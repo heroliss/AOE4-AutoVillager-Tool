@@ -4,11 +4,11 @@
 
 《帝国时代4》自动化工具，自动检测并生产村民，解放双手专注战斗。
 
-**配置说明：**
+**默认配置：**
 
 - 基于 2560x1440 分辨率 + HDR开启
 - 模板基于中国阵营，所有阵营通用
-- 其他分辨率需调整 [config.py](config.py) 坐标参数
+- 其他配置需调整 [config.py](config.py) 参数（详见下方配置说明）
 
 ## 功能特性
 
@@ -16,7 +16,6 @@
 - ✅ OCR识别人口、食物数量
 - ✅ 多TC支持（自动检测并按比例生产）
 - ✅ 智能房屋管理和UI遮挡检测
-- ✅ GPU加速OCR识别
 - ✅ 优化按键操作（shift+q批量排队）
 - ✅ 输入保护（操作时临时等待避免误操作）
 
@@ -28,38 +27,7 @@
 pip install -r requirements.txt
 ```
 
-### 2. GPU加速配置（可选但推荐）
-
-**检查CUDA版本：**
-
-```bash
-nvidia-smi
-```
-
-**安装对应PyTorch版本：**
-
-```bash
-# CUDA 13.0+
-pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-
-# CUDA 12.1-12.6
-pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
-# CUDA 11.8
-pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-```
-
-**验证安装：**
-
-```python
-import torch
-print(f"CUDA可用: {torch.cuda.is_available()}")
-print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU模式'}")
-```
-
-> **注意：** CUDA向下兼容，高版本CUDA可使用低版本PyTorch。无GPU时自动使用CPU模式（速度稍慢但完全可用）。
-
-### 3. 准备模板图片（必需）
+### 2. 准备模板图片（必需）
 
 以下模板文件必须存在于 [templates/](templates/) 目录：
 
@@ -67,7 +35,7 @@ print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'C
 - `tc_icon.png` - TC图标（必需）
 - `blocked.png` - UI遮挡检测（必需）
 
-### 4. 运行程序
+### 3. 运行程序
 
 ```bash
 python main.py
@@ -75,7 +43,7 @@ python main.py
 
 ## 配置说明
 
-所有参数在 [config.py](config.py) 中管理：
+所有参数在 [config.py](config.py) 中管理。
 
 ### 基础参数
 
@@ -93,17 +61,57 @@ DEBUG_MODE = False                    # 全局调试（生成截图和详细日�
 DEBUG_BLOCKED_DETECTION = False       # 遮挡检测调试
 ```
 
-### 截图区域（2560x1440分辨率）
+### 不同分辨率适配
+
+默认配置基于 **2560x1440** 分辨率。如果你使用其他分辨率，需要按比例调整以下所有坐标参数：
 
 ```python
-GAME_DETECT_PIXEL = (2526, 1405)              # 游戏窗口检测点
-VILLAGER_QUEUE_REGION = (10, 970, 500, 1025) # 生产队列区域
-POPULATION_REGION = (45, 1126, 151, 1183)     # 人口显示区域
-FOOD_REGION = (50, 1222, 140, 1248)           # 食物显示区域
-TC_ICON_REGION = (390, 1210, 700, 1260)       # TC图标区域
+# 游戏窗口检测点（右下角某个固定颜色的像素）
+GAME_DETECT_PIXEL = (2526, 1405)
+
+# 村民生产队列区域（左下角队列图标区域）
+VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
+
+# UI遮挡检测区域（队列区域内的特征点）
+BLOCKED_DETECT_REGION = (260, 1000, 265, 1005)
+
+# 人口显示区域（如 "50/200"）
+POPULATION_REGION = (45, 1126, 151, 1183)
+
+# 食物数量显示区域
+FOOD_REGION = (50, 1222, 140, 1248)
+
+# TC图标检测区域（左下角建筑图标区域）
+TC_ICON_REGION = (390, 1210, 700, 1260)
+
+# 村民总数统计区域（左下角数字区域）
+VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
 ```
 
-> 其他分辨率需按比例调整坐标。启用 `DEBUG_MODE` 查看 [debug_output/](debug_output/) 截图确认区域。
+**调整方法：**
+
+1. 启用 `DEBUG_MODE = True`
+2. 运行程序，查看 [debug_output/](debug_output/) 目录下的截图
+3. 根据截图调整坐标，确保区域覆盖正确的UI元素
+4. 重复测试直到识别准确
+
+### HDR 设置适配
+
+HDR 开关只影响游戏窗口检测的颜色值，不影响其他功能。
+
+```python
+# HDR 开启时（默认）
+GAME_DETECT_COLOR = (65, 78, 105)
+
+# HDR 关闭时，需要修改为
+GAME_DETECT_COLOR = (26, 32, 46)
+```
+
+**如何获取正确的颜色值：**
+
+1. 进入游戏，截取全屏
+2. 使用截图工具查看 `GAME_DETECT_PIXEL` 坐标处的 RGB 颜色值
+3. 将颜色值填入 `GAME_DETECT_COLOR`
 
 ## 工作流程
 
@@ -153,10 +161,43 @@ TC_ICON_REGION = (390, 1210, 700, 1260)       # TC图标区域
 2. 检查 `TC_ICON_REGION` 坐标
 3. 调整 `TC_MATCH_THRESHOLD` 阈值
 
-### GPU加速未启用
+## GPU加速配置（可选）
+
+程序默认使用CPU模式，完全可用。如需GPU加速OCR识别，可按以下步骤配置：
+
+**检查CUDA版本：**
+
+```bash
+nvidia-smi
+```
+
+**安装对应PyTorch版本：**
+
+```bash
+# CUDA 13.0+
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+
+# CUDA 12.1-12.6
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# CUDA 11.8
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
+
+**验证安装：**
+
+```python
+import torch
+print(f"CUDA可用: {torch.cuda.is_available()}")
+print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU模式'}")
+```
+
+> **注意：** CUDA向下兼容，高版本CUDA可使用低版本PyTorch。
+
+**GPU加速未启用排查：**
 
 1. 确认NVIDIA显卡和驱动已安装
-2. 重装PyTorch（见上方GPU配置）
+2. 重装PyTorch（见上方命令）
 3. 重装EasyOCR：
    ```bash
    pip uninstall easyocr -y
@@ -209,7 +250,7 @@ auto_train_villager_standalone/
 
 - Python 3.8+
 - OpenCV - 图像处理
-- EasyOCR - 文字识别（GPU加速）
+- EasyOCR - 文字识别
 - Pillow - 屏幕截图
 - pydirectinput - 键盘模拟
 
