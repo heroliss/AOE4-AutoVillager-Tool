@@ -19,6 +19,7 @@ AOE4 自动生产村民工具
 import winsound
 import time
 import sys
+import pydirectinput
 from config import *
 from game_detector import GameDetector
 from villager_training_detector import VillagerTrainingDetector
@@ -29,6 +30,10 @@ from tc_selector import TCSelector
 from villager_counter import VillagerCounter
 from food_reader import FoodReader
 from lock import acquire_lock, release_lock
+from input_blocker import input_blocked
+
+
+from contextlib import nullcontext
 
 
 class LogMerger:
@@ -166,52 +171,78 @@ def main():
 
             # 8. 执行生产村民操作
             try:
-                # 8.1 先播放蜂鸣声提醒
-                for _ in range(BEEP_COUNT):
-                    winsound.Beep(BEEP_FREQUENCY, BEEP_DURATION)
-                    time.sleep(0.1)
+                # 8.1 计算预估操作时长：蜂鸣 + 延迟 + 选中TC + 排队 + 操作后等待
+                beep_duration = (BEEP_DURATION / 1000.0 + 0.1) * BEEP_COUNT
+                estimated_duration = beep_duration + OPERATION_DELAY + TC_SELECT_DELAY + (VILLAGERS_PER_TC * QUEUE_DELAY) + BLOCK_INPUT_DURATION + 1.0
+                max_block_duration = min(estimated_duration * 2, 5.0)  # 最多5秒
 
-                # 8.2 操作前延迟，给用户反应时间
-                if OPERATION_DELAY > 0:
-                    print(f"[准备操作] {OPERATION_DELAY} 秒后执行按键操作...")
-                    time.sleep(OPERATION_DELAY)
+                # 8.2 屏蔽输入并执行所有操作（从蜂鸣开始）
+                blocker = input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext()
 
-                # 8.3 选中TC并检测数量
-                print("[执行操作] 选中TC...")
-                tc_selector.do()
-                tc_counter.do()
-                planned_villagers = VILLAGERS_PER_TC * tc_counter.count
+                with blocker:
+                    # 8.2.1 保存当前选中的单位（使用Ctrl+0编组）
+                    print("[执行操作] 保存当前选中...")
+                    pydirectinput.keyDown('ctrl')
+                    pydirectinput.press('0')
+                    pydirectinput.keyUp('ctrl')
 
-                # 8.4 根据可用空位和食物调整生产数量
-                actual_villagers = min(planned_villagers, available_slots)
-                max_villagers_by_food = food_reader.amount // FOOD_PER_VILLAGER
-                actual_villagers = min(actual_villagers, max_villagers_by_food)
+                    # 8.2.2 播放蜂鸣声提醒（此时输入已屏蔽）
+                    for _ in range(BEEP_COUNT):
+                        winsound.Beep(BEEP_FREQUENCY, BEEP_DURATION)
+                        time.sleep(0.1)
 
-                # 如果计算后没有可生产的村民，跳过
-                if actual_villagers <= 0:
-                    logger.force_print(f"食物不足以生产村民（食物 {food_reader.amount}，需要 {FOOD_PER_VILLAGER}）")
-                    continue
+                    # 8.2.3 操作前延迟，给用户反应时间
+                    if OPERATION_DELAY > 0:
+                        print(f"[准备操作] {OPERATION_DELAY} 秒后执行按键操作...")
+                        time.sleep(OPERATION_DELAY)
+                    # 8.2.3 选中TC并检测数量
+                    print("[执行操作] 选中TC...")
+                    tc_selector.do()
+                    tc_counter.do()
+                    planned_villagers = VILLAGERS_PER_TC * tc_counter.count
 
-                # 8.5 显示操作信息
-                if actual_villagers < planned_villagers:
-                    reason = []
-                    if actual_villagers == available_slots:
-                        reason.append("房屋不足")
-                    if actual_villagers == max_villagers_by_food:
-                        reason.append("食物不足")
-                    reason_str = "、".join(reason)
-                    logger.force_print(f"人口 {population_reader.current}/{population_reader.limit}，村民 {villager_counter.total}/{MAX_VILLAGERS}，食物 {food_reader.amount}，检测到 {tc_counter.count} 个TC，{reason_str}，生产 {actual_villagers}/{planned_villagers} 个村民")
-                else:
-                    logger.force_print(f"人口 {population_reader.current}/{population_reader.limit}，村民 {villager_counter.total}/{MAX_VILLAGERS}，食物 {food_reader.amount}，检测到 {tc_counter.count} 个TC，触发生产 {actual_villagers} 个村民")
+                    # 8.2.4 根据可用空位和食物调整生产数量
+                    actual_villagers = min(planned_villagers, available_slots)
+                    max_villagers_by_food = food_reader.amount // FOOD_PER_VILLAGER
+                    actual_villagers = min(actual_villagers, max_villagers_by_food)
 
-                # 8.6 执行排队操作
-                print("[执行操作] 排队村民...")
-                VillagerTrainer().do(count=actual_villagers)
+                    # 如果计算后没有可生产的村民，跳过
+                    if actual_villagers <= 0:
+                        logger.force_print(f"食物不足以生产村民（食物 {food_reader.amount}，需要 {FOOD_PER_VILLAGER}）")
+                        continue
 
-                # 8.7 操作后等待，让操作完全完成
-                if BLOCK_INPUT_DURATION > 0:
-                    print(f"[操作完成] 等待 {BLOCK_INPUT_DURATION} 秒...")
-                    time.sleep(BLOCK_INPUT_DURATION)
+                    # 8.2.5 显示操作信息
+                    if actual_villagers < planned_villagers:
+                        reason = []
+                        if actual_villagers == available_slots:
+                            reason.append("房屋不足")
+                        if actual_villagers == max_villagers_by_food:
+                            reason.append("食物不足")
+                        reason_str = "、".join(reason)
+                        logger.force_print(f"人口 {population_reader.current}/{population_reader.limit}，村民 {villager_counter.total}/{MAX_VILLAGERS}，食物 {food_reader.amount}，检测到 {tc_counter.count} 个TC，{reason_str}，生产 {actual_villagers}/{planned_villagers} 个村民")
+                    else:
+                        logger.force_print(f"人口 {population_reader.current}/{population_reader.limit}，村民 {villager_counter.total}/{MAX_VILLAGERS}，食物 {food_reader.amount}，检测到 {tc_counter.count} 个TC，触发生产 {actual_villagers} 个村民")
+
+                    # 8.2.6 执行排队操作
+                    print("[执行操作] 排队村民...")
+                    VillagerTrainer().do(count=actual_villagers)
+
+                    # 8.2.7 操作后等待，让操作完全完成
+                    if BLOCK_INPUT_DURATION > 0:
+                        print(f"[操作完成] 等待 {BLOCK_INPUT_DURATION} 秒...")
+                        time.sleep(BLOCK_INPUT_DURATION)
+
+                    # 8.2.8 恢复之前选中的单位（按0）
+                    print("[执行操作] 恢复之前选中...")
+                    pydirectinput.press('0')
+
+                    # 8.2.9 取消编组（Ctrl+Alt+0）
+                    print("[执行操作] 取消临时编组...")
+                    pydirectinput.keyDown('ctrl')
+                    pydirectinput.keyDown('alt')
+                    pydirectinput.press('0')
+                    pydirectinput.keyUp('alt')
+                    pydirectinput.keyUp('ctrl')
 
             finally:
                 release_lock()

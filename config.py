@@ -16,8 +16,9 @@ MIN_FOOD = 50  # 最低食物要求，低于此值不生产村民
 FOOD_PER_VILLAGER = 50  # 单个村民需要的食物数量
 
 # ==================== 操作时序设置 ====================
-OPERATION_DELAY = 0.5  # 蜂鸣后延迟多久执行操作（秒），给用户反应时间
-BLOCK_INPUT_DURATION = 1.5  # 操作后等待时长（秒），让操作完全完成
+OPERATION_DELAY = 0  # 蜂鸣后延迟多久执行操作（秒），设为0立即执行
+BLOCK_INPUT_DURATION = 0  # 操作后等待时长（秒），设为0最快
+ENABLE_INPUT_BLOCK = True  # 是否在操作期间屏蔽物理鼠标键盘输入（需要管理员权限）
 
 # ==================== 调试开关 ====================
 DEBUG_MODE = False  # 全局调试模式：启用TC计数和村民计数的详细日志和截图
@@ -51,22 +52,22 @@ FOOD_REGION = (50, 1222, 140, 1248)
 
 # ==================== 模板匹配阈值 ====================
 VILLAGER_MATCH_THRESHOLD = 0.6  # 村民图标匹配阈值
-BLOCKED_MATCH_THRESHOLD = 0.6  # 遮挡检测匹配阈值
+BLOCKED_MATCH_THRESHOLD = 0.7  # 遮挡检测匹配阈值
 TC_MATCH_THRESHOLD = 0.7  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================
 # pydirectinput默认每次按键有0.1秒延迟，这里设置为0可以加速
-TC_SELECT_DELAY = 0.1  # 按H键选中TC后的等待时间（需要等待UI响应）
-QUEUE_DELAY = 0.0  # 每次按Q键之间的延迟（设为0最快）
-OPERATION_DELAY = 0.5  # 操作前延迟（秒），降低误操作可能性
+TC_SELECT_DELAY = 0.05  # 按H键选中TC后的等待时间，最小建议值0.05秒（低于0.02秒可能无法识别多TC）
+QUEUE_DELAY = 0  # 每次按Q键之间的延迟，设为0最快
 
 # ==================== 音效设置 ====================
 BEEP_FREQUENCY = 1000  # 蜂鸣声频率（Hz），范围 37~32767
-BEEP_DURATION = 100  # 蜂鸣声持续时间（毫秒）
-BEEP_COUNT = 3  # 触发生产时蜂鸣次数
+BEEP_DURATION = 50  # 蜂鸣声持续时间（毫秒）
+BEEP_COUNT = 0  # 触发生产时蜂鸣次数，设为0禁用蜂鸣
 
 # ==================== 目录路径 ====================
 import os
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 DEBUG_OUTPUT_DIR = os.path.join(BASE_DIR, "debug_output")
