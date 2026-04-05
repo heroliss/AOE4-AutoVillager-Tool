@@ -32,7 +32,8 @@ class FoodReader(object):
         self._parse(raw)
 
     def _capture(self):
-        """截取食物显示区域并放大以提高OCR准确率"""
+        """截取食物显示区域并根据配置缩放"""
+        from config import OCR_IMAGE_SCALE
         left, top, right, bottom = FOOD_REGION
         img = ImageGrab.grab(bbox=(left, top, right, bottom))
 
@@ -42,9 +43,13 @@ class FoodReader(object):
             if DEBUG_MODE:
                 print(f"[食物识别] 已保存检测区域截图到: {FOOD_DEBUG_SCREENSHOT}")
 
-        # 放大4倍以提高OCR准确率
-        w, h = img.size
-        img = img.resize((w * 4, h * 4))
+        # 根据配置缩放图片
+        if OCR_IMAGE_SCALE != 1.0:
+            w, h = img.size
+            new_w = int(w * OCR_IMAGE_SCALE)
+            new_h = int(h * OCR_IMAGE_SCALE)
+            img = img.resize((new_w, new_h))
+
         return np.array(img)
 
     def _ocr(self, img):

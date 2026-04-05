@@ -6,23 +6,35 @@
 2. 如果你的分辨率不同，需要调整所有坐标参数
 3. HDR开关只影响 GAME_DETECT_COLOR 像素值，不影响图片识别
 4. 模板图片基于中国阵营截取，但经测试所有阵营通用
+
+性能优化说明：
+- USE_GPU: 对于小图片OCR，CPU模式通常比GPU更快（GPU有数据传输开销）
+- OCR_IMAGE_SCALE: 图片缩放比例，越小越快但可能影响准确率
+- VILLAGER_CHECK_INTERVAL: 村民数量变化慢，不需要频繁检查
 """
 
 # ==================== 基础参数 ====================
-CHECK_INTERVAL = 0.2  # 检测循环间隔（秒）
+CHECK_INTERVAL = 0  # 检测循环间隔（秒），平衡响应速度和CPU占用
 VILLAGERS_PER_TC = 3  # 每个TC排队的村民数量
 MAX_VILLAGERS = 120  # 村民数量上限，超过此数量停止自动生产
 MIN_FOOD = 50  # 最低食物要求，低于此值不生产村民
 FOOD_PER_VILLAGER = 50  # 单个村民需要的食物数量
+VILLAGER_CHECK_INTERVAL = 10.0  # 村民数量检查间隔（秒），村民数量变化慢，不需要频繁检查
 
 # ==================== 操作时序设置 ====================
 OPERATION_DELAY = 0  # 蜂鸣后延迟多久执行操作（秒），设为0立即执行
 BLOCK_INPUT_DURATION = 0  # 操作后等待时长（秒），设为0最快
 ENABLE_INPUT_BLOCK = True  # 是否在操作期间屏蔽物理鼠标键盘输入（需要管理员权限）
+POST_OPERATION_DELAY = 0.2  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发，设为0禁用
 
 # ==================== 调试开关 ====================
-DEBUG_MODE = False  # 全局调试模式：启用TC计数和村民计数的详细日志和截图
+DEBUG_MODE = True  # 全局调试模式：启用TC计数和村民计数的详细日志和截图
 DEBUG_BLOCKED_DETECTION = False  # 遮挡检测调试：显示遮挡检测置信度和截图
+DEBUG_TRAINING_DETECTION = True  # 村民生产检测调试：显示每次检测的置信度
+
+# ==================== OCR设置 ====================
+USE_GPU = False  # 是否使用GPU加速OCR（小图片OCR时CPU更快，GPU有数据传输开销）
+OCR_IMAGE_SCALE = 0.5  # OCR图片缩放比例，越小越快但可能影响准确率
 
 # ==================== 截图区域坐标 ====================
 # 注意：以下坐标基于 2560x1440 分辨率，其他分辨率需要调整
@@ -51,13 +63,13 @@ VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
 FOOD_REGION = (50, 1222, 140, 1248)
 
 # ==================== 模板匹配阈值 ====================
-VILLAGER_MATCH_THRESHOLD = 0.6  # 村民图标匹配阈值
+VILLAGER_MATCH_THRESHOLD = 0.6  # 村民图标匹配阈值，降低以更快检测到图标消失
 BLOCKED_MATCH_THRESHOLD = 0.7  # 遮挡检测匹配阈值
 TC_MATCH_THRESHOLD = 0.7  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================
 # pydirectinput默认每次按键有0.1秒延迟，这里设置为0可以加速
-TC_SELECT_DELAY = 0.05  # 按H键选中TC后的等待时间，最小建议值0.05秒（低于0.02秒可能无法识别多TC）
+TC_SELECT_DELAY = 0.03  # 按H键选中TC后的等待时间，最小建议值0.05秒（低于0.02秒可能无法识别多TC）
 QUEUE_DELAY = 0  # 每次按Q键之间的延迟，设为0最快
 
 # ==================== 音效设置 ====================

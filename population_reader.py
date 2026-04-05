@@ -18,21 +18,26 @@ def _get_reader():
     if _reader is None:
         import warnings
         import os
+        from config import USE_GPU
         # 屏蔽PyTorch警告
         warnings.filterwarnings('ignore', category=UserWarning, module='torch')
         os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
 
-        # 尝试使用GPU，如果失败则回退到CPU
-        try:
-            import torch
-            gpu_available = torch.cuda.is_available()
-            _reader = easyocr.Reader(["en"], gpu=gpu_available, verbose=False)
-            if gpu_available:
-                print(f"[OCR] GPU加速已启用")
-            else:
-                print(f"[OCR] 使用CPU模式（未检测到CUDA GPU）")
-        except Exception as e:
-            print(f"[OCR] GPU初始化失败，使用CPU模式: {e}")
+        # 根据配置决定是否使用GPU
+        if USE_GPU:
+            try:
+                import torch
+                gpu_available = torch.cuda.is_available()
+                _reader = easyocr.Reader(["en"], gpu=gpu_available, verbose=False)
+                if gpu_available:
+                    print(f"[OCR] GPU加速已启用")
+                else:
+                    print(f"[OCR] 使用CPU模式（未检测到CUDA GPU）")
+            except Exception as e:
+                print(f"[OCR] GPU初始化失败，使用CPU模式: {e}")
+                _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        else:
+            print(f"[OCR] 使用CPU模式（配置禁用GPU）")
             _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
     return _reader
 
@@ -50,11 +55,18 @@ class PopulationReader(object):
         self._parse(raw)
 
     def _capture(self):
-        """截取人口显示区域并放大3倍以提高OCR准确率"""
+        """截取人口显示区域并根据配置缩放"""
+        from config import OCR_IMAGE_SCALE
         left, top, right, bottom = REGION
         img = ImageGrab.grab(bbox=(left, top, right, bottom))
-        w, h = img.size
-        img = img.resize((w * 3, h * 3))
+
+        # 根据配置缩放图片
+        if OCR_IMAGE_SCALE != 1.0:
+            w, h = img.size
+            new_w = int(w * OCR_IMAGE_SCALE)
+            new_h = int(h * OCR_IMAGE_SCALE)
+            img = img.resize((new_w, new_h))
+
         return np.array(img)
 
     def _ocr(self, img):

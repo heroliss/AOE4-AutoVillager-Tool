@@ -39,7 +39,8 @@ class VillagerCounter(object):
         self._parse(raw)
 
     def _capture(self):
-        """截取村民数量显示区域"""
+        """截取村民数量显示区域并根据配置缩放"""
+        from config import OCR_IMAGE_SCALE
         left, top, right, bottom = REGION
         img = ImageGrab.grab(bbox=(left, top, right, bottom))
 
@@ -50,9 +51,14 @@ class VillagerCounter(object):
             print(f"[村民计数] 截图区域: ({left}, {top}, {right}, {bottom})")
             print(f"[村民计数] 原始尺寸: {img.size[0]}x{img.size[1]}")
 
-        # 放大4倍以提高OCR准确率
-        w, h = img.size
-        img = img.resize((w * 4, h * 4))
+        # 根据配置缩放图片
+        if OCR_IMAGE_SCALE != 1.0:
+            w, h = img.size
+            new_w = int(w * OCR_IMAGE_SCALE)
+            new_h = int(h * OCR_IMAGE_SCALE)
+            img = img.resize((new_w, new_h))
+
+        return np.array(img)
 
         if DEBUG_MODE:
             print(f"[村民计数] 放大后尺寸: {img.size[0]}x{img.size[1]}")
