@@ -1,13 +1,17 @@
 """
 村民总数统计模块
 通过OCR识别左下角区域的所有数字并求和
+
+性能优化：
+- 使用mss库替代PIL.ImageGrab（2-3x提升）
 """
 import os
 import re
 import numpy as np
-from PIL import ImageGrab
 import easyocr
 from config import *
+from screenshot_util import capture_region
+from logger import log_villager
 
 REGION = VILLAGER_COUNT_REGION
 DEBUG_SCREENSHOT_PATH = VILLAGER_COUNT_DEBUG_SCREENSHOT
@@ -42,14 +46,16 @@ class VillagerCounter(object):
         """截取村民数量显示区域并根据配置缩放"""
         from config import OCR_IMAGE_SCALE
         left, top, right, bottom = REGION
-        img = ImageGrab.grab(bbox=(left, top, right, bottom))
+        img = capture_region(left, top, right, bottom)
 
         # 保存调试截图（仅在调试模式下）
-        if DEBUG_MODE:
-            img.save(DEBUG_SCREENSHOT_PATH)
-            print(f"[村民计数] 已保存检测区域截图到: {DEBUG_SCREENSHOT_PATH}")
-            print(f"[村民计数] 截图区域: ({left}, {top}, {right}, {bottom})")
-            print(f"[村民计数] 原始尺寸: {img.size[0]}x{img.size[1]}")
+        if DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+            try:
+                img.save(DEBUG_SCREENSHOT_PATH)
+                log_villager("截图", f"{DEBUG_SCREENSHOT_PATH}")
+                log_villager("截图", f"区域=({left},{top},{right},{bottom}) 尺寸={img.size[0]}x{img.size[1]}")
+            except Exception as e:
+                log_villager("截图", f"保存失败: {e}")
 
         # 根据配置缩放图片
         if OCR_IMAGE_SCALE != 1.0:
@@ -57,11 +63,7 @@ class VillagerCounter(object):
             new_w = int(w * OCR_IMAGE_SCALE)
             new_h = int(h * OCR_IMAGE_SCALE)
             img = img.resize((new_w, new_h))
-
-        return np.array(img)
-
-        if DEBUG_MODE:
-            print(f"[村民计数] 放大后尺寸: {img.size[0]}x{img.size[1]}")
+            log_villager("截图", f"缩放后={new_w}x{new_h}")
 
         return np.array(img)
 
@@ -70,10 +72,9 @@ class VillagerCounter(object):
         # 使用更宽松的参数以识别更多文本
         results = _get_reader().readtext(img, detail=1, allowlist="0123456789OolIsS ")
 
-        if DEBUG_MODE:
-            print(f"[村民计数] OCR检测到 {len(results)} 个文本块")
-            for i, (bbox, text, conf) in enumerate(results):
-                print(f"[村民计数]   文本块{i+1}: '{text}' (置信度: {conf:.3f})")
+        log_villager("OCR", f"检测到{len(results)}个文本块")
+        for i, (bbox, text, conf) in enumerate(results):
+            log_villager("OCR", f"  #{i+1} 文本='{text}' 置信度={conf:.3f}")
 
         # 提取所有文本
         texts = [text for bbox, text, conf in results]
@@ -94,8 +95,5 @@ class VillagerCounter(object):
         self.numbers = [int(n) for n in numbers]
         self.total = sum(self.numbers)
 
-        if DEBUG_MODE:
-            print(f"[村民计数] OCR原文: {text}")
-            print(f"[村民计数] 清理后: {cleaned}")
-            print(f"[村民计数] 提取数字: {self.numbers}")
-            print(f"[村民计数] 总数: {self.total}")
+        log_villager("解析", f"原文='{text}' 清理='{cleaned}'")
+        log_villager("解析", f"数字={self.numbers} 总数={self.total}")

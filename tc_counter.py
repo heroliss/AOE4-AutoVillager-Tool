@@ -1,179 +1,331 @@
 """
 TC数量检测模块
-通过模板匹配检测左下角TC图标数量
-如果检测到多TC，还会通过OCR识别数字来确定准确数量
+
+检测策略：
+1. 预检测：检测单TC区域是否匹配tc_single.png专用模板
+   - 匹配 → 只有1个TC，直接返回（最快路径）
+   - 不匹配 → 进入主检测流程
+2. 主检测阶段1：用完整图标匹配TC_ICON_REGION区域的tc_number_1.png
+   - 置信度低于阈值 → 未选中TC，重新按H键（最多10次）
+   - 置信度达到阈值 → 有多个TC，进入阶段2
+3. 主检测阶段2：用左上角20×20区域精确匹配所有数字模板
+   - tc_number_1.png → 2个TC（1+1）
+   - tc_number_2.png → 3个TC（1+2）
+   - 以此类推
+
+性能优化：
+- 模板缓存：首次加载后缓存所有模板，避免重复I/O
+- 灰度图匹配：减少计算量，提升性能
+- 提前退出：高置信度匹配时提前结束搜索
+- mss截图：使用mss库替代PIL.ImageGrab（2-3x提升）
+- 自动重试：UI未刷新时自动重试，确保检测成功
+
+模板文件：
+- templates/tc_single.png：单TC预检测专用（灰度图）
+- templates/tc_number_N.png：多TC数字模板（N从1开始）
 """
 import os
-import re
-import cv2
+import time
 import numpy as np
-from PIL import ImageGrab
+import cv2
 from config import *
+from screenshot_util import capture_region_np
+from logger import log_tc, log_perf
 
-# 左下角区域，需要根据实际情况调整
-REGION = TC_ICON_REGION
-TEMPLATE_PATH = TC_ICON_TEMPLATE
+# 检测区域和阈值配置
+REGION = TC_ICON_REGION  # 多TC主检测区域
 DEBUG_SCREENSHOT_PATH = TC_DEBUG_SCREENSHOT
 MATCH_THRESHOLD = TC_MATCH_THRESHOLD
+CROP_SIZE = 20  # 阶段2匹配时裁剪的左上角区域尺寸
+EARLY_EXIT_THRESHOLD = 0.95  # 提前退出阈值，置信度超过此值直接返回
+MAX_RETRY = 10  # 未检测到TC时的最大重试次数
 
-_template = None
-_reader = None
-
-
-def _get_template():
-    global _template
-    if _template is None:
-        if not os.path.exists(TEMPLATE_PATH):
-            return None
-        _template = cv2.imread(TEMPLATE_PATH, cv2.IMREAD_COLOR)
-    return _template
+# 全局模板缓存
+_template_cache = {}
+_template_crop_cache = {}
+_single_tc_template = None  # 单TC预检测专用模板
 
 
-def _get_reader():
-    """获取共享的OCR Reader实例"""
-    global _reader
-    if _reader is None:
-        from population_reader import _get_reader as get_pop_reader
-        _reader = get_pop_reader()
-    return _reader
+def _load_single_tc_template():
+    """加载单TC预检测专用模板（灰度图，带缓存）"""
+    global _single_tc_template
+    if _single_tc_template is None:
+        from config import TC_SINGLE_TEMPLATE
+        if os.path.exists(TC_SINGLE_TEMPLATE):
+            _single_tc_template = cv2.imread(TC_SINGLE_TEMPLATE, cv2.IMREAD_GRAYSCALE)
+    return _single_tc_template
 
 
-class TCCounter(object):
-    """检测左下角区域的TC图标数量，结果存入 self.count"""
+def _load_template_full(num):
+    """加载完整模板（阶段1使用），带缓存"""
+    cache_key = f"full_{num}"
+    if cache_key in _template_cache:
+        return _template_cache[cache_key]
+
+    template_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+    if not os.path.exists(template_path):
+        return None
+
+    template = cv2.imread(template_path, cv2.IMREAD_GRAYSCALE)
+    if template is not None:
+        _template_cache[cache_key] = template
+    return template
+
+
+def _load_template_crop(num):
+    """加载裁剪后的模板（阶段2使用），带缓存"""
+    cache_key = f"crop_{num}"
+    if cache_key in _template_crop_cache:
+        return _template_crop_cache[cache_key]
+
+    template_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+    if not os.path.exists(template_path):
+        return None
+
+    template = cv2.imread(template_path, cv2.IMREAD_COLOR)
+    if template is None:
+        return None
+
+    # 裁剪左上角区域
+    if template.shape[0] < CROP_SIZE or template.shape[1] < CROP_SIZE:
+        return None
+
+    template_crop = template[0:CROP_SIZE, 0:CROP_SIZE]
+    template_gray = cv2.cvtColor(template_crop, cv2.COLOR_BGR2GRAY)
+
+    _template_crop_cache[cache_key] = template_gray
+    return template_gray
+
+
+class TCCounter:
+    """TC数量检测器"""
 
     def __init__(self):
-        self.count = 1  # 默认至少有1个TC
-        self.locations = []
+        self.count = 1  # 默认1个TC
+        self.tc_selector = None  # TC选择器，需要外部注入
+
+    def set_tc_selector(self, tc_selector):
+        """设置TC选择器（用于重试）"""
+        self.tc_selector = tc_selector
 
     def do(self):
-        template = _get_template()
-        if template is None:
-            # 如果没有模板图片，默认返回1个TC
-            if DEBUG_MODE:
-                print(f"[TC计数] 未找到模板图片 {TEMPLATE_PATH}，默认1个TC")
+        """执行TC数量检测，带自动重试"""
+        t_start = time.time() if DEBUG_PERFORMANCE else None
+
+        # 预检测：先检测单TC区域
+        if self._check_single_tc_region():
             self.count = 1
+            log_tc("预检测", f"单TC区域匹配 TC数=1")
+            if DEBUG_PERFORMANCE:
+                t_total = time.time() - t_start
+                log_perf("TC", f"总耗时={t_total*1000:.2f}ms (预检测)")
             return
 
-        if DEBUG_MODE:
-            print(f"[TC计数] 模板图片尺寸: {template.shape[1]}x{template.shape[0]}")
-        screenshot = self._capture()
-        if DEBUG_MODE:
-            print(f"[TC计数] 截图区域尺寸: {screenshot.shape[1]}x{screenshot.shape[0]}")
-        self._match_all(screenshot, template)
+        # 主检测：检测多TC区域，带重试
+        for retry in range(MAX_RETRY):
+            screenshot = self._capture()
+            t_capture = time.time() if DEBUG_PERFORMANCE else None
 
-        # 如果检测到多TC，通过OCR确认准确数量
-        if self.count > 1:
-            self._verify_tc_count_with_ocr()
+            log_tc("截图", f"尺寸={screenshot.shape[1]}x{screenshot.shape[0]}")
+
+            detected_number = self._match_numbered_tc(screenshot)
+            t_match = time.time() if DEBUG_PERFORMANCE else None
+
+            if detected_number is not None:
+                self.count = 1 + detected_number
+                log_tc("结果", f"匹配到tc_number_{detected_number}.png TC数={self.count}")
+
+                if DEBUG_PERFORMANCE:
+                    t_total = time.time() - t_start
+                    log_perf("TC", f"总耗时={t_total*1000:.2f}ms")
+                    log_perf("TC", f"  截图={((t_capture-t_start)*1000):.2f}ms")
+                    log_perf("TC", f"  匹配={((t_match-t_capture)*1000):.2f}ms")
+                return
+
+            # 未检测到TC，需要重试
+            if retry < MAX_RETRY - 1:
+                log_tc("重试", f"未检测到TC 第{retry+1}/{MAX_RETRY}次 重新按H键")
+                if self.tc_selector:
+                    self.tc_selector.do()
+                    from config import TC_RETRY_DELAY
+                    time.sleep(TC_RETRY_DELAY)  # 等待UI刷新
+                else:
+                    log_tc("错误", "tc_selector未设置，无法重试")
+                    break
+            else:
+                log_tc("失败", f"重试{MAX_RETRY}次后仍未检测到TC 默认TC数=1")
+                self.count = 1
+
+        if DEBUG_PERFORMANCE:
+            t_total = time.time() - t_start
+            log_perf("TC", f"总耗时={t_total*1000:.2f}ms (含重试)")
+
+    def _check_single_tc_region(self):
+        """
+        预检测：检测单TC区域是否匹配tc_single.png专用模板
+        使用灰度图匹配，无需缩放，性能最优
+
+        返回：True表示匹配（只有1个TC），False表示不匹配（需要继续主检测）
+        """
+        template = _load_single_tc_template()
+        if template is None:
+            log_tc("预检测", "未找到tc_single.png 跳过预检测")
+            return False
+
+        left, top, right, bottom = SINGLE_TC_REGION
+        screenshot = capture_region_np(left, top, right, bottom)
+        screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+
+        # 保存调试截图
+        if DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+            try:
+                from PIL import Image
+                debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_single_region_debug.png")
+                img_rgb = cv2.cvtColor(screenshot, cv2.COLOR_BGR2RGB)
+                Image.fromarray(img_rgb).save(debug_path)
+                log_tc("预检测截图", f"{debug_path}")
+
+                debug_gray_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_single_region_gray.png")
+                cv2.imwrite(debug_gray_path, screenshot_gray)
+                log_tc("预检测灰度", f"{debug_gray_path}")
+            except Exception as e:
+                log_tc("预检测截图", f"保存失败: {e}")
+
+        if DEBUG_MODE:
+            log_tc("预检测", f"截图尺寸={screenshot_gray.shape[1]}x{screenshot_gray.shape[0]} 模板尺寸={template.shape[1]}x{template.shape[0]}")
+
+        # 检查模板是否超过截图尺寸
+        if template.shape[0] > screenshot_gray.shape[0] or template.shape[1] > screenshot_gray.shape[1]:
+            log_tc("预检测", f"模板超过截图尺寸，无法匹配")
+            return False
+
+        # 灰度图模板匹配
+        result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+
+        log_tc("预检测", f"置信度={max_val:.4f} 阈值={MATCH_THRESHOLD:.4f}")
+
+        return max_val >= MATCH_THRESHOLD
 
     def _capture(self):
+        """截取TC图标区域（多TC主检测区域）"""
         left, top, right, bottom = REGION
-        img = ImageGrab.grab(bbox=(left, top, right, bottom))
+        img_bgr = capture_region_np(left, top, right, bottom)
 
-        # 保存调试截图（仅在调试模式下）
-        if DEBUG_MODE:
-            img.save(DEBUG_SCREENSHOT_PATH)
-            print(f"[TC计数] 已保存检测区域截图到: {DEBUG_SCREENSHOT_PATH}")
+        if DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+            try:
+                from PIL import Image
+                img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                Image.fromarray(img_rgb).save(DEBUG_SCREENSHOT_PATH)
+                log_tc("截图", f"{DEBUG_SCREENSHOT_PATH}")
+            except Exception as e:
+                log_tc("截图", f"保存失败: {e}")
 
-        return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        return img_bgr
 
-    def _match_all(self, screenshot, template):
-        """查找所有匹配的TC图标"""
-        result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-
-        # 获取最大匹配值
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-        if DEBUG_MODE:
-            print(f"[TC计数] 最大匹配相似度: {max_val:.4f}, 阈值: {MATCH_THRESHOLD}")
-
-        # 找到所有超过阈值的位置
-        locations = np.where(result >= MATCH_THRESHOLD)
-        locations = list(zip(*locations[::-1]))  # 转换为 (x, y) 格式
-        if DEBUG_MODE:
-            print(f"[TC计数] 找到 {len(locations)} 个匹配点（阈值前）")
-
-        if not locations:
-            # 没找到图标，可能是单TC（不显示图标）
-            if DEBUG_MODE:
-                print(f"[TC计数] 未找到匹配图标，默认1个TC")
-            self.count = 1
-            self.locations = []
-            return
-
-        # 去除重复检测（同一个图标可能被多次匹配）
-        filtered_locations = self._filter_nearby_locations(locations, template.shape)
-        if DEBUG_MODE:
-            print(f"[TC计数] 去重后剩余 {len(filtered_locations)} 个TC图标")
-            print(f"[TC计数] TC位置: {filtered_locations}")
-
-        self.locations = filtered_locations
-        self.count = len(filtered_locations)
-
-    def _filter_nearby_locations(self, locations, template_shape):
-        """过滤掉距离太近的重复匹配点，使用更高效的算法"""
-        if not locations:
-            return []
-
-        h, w = template_shape[:2]
-        min_distance = w * 0.5  # 两个图标之间的最小距离
-
-        # 转换为numpy数组以提高计算效率
-        locations_array = np.array(locations)
-        filtered = []
-
-        for i, loc in enumerate(locations_array):
-            # 检查是否与已有位置太近
-            if filtered:
-                distances = np.sqrt(np.sum((np.array(filtered) - loc)**2, axis=1))
-                if np.min(distances) < min_distance:
-                    continue
-
-            filtered.append(tuple(loc))
-
-        return filtered
-
-    def _verify_tc_count_with_ocr(self):
+    def _match_numbered_tc(self, screenshot):
         """
-        当检测到多TC时，通过OCR识别数字来确定准确的TC数量
-        检测点(444, 1211)向右下延伸32像素区域内的数字
-        - 如果没有数字：说明是2TC
-        - 如果有数字n：说明是1+n个TC
-        """
-        # 定义OCR检测区域：从(444, 1211)向右下延伸32像素
-        ocr_region = (444, 1211, 444 + 32, 1211 + 32)
-        left, top, right, bottom = ocr_region
+        两阶段匹配策略：
+        阶段1：用完整图标匹配tc_number_1.png判断是否有多TC
+        阶段2：用左上角20*20区域精确匹配所有数字
 
-        # 截取区域
-        img = ImageGrab.grab(bbox=(left, top, right, bottom))
-        img_array = np.array(img)
+        返回：匹配到的数字N（对应1+N个TC），未匹配到返回None
+        """
+        # 阶段1：完整图标匹配判断是否有多TC
+        if not self._has_tc_icon(screenshot):
+            return None
+
+        # 阶段2：左上角区域精确匹配数字
+        return self._match_number_in_top_left(screenshot)
+
+    def _has_tc_icon(self, screenshot):
+        """阶段1：用完整图标匹配tc_number_1.png判断是否有TC图标显示"""
+        template = _load_template_full(1)
+        if template is None:
+            if DEBUG_MODE:
+                print(f"[TC阶段1] 未找到tc_number_1.png")
+            return False
+
+        # 自动缩放模板（如果模板超过截图尺寸）
+        template = self._resize_if_needed(template, screenshot)
+        if template is None:
+            return False
+
+        # 灰度图匹配
+        screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+        result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
 
         if DEBUG_MODE:
-            debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_number_ocr_debug.png")
-            img.save(debug_path)
-            print(f"[TC计数] OCR区域截图已保存到: {debug_path}")
+            print(f"[TC阶段1] 置信度={max_val:.4f} 阈值={MATCH_THRESHOLD:.4f}")
 
-        # 使用OCR识别数字
-        try:
-            reader = _get_reader()
-            results = reader.readtext(img_array, detail=0, allowlist="0123456789")
-            text = "".join(results).strip()
+        return max_val >= MATCH_THRESHOLD
+
+    def _match_number_in_top_left(self, screenshot):
+        """阶段2：用左上角20*20区域精确匹配所有数字"""
+        if DEBUG_MODE:
+            print(f"[TC阶段2] 检测到多TC，用左上角区域精确匹配...")
+
+        # 裁剪截图左上角区域
+        if screenshot.shape[0] < CROP_SIZE or screenshot.shape[1] < CROP_SIZE:
+            if DEBUG_MODE:
+                print(f"[TC阶段2] 截图过小，默认返回1")
+            return 1
+
+        screenshot_crop = screenshot[0:CROP_SIZE, 0:CROP_SIZE]
+        screenshot_gray = cv2.cvtColor(screenshot_crop, cv2.COLOR_BGR2GRAY)
+
+        if DEBUG_MODE:
+            debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_match_region.png")
+            cv2.imwrite(debug_path, screenshot_crop)
+            print(f"[TC阶段2] 匹配区域={debug_path}")
+
+        # 遍历所有数字模板，找最佳匹配
+        best_number = 1
+        best_confidence = 0
+
+        for num in range(1, 21):
+            template_gray = _load_template_crop(num)
+            if template_gray is None:
+                if DEBUG_MODE:
+                    print(f"[TC阶段2] 未找到tc_number_{num}.png，停止搜索")
+                break
+
+            # 模板匹配
+            result = cv2.matchTemplate(screenshot_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
 
             if DEBUG_MODE:
-                print(f"[TC计数] OCR识别结果: '{text}'")
+                print(f"[TC阶段2] tc_number_{num}.png 置信度={max_val:.4f}")
 
-            # 提取数字
-            m = re.search(r'(\d+)', text)
-            if m:
-                # 有数字，说明是1+n个TC
-                n = int(m.group(1))
-                self.count = 1 + n
-                if DEBUG_MODE:
-                    print(f"[TC计数] OCR检测到数字 {n}，确定为 {self.count} 个TC")
-            else:
-                # 没有数字，说明是2TC
-                self.count = 2
-                if DEBUG_MODE:
-                    print(f"[TC计数] OCR未检测到数字，确定为 2 个TC")
-        except Exception as e:
-            if DEBUG_MODE:
-                print(f"[TC计数] OCR识别失败: {e}，保持原检测结果 {self.count} 个TC")
+            if max_val > best_confidence:
+                best_confidence = max_val
+                best_number = num
 
+                # 提前退出优化：置信度非常高时直接返回
+                if max_val >= EARLY_EXIT_THRESHOLD:
+                    if DEBUG_MODE:
+                        print(f"[TC阶段2] 置信度超过{EARLY_EXIT_THRESHOLD}，提前退出")
+                    break
+
+        if DEBUG_MODE:
+            print(f"[TC阶段2] 最佳匹配=tc_number_{best_number}.png 置信度={best_confidence:.4f}")
+
+        return best_number
+
+    def _resize_if_needed(self, template, screenshot):
+        """自动缩放过大的模板，保持宽高比"""
+        t_h, t_w = template.shape[:2]
+        s_h, s_w = screenshot.shape[:2]
+
+        if t_h <= s_h and t_w <= s_w:
+            return template
+
+        # 缩放到截图尺寸的90%以内
+        scale = min((s_h * 0.9) / t_h, (s_w * 0.9) / t_w)
+        new_size = (int(t_w * scale), int(t_h * scale))
+
+        if DEBUG_MODE:
+            print(f"[TC] 模板过大({t_w}x{t_h})，缩放到{new_size}")
+
+        return cv2.resize(template, new_size, interpolation=cv2.INTER_AREA)

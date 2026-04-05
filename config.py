@@ -14,7 +14,7 @@
 """
 
 # ==================== 基础参数 ====================
-CHECK_INTERVAL = 0  # 检测循环间隔（秒），平衡响应速度和CPU占用
+CHECK_INTERVAL = 0.1  # 检测循环间隔（秒），平衡响应速度和CPU占用
 VILLAGERS_PER_TC = 3  # 每个TC排队的村民数量
 MAX_VILLAGERS = 120  # 村民数量上限，超过此数量停止自动生产
 MIN_FOOD = 50  # 最低食物要求，低于此值不生产村民
@@ -28,13 +28,28 @@ ENABLE_INPUT_BLOCK = True  # 是否在操作期间屏蔽物理鼠标键盘输入
 POST_OPERATION_DELAY = 2.0  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发（联网游戏需要更长延迟），设为0禁用
 
 # ==================== 调试开关 ====================
-DEBUG_MODE = False  # 全局调试模式：启用TC计数和村民计数的详细日志和截图
-DEBUG_BLOCKED_DETECTION = False  # 遮挡检测调试：显示遮挡检测置信度和截图
-DEBUG_TRAINING_DETECTION = False  # 村民生产检测调试：显示每次检测的置信度
+# 调试开关说明：
+# - DEBUG_MODE: 全局调试开关，控制TC/村民/食物等模块的详细日志和截图
+# - DEBUG_BLOCKED_DETECTION: 遮挡检测专项调试，独立开关（不依赖DEBUG_MODE）
+# - DEBUG_TRAINING_DETECTION: 村民生产检测专项调试，显示每次检测的置信度
+# - DEBUG_PERFORMANCE: 性能分析开关，显示各模块耗时（独立于其他开关）
+# - DEBUG_SAVE_SCREENSHOTS: 是否保存调试截图到文件（关闭可提升5-10ms性能）
+#
+# 推荐配置：
+# - 日常使用：全部False
+# - 排查问题：开启DEBUG_MODE，关闭DEBUG_SAVE_SCREENSHOTS
+# - 性能优化：开启DEBUG_PERFORMANCE
+# - 遮挡误判：开启DEBUG_BLOCKED_DETECTION
+
+DEBUG_MODE = True  # 全局调试：TC/村民/食物模块的详细日志和截图
+DEBUG_BLOCKED_DETECTION = True  # 遮挡检测：显示置信度和截图（独立开关）
+DEBUG_TRAINING_DETECTION = False  # 村民生产：显示每次检测的置信度
+DEBUG_PERFORMANCE = False  # 性能分析：显示各模块详细耗时（独立开关）
+DEBUG_SAVE_SCREENSHOTS = True  # 保存调试截图：关闭可提升5-10ms性能
 
 # ==================== OCR设置 ====================
 USE_GPU = False  # 是否使用GPU加速OCR（小图片OCR时CPU更快，GPU有数据传输开销）
-OCR_IMAGE_SCALE = 0.5  # OCR图片缩放比例，越小越快但可能影响准确率
+OCR_IMAGE_SCALE = 1  # OCR图片缩放比例，越小越快但可能影响准确率
 
 # ==================== 截图区域坐标 ====================
 # 注意：以下坐标基于 2560x1440 分辨率，其他分辨率需要调整
@@ -47,14 +62,17 @@ GAME_DETECT_COLOR = (65, 78, 105)  # 这是HDR开启时的颜色值，SDR时该�
 # 村民生产队列检测区域
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
 
-# UI遮挡检测区域（5x5像素）
-BLOCKED_DETECT_REGION = (260, 1000, 265, 1005)
+# UI遮挡检测区域
+BLOCKED_DETECT_REGION = (260, 950, 290, 990)
 
 # 人口显示区域（如 "50/200"）
-POPULATION_REGION = (45, 1126, 151, 1183)
+POPULATION_REGION = (50, 1140, 150, 1170)
 
 # TC图标检测区域（左下角）
-TC_ICON_REGION = (390, 1210, 700, 1260)
+TC_ICON_REGION = (444, 1212, 492, 1259)
+
+# 单TC预检测区域（用于快速判断是否只有1个TC）
+SINGLE_TC_REGION = (300, 1140, 354, 1194)
 
 # 村民总数统计区域（左下角多个数字）
 VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
@@ -64,12 +82,13 @@ FOOD_REGION = (50, 1222, 140, 1248)
 
 # ==================== 模板匹配阈值 ====================
 VILLAGER_MATCH_THRESHOLD = 0.6  # 村民图标匹配阈值，降低以更快检测到图标消失
-BLOCKED_MATCH_THRESHOLD = 0.7  # 遮挡检测匹配阈值
-TC_MATCH_THRESHOLD = 0.7  # TC图标匹配阈值
+BLOCKED_MATCH_THRESHOLD = 0.4  # 遮挡检测匹配阈值
+TC_MATCH_THRESHOLD = 0.6  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================
 # pydirectinput默认每次按键有0.1秒延迟，这里设置为0可以加速
-TC_SELECT_DELAY = 0.03  # 按H键选中TC后的等待时间，最小建议值0.05秒（低于0.02秒可能无法识别多TC）
+TC_SELECT_DELAY = 0.02  # 按H键选中TC后的等待时间（秒）
+TC_RETRY_DELAY = 0.01  # TC检测失败后重试H键的等待时间（秒），UI未刷新时自动重试
 QUEUE_DELAY = 0  # 每次按Q键之间的延迟，设为0最快
 
 # ==================== 音效设置 ====================
@@ -92,6 +111,7 @@ if not os.path.exists(DEBUG_OUTPUT_DIR):
 VILLAGER_TEMPLATE = os.path.join(TEMPLATES_DIR, "cunmin.png")
 BLOCKED_TEMPLATE = os.path.join(TEMPLATES_DIR, "blocked.png")
 TC_ICON_TEMPLATE = os.path.join(TEMPLATES_DIR, "tc_icon.png")
+TC_SINGLE_TEMPLATE = os.path.join(TEMPLATES_DIR, "tc_single.png")  # 单TC预检测专用模板
 
 # 调试输出路径
 TC_DEBUG_SCREENSHOT = os.path.join(DEBUG_OUTPUT_DIR, "tc_detection_debug.png")

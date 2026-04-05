@@ -1,11 +1,15 @@
 """
 食物数量识别模块
 通过OCR识别屏幕上的食物数量
+
+性能优化：
+- 使用mss库替代PIL.ImageGrab（2-3x提升）
 """
 import re
 import numpy as np
-from PIL import ImageGrab
 from config import *
+from screenshot_util import capture_region
+from logger import log_food
 
 _reader = None
 
@@ -35,13 +39,15 @@ class FoodReader(object):
         """截取食物显示区域并根据配置缩放"""
         from config import OCR_IMAGE_SCALE
         left, top, right, bottom = FOOD_REGION
-        img = ImageGrab.grab(bbox=(left, top, right, bottom))
+        img = capture_region(left, top, right, bottom)
 
         # 保存调试截图（仅在调试模式下）
-        if DEBUG_MODE:
-            img.save(FOOD_DEBUG_SCREENSHOT)
-            if DEBUG_MODE:
-                print(f"[食物识别] 已保存检测区域截图到: {FOOD_DEBUG_SCREENSHOT}")
+        if DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+            try:
+                img.save(FOOD_DEBUG_SCREENSHOT)
+                log_food("截图", f"{FOOD_DEBUG_SCREENSHOT}")
+            except Exception as e:
+                log_food("截图", f"保存失败: {e}")
 
         # 根据配置缩放图片
         if OCR_IMAGE_SCALE != 1.0:
@@ -74,5 +80,4 @@ class FoodReader(object):
         else:
             self.amount = None
 
-        if DEBUG_MODE:
-            print(f"[食物识别] OCR原文: '{text}' -> 清理后: '{cleaned}' -> 食物: {self.amount}")
+        log_food("解析", f"原文='{text}' 清理='{cleaned}' 食物={self.amount}")

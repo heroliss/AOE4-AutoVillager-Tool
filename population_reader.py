@@ -30,14 +30,14 @@ def _get_reader():
                 gpu_available = torch.cuda.is_available()
                 _reader = easyocr.Reader(["en"], gpu=gpu_available, verbose=False)
                 if gpu_available:
-                    print(f"[OCR] GPU加速已启用")
+                    print(f"OCR: GPU加速已启用")
                 else:
-                    print(f"[OCR] 使用CPU模式（未检测到CUDA GPU）")
+                    print(f"OCR: 使用CPU模式（未检测到CUDA）")
             except Exception as e:
-                print(f"[OCR] GPU初始化失败，使用CPU模式: {e}")
+                print(f"OCR: GPU初始化失败，使用CPU模式")
                 _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
         else:
-            print(f"[OCR] 使用CPU模式（配置禁用GPU）")
+            print(f"OCR: 使用CPU模式（配置禁用GPU）")
             _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
     return _reader
 

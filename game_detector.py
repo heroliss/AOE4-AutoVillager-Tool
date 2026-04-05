@@ -1,11 +1,14 @@
 """
 游戏窗口检测模块
 结合窗口标题和像素点颜色双重检测
+
+性能优化：
+- 使用mss库替代PIL.ImageGrab
 """
 import ctypes
 from ctypes import wintypes
-from PIL import ImageGrab
 from config import GAME_DETECT_PIXEL, GAME_DETECT_COLOR
+from screenshot_util import capture_region
 
 # Windows API 函数
 user32 = ctypes.windll.user32
@@ -33,9 +36,13 @@ class GameDetector(object):
         self.window_title = self._get_active_window_title()
         self.window_active = self._is_game_window(self.window_title)
 
-        # 2. 检测像素点颜色
-        self.color = self._capture_pixel()
-        self.pixel_match = self._match_pixel(self.color)
+        # 2. 只有窗口标题匹配时才检测像素点颜色（避免不必要的截图）
+        if self.window_active:
+            self.color = self._capture_pixel()
+            self.pixel_match = self._match_pixel(self.color)
+        else:
+            self.color = None
+            self.pixel_match = False
 
         # 3. 两个条件都满足才认为在游戏中
         self.in_game = self.window_active and self.pixel_match
@@ -75,7 +82,7 @@ class GameDetector(object):
     def _capture_pixel(self):
         """截取特定像素点的颜色"""
         try:
-            img = ImageGrab.grab(bbox=(PIXEL_X, PIXEL_Y, PIXEL_X + 1, PIXEL_Y + 1))
+            img = capture_region(PIXEL_X, PIXEL_Y, PIXEL_X + 1, PIXEL_Y + 1)
             return img.getpixel((0, 0))[:3]
         except Exception:
             return (0, 0, 0)
