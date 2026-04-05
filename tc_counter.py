@@ -1,8 +1,10 @@
 """
 TC数量检测模块
 通过模板匹配检测左下角TC图标数量
+如果检测到多TC，还会通过OCR识别数字来确定准确数量
 """
 import os
+import re
 import cv2
 import numpy as np
 from PIL import ImageGrab
@@ -15,6 +17,7 @@ DEBUG_SCREENSHOT_PATH = TC_DEBUG_SCREENSHOT
 MATCH_THRESHOLD = TC_MATCH_THRESHOLD
 
 _template = None
+_reader = None
 
 
 def _get_template():
@@ -24,6 +27,15 @@ def _get_template():
             return None
         _template = cv2.imread(TEMPLATE_PATH, cv2.IMREAD_COLOR)
     return _template
+
+
+def _get_reader():
+    """获取共享的OCR Reader实例"""
+    global _reader
+    if _reader is None:
+        from population_reader import _get_reader as get_pop_reader
+        _reader = get_pop_reader()
+    return _reader
 
 
 class TCCounter(object):
@@ -48,6 +60,10 @@ class TCCounter(object):
         if DEBUG_MODE:
             print(f"[TC计数] 截图区域尺寸: {screenshot.shape[1]}x{screenshot.shape[0]}")
         self._match_all(screenshot, template)
+
+        # 如果检测到多TC，通过OCR确认准确数量
+        if self.count > 1:
+            self._verify_tc_count_with_ocr()
 
     def _capture(self):
         left, top, right, bottom = REGION
@@ -114,3 +130,50 @@ class TCCounter(object):
             filtered.append(tuple(loc))
 
         return filtered
+
+    def _verify_tc_count_with_ocr(self):
+        """
+        当检测到多TC时，通过OCR识别数字来确定准确的TC数量
+        检测点(444, 1211)向右下延伸32像素区域内的数字
+        - 如果没有数字：说明是2TC
+        - 如果有数字n：说明是1+n个TC
+        """
+        # 定义OCR检测区域：从(444, 1211)向右下延伸32像素
+        ocr_region = (444, 1211, 444 + 32, 1211 + 32)
+        left, top, right, bottom = ocr_region
+
+        # 截取区域
+        img = ImageGrab.grab(bbox=(left, top, right, bottom))
+        img_array = np.array(img)
+
+        if DEBUG_MODE:
+            debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_number_ocr_debug.png")
+            img.save(debug_path)
+            print(f"[TC计数] OCR区域截图已保存到: {debug_path}")
+
+        # 使用OCR识别数字
+        try:
+            reader = _get_reader()
+            results = reader.readtext(img_array, detail=0, allowlist="0123456789")
+            text = "".join(results).strip()
+
+            if DEBUG_MODE:
+                print(f"[TC计数] OCR识别结果: '{text}'")
+
+            # 提取数字
+            m = re.search(r'(\d+)', text)
+            if m:
+                # 有数字，说明是1+n个TC
+                n = int(m.group(1))
+                self.count = 1 + n
+                if DEBUG_MODE:
+                    print(f"[TC计数] OCR检测到数字 {n}，确定为 {self.count} 个TC")
+            else:
+                # 没有数字，说明是2TC
+                self.count = 2
+                if DEBUG_MODE:
+                    print(f"[TC计数] OCR未检测到数字，确定为 2 个TC")
+        except Exception as e:
+            if DEBUG_MODE:
+                print(f"[TC计数] OCR识别失败: {e}，保持原检测结果 {self.count} 个TC")
+
