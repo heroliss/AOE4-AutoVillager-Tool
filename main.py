@@ -311,12 +311,17 @@ def main():
                     if DEBUG_MODE:
                         logger.force_print(f"[调试] 本次操作总耗时: {(last_trigger_time - loop_start):.3f} 秒")
 
+                # 操作完成后，等待游戏UI更新（避免连续触发）
+                # 必须在释放锁之前等待，确保下次循环时村民图标已出现
+                if POST_OPERATION_DELAY > 0:
+                    time.sleep(POST_OPERATION_DELAY)
+
             finally:
                 release_lock()
 
-            # 操作完成后，等待游戏UI更新（避免连续触发）
-            if POST_OPERATION_DELAY > 0:
-                time.sleep(POST_OPERATION_DELAY)
+            # 循环间隔，降低CPU占用
+            if CHECK_INTERVAL > 0:
+                time.sleep(CHECK_INTERVAL)
 
     except KeyboardInterrupt:
         logger.force_print("\n程序已退出")
