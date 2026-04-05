@@ -22,16 +22,6 @@
 
 ## 快速开始
 
-> **⚠️ 重要提示：本工具需要以管理员身份运行**
-> 
-> 程序使用输入屏蔽功能防止操作期间的误触，需要管理员权限才能调用Windows底层API。
-> 
-> **运行方式：**
-> - Windows：右键 `main.py` → 选择"以管理员身份运行"
-> - 命令行：以管理员身份打开终端，然后执行 `python main.py`
-> 
-> 如果不想使用管理员权限，可在 [config.py](config.py) 中设置 `ENABLE_INPUT_BLOCK = False` 关闭输入屏蔽功能（可能会有误操作风险）。
-
 ### 1. 游戏设置要求
 
 **重要：** 在使用本工具前，必须在游戏中进行以下设置：
@@ -67,6 +57,12 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
+
+> 提示：程序使用输入屏蔽功能防止操作期间的误触，需要管理员权限才能调用Windows底层API。
+>
+> 运行方式：以管理员身份打开终端，然后执行 `python main.py`
+>
+> 如果不想使用管理员权限，可在 [config.py](config.py) 中设置 `ENABLE_INPUT_BLOCK = False` 关闭输入屏蔽功能。
 
 ## 配置说明
 
