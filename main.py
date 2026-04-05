@@ -137,16 +137,16 @@ def main():
             # 2. 优先检查是否有村民正在生产（快速，模板匹配）
             training_detector.do()
 
-            # 调试输出（使用logger折叠）
-            if DEBUG_TRAINING_DETECTION:
-                logger.log(f"[生产检测] 置信度: {training_detector.confidence}, 阈值: {VILLAGER_MATCH_THRESHOLD}, 结果: {'生产中' if training_detector.found else '未生产'}")
-
             if training_detector.blocked:
                 logger.log(f"生产队列UI被遮挡（相似度 {training_detector.blocked_confidence}），跳过")
                 continue
 
             if training_detector.found:
-                logger.log(f"村民生产中（相似度 {training_detector.confidence}），跳过")
+                # 合并调试信息和用户信息为一条
+                if DEBUG_TRAINING_DETECTION:
+                    logger.log(f"村民生产中（相似度 {training_detector.confidence}，阈值 {VILLAGER_MATCH_THRESHOLD}），跳过")
+                else:
+                    logger.log(f"村民生产中（相似度 {training_detector.confidence}），跳过")
                 continue
 
             # 调试：记录检测到"没有村民生产"的时间
