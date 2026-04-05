@@ -114,9 +114,6 @@ def main():
     food_reader        = FoodReader()
     logger             = LogMerger()
 
-    # 注入tc_selector到tc_counter（用于重试）
-    tc_counter.set_tc_selector(tc_selector)
-
     # 预热OCR模型，避免第一次使用时延迟
     print("正在预热OCR模型...")
     warmup_start = time.time()
@@ -290,6 +287,37 @@ def main():
                         logger.force_print("[操作] 选中TC")
                     tc_selector.do()
                     tc_counter.do()
+
+                # with块结束，输入屏蔽自动解除
+
+                # 检查TC检测是否失败
+                if tc_counter.detection_failed:
+                    logger.force_print(f"[错误] TC检测失败（可能还没有建造TC），进入冷却状态 {TC_DETECTION_FAILED_COOLDOWN}秒")
+                    logger.force_print(f"[提示] 冷却期间会监控村民生产图标，如果检测到说明TC已建造，将自动恢复")
+
+                    # 冷却等待，期间监控村民生产图标
+                    cooldown_start = time.time()
+                    cooldown_check_interval = 1.0  # 每秒检查一次
+
+                    while time.time() - cooldown_start < TC_DETECTION_FAILED_COOLDOWN:
+                        # 检查是否有村民生产图标
+                        cooldown_detector = VillagerTrainingDetector()
+                        has_villager_icon = cooldown_detector.has_villager_icon()
+
+                        if has_villager_icon:
+                            elapsed = time.time() - cooldown_start
+                            logger.force_print(f"[恢复] 检测到村民生产图标，TC已建造，提前结束冷却（已等待{elapsed:.1f}秒）")
+                            break
+
+                        time.sleep(cooldown_check_interval)
+                    else:
+                        # 冷却时间到，未检测到村民图标
+                        logger.force_print(f"[冷却] 冷却时间结束，继续尝试检测TC")
+
+                    continue
+
+                # TC检测成功，继续执行生产逻辑（需要重新屏蔽输入）
+                with input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext():
                     planned_villagers = VILLAGERS_PER_TC * tc_counter.count
 
                     # 8.2.4 根据可用空位和食物调整生产数量

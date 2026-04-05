@@ -26,6 +26,7 @@ BLOCKED_THRESHOLD = BLOCKED_MATCH_THRESHOLD
 # 模板缓存（灰度图）
 _template_gray = None
 _blocked_template_gray = None
+_blocked_detection_initialized = False  # 遮挡检测是否已初始化（用于避免重复打印）
 
 
 def _get_template():
@@ -71,6 +72,8 @@ class VillagerTrainingDetector(object):
 
     def _init_blocked_detection(self):
         """初始化遮挡检测，检查模板是否可用"""
+        global _blocked_detection_initialized
+
         if not os.path.exists(BLOCKED_TEMPLATE_PATH):
             raise FileNotFoundError(
                 f"错误: 未找到 blocked.png 模板文件！\n"
@@ -89,10 +92,33 @@ class VillagerTrainingDetector(object):
         screenshot_height = bottom - top
 
         self._blocked_check_enabled = True
-        if DEBUG_MODE:
-            print(f"[遮挡检测] 已启用 区域={screenshot_width}x{screenshot_height} 模板={blocked_template.shape[1]}x{blocked_template.shape[0]}")
-        else:
-            print(f"UI遮挡检测: 已启用")
+
+        # 只在第一次初始化时打印
+        if not _blocked_detection_initialized:
+            if DEBUG_MODE:
+                print(f"[遮挡检测] 已启用 区域={screenshot_width}x{screenshot_height} 模板={blocked_template.shape[1]}x{blocked_template.shape[0]}")
+            else:
+                print(f"UI遮挡检测: 已启用")
+            _blocked_detection_initialized = True
+
+    def has_villager_icon(self):
+        """
+        快速检测是否有村民生产图标（不检查遮挡）
+        用于冷却期间监控TC是否已建造
+
+        返回：True表示有村民图标，False表示没有
+        """
+        # 截取队列区域
+        left, top, right, bottom = REGION
+        img_bgr = capture_region_np(left, top, right, bottom)
+        screenshot = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+        # 模板匹配
+        template = _get_template()
+        result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+
+        return max_val >= MATCH_THRESHOLD
 
     def do(self):
         t_start = time.time() if DEBUG_PERFORMANCE else None

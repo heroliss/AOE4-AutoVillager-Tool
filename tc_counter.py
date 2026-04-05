@@ -38,7 +38,6 @@ DEBUG_SCREENSHOT_PATH = TC_DEBUG_SCREENSHOT
 MATCH_THRESHOLD = TC_MATCH_THRESHOLD
 CROP_SIZE = 20  # 阶段2匹配时裁剪的左上角区域尺寸
 EARLY_EXIT_THRESHOLD = 0.95  # 提前退出阈值，置信度超过此值直接返回
-MAX_RETRY = 10  # 未检测到TC时的最大重试次数
 
 # 全局模板缓存
 _template_cache = {}
@@ -102,31 +101,39 @@ class TCCounter:
 
     def __init__(self):
         self.count = 1  # 默认1个TC
-        self.tc_selector = None  # TC选择器，需要外部注入
-
-    def set_tc_selector(self, tc_selector):
-        """设置TC选择器（用于重试）"""
-        self.tc_selector = tc_selector
+        self.detection_failed = False  # 检测是否失败
 
     def do(self):
         """执行TC数量检测，带自动重试"""
         t_start = time.time() if DEBUG_PERFORMANCE else None
 
-        # 预检测：先检测单TC区域
-        if self._check_single_tc_region():
-            self.count = 1
-            log_tc("预检测", f"单TC区域匹配 TC数=1")
-            if DEBUG_PERFORMANCE:
-                t_total = time.time() - t_start
-                log_perf("TC", f"总耗时={t_total*1000:.2f}ms (预检测)")
-            return
+        # 重置失败标志
+        self.detection_failed = False
 
-        # 主检测：检测多TC区域，带重试
-        for retry in range(MAX_RETRY):
-            screenshot = self._capture()
+        # 等待UI刷新（因为外部刚按了H键）
+        from config import TC_RETRY_DELAY
+        time.sleep(TC_RETRY_DELAY)
+
+        # 重试循环：每次都检测两个区域
+        for retry in range(TC_MAX_RETRY):
+            log_tc("重试", f"第{retry+1}/{TC_MAX_RETRY}次检测")
+
+            # 1. 先检测单TC区域（快速路径）
+            # 只在第一次保存调试截图
+            if self._check_single_tc_region(save_debug=(retry == 0)):
+                self.count = 1
+                log_tc("结果", f"单TC区域匹配 TC数=1")
+                if DEBUG_PERFORMANCE:
+                    t_total = time.time() - t_start
+                    log_perf("TC", f"总耗时={t_total*1000:.2f}ms (单TC)")
+                return
+
+            # 2. 检测多TC区域
+            # 只在第一次保存调试截图
+            screenshot = self._capture(retry_count=(retry if retry < 3 else -1))  # 只保存前3次
             t_capture = time.time() if DEBUG_PERFORMANCE else None
 
-            log_tc("截图", f"尺寸={screenshot.shape[1]}x{screenshot.shape[0]}")
+            log_tc("截图", f"多TC区域 尺寸={screenshot.shape[1]}x{screenshot.shape[0]}")
 
             detected_number = self._match_numbered_tc(screenshot)
             t_match = time.time() if DEBUG_PERFORMANCE else None
@@ -142,28 +149,26 @@ class TCCounter:
                     log_perf("TC", f"  匹配={((t_match-t_capture)*1000):.2f}ms")
                 return
 
-            # 未检测到TC，需要重试
-            if retry < MAX_RETRY - 1:
-                log_tc("重试", f"未检测到TC 第{retry+1}/{MAX_RETRY}次 重新按H键")
-                if self.tc_selector:
-                    self.tc_selector.do()
-                    from config import TC_RETRY_DELAY
-                    time.sleep(TC_RETRY_DELAY)  # 等待UI刷新
-                else:
-                    log_tc("错误", "tc_selector未设置，无法重试")
-                    break
-            else:
-                log_tc("失败", f"重试{MAX_RETRY}次后仍未检测到TC 默认TC数=1")
-                self.count = 1
+            # 两个区域都未检测到TC，等待后重试
+            if retry < TC_MAX_RETRY - 1:
+                log_tc("重试", f"两个区域都未检测到TC 等待UI刷新后重试")
+                time.sleep(TC_RETRY_DELAY)  # 等待UI刷新
+
+        # 所有重试都失败，标记为检测失败
+        log_tc("失败", f"重试{TC_MAX_RETRY}次后仍未检测到TC 进入冷却状态")
+        self.detection_failed = True
 
         if DEBUG_PERFORMANCE:
             t_total = time.time() - t_start
-            log_perf("TC", f"总耗时={t_total*1000:.2f}ms (含重试)")
+            log_perf("TC", f"总耗时={t_total*1000:.2f}ms (检测失败)")
 
-    def _check_single_tc_region(self):
+    def _check_single_tc_region(self, save_debug=False):
         """
         预检测：检测单TC区域是否匹配tc_single.png专用模板
         使用灰度图匹配，无需缩放，性能最优
+
+        参数：
+            save_debug: 是否保存调试截图（只在第一次调用时保存）
 
         返回：True表示匹配（只有1个TC），False表示不匹配（需要继续主检测）
         """
@@ -176,8 +181,8 @@ class TCCounter:
         screenshot = capture_region_np(left, top, right, bottom)
         screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
-        # 保存调试截图
-        if DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+        # 保存调试截图（只在第一次时保存）
+        if save_debug and DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
             try:
                 from PIL import Image
                 debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_single_region_debug.png")
@@ -188,11 +193,17 @@ class TCCounter:
                 debug_gray_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_single_region_gray.png")
                 cv2.imwrite(debug_gray_path, screenshot_gray)
                 log_tc("预检测灰度", f"{debug_gray_path}")
+
+                # 同时保存模板用于对比
+                template_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_single_template.png")
+                cv2.imwrite(template_path, template)
+                log_tc("预检测模板", f"{template_path}")
             except Exception as e:
                 log_tc("预检测截图", f"保存失败: {e}")
 
         if DEBUG_MODE:
             log_tc("预检测", f"截图尺寸={screenshot_gray.shape[1]}x{screenshot_gray.shape[0]} 模板尺寸={template.shape[1]}x{template.shape[0]}")
+            log_tc("预检测", f"区域坐标=({left},{top},{right},{bottom})")
 
         # 检查模板是否超过截图尺寸
         if template.shape[0] > screenshot_gray.shape[0] or template.shape[1] > screenshot_gray.shape[1]:
@@ -203,21 +214,24 @@ class TCCounter:
         result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
 
-        log_tc("预检测", f"置信度={max_val:.4f} 阈值={MATCH_THRESHOLD:.4f}")
+        log_tc("预检测", f"置信度={max_val:.4f} 阈值={MATCH_THRESHOLD:.4f} 匹配={'成功' if max_val >= MATCH_THRESHOLD else '失败'}")
 
         return max_val >= MATCH_THRESHOLD
 
-    def _capture(self):
+    def _capture(self, retry_count=0):
         """截取TC图标区域（多TC主检测区域）"""
         left, top, right, bottom = REGION
         img_bgr = capture_region_np(left, top, right, bottom)
 
-        if DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+        # 只保存前3次重试的截图
+        if retry_count >= 0 and DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
             try:
                 from PIL import Image
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                Image.fromarray(img_rgb).save(DEBUG_SCREENSHOT_PATH)
-                log_tc("截图", f"{DEBUG_SCREENSHOT_PATH}")
+                # 保存时带上重试次数，避免覆盖
+                debug_path = DEBUG_SCREENSHOT_PATH.replace('.png', f'_retry{retry_count}.png')
+                Image.fromarray(img_rgb).save(debug_path)
+                log_tc("截图", f"{debug_path}")
             except Exception as e:
                 log_tc("截图", f"保存失败: {e}")
 

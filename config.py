@@ -25,7 +25,7 @@ VILLAGER_CHECK_INTERVAL = 10.0  # 村民数量检查间隔（秒），村民数�
 OPERATION_DELAY = 0  # 蜂鸣后延迟多久执行操作（秒），设为0立即执行
 BLOCK_INPUT_DURATION = 0  # 操作后等待时长（秒），设为0最快
 ENABLE_INPUT_BLOCK = True  # 是否在操作期间屏蔽物理鼠标键盘输入（需要管理员权限）
-POST_OPERATION_DELAY = 2.0  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发（联网游戏需要更长延迟），设为0禁用
+POST_OPERATION_DELAY = 10.0  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发（联网游戏需要更长延迟），设为0禁用 （对于蒙古开局tc没展开无法生产农民的情况，这个值可以调大些）
 
 # ==================== 调试开关 ====================
 # 调试开关说明：
@@ -41,11 +41,11 @@ POST_OPERATION_DELAY = 2.0  # 操作完成后等待游戏UI更新的时间（秒
 # - 性能优化：开启DEBUG_PERFORMANCE
 # - 遮挡误判：开启DEBUG_BLOCKED_DETECTION
 
-DEBUG_MODE = True  # 全局调试：TC/村民/食物模块的详细日志和截图
-DEBUG_BLOCKED_DETECTION = True  # 遮挡检测：显示置信度和截图（独立开关）
+DEBUG_MODE = False  # 全局调试：TC/村民/食物模块的详细日志和截图
+DEBUG_BLOCKED_DETECTION = False  # 遮挡检测：显示置信度和截图（独立开关）
 DEBUG_TRAINING_DETECTION = False  # 村民生产：显示每次检测的置信度
-DEBUG_PERFORMANCE = False  # 性能分析：显示各模块详细耗时（独立开关）
-DEBUG_SAVE_SCREENSHOTS = True  # 保存调试截图：关闭可提升5-10ms性能
+DEBUG_PERFORMANCE = True  # 性能分析：显示各模块详细耗时（独立开关）
+DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：关闭可提升5-10ms性能
 
 # ==================== OCR设置 ====================
 USE_GPU = False  # 是否使用GPU加速OCR（小图片OCR时CPU更快，GPU有数据传输开销）
@@ -87,8 +87,10 @@ TC_MATCH_THRESHOLD = 0.6  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================
 # pydirectinput默认每次按键有0.1秒延迟，这里设置为0可以加速
-TC_SELECT_DELAY = 0.02  # 按H键选中TC后的等待时间（秒）
-TC_RETRY_DELAY = 0.01  # TC检测失败后重试H键的等待时间（秒），UI未刷新时自动重试
+TC_SELECT_DELAY = 0.03  # 按H键选中TC后的等待时间（秒）
+TC_RETRY_DELAY = 0.01  # TC检测失败后重试H键的等待时间（秒），给游戏UI足够的刷新时间
+TC_MAX_RETRY = 50  # TC检测失败时的最大重试次数
+TC_DETECTION_FAILED_COOLDOWN = 1000.0  # TC检测失败后的冷却时间（秒），避免频繁重试
 QUEUE_DELAY = 0  # 每次按Q键之间的延迟，设为0最快
 
 # ==================== 音效设置 ====================
