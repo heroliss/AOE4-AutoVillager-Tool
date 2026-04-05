@@ -160,7 +160,7 @@ GAME_DETECT_COLOR = (26, 32, 46)
 8. **🗑️ Ctrl+Alt+0** - 取消0号临时编组
 9. **🔓 结束屏蔽** - 恢复物理输入控制
 
-整个操作耗时约0.1-0.3秒，完全不影响正常游戏操作。
+整个操作耗时极短，几乎不影响正常游戏操作。
 
 ## 核心技术
 
@@ -260,6 +260,8 @@ actual = min(planned, available_slots, remaining, max_by_food)
 1. 确认 [templates/tc_icon.png](templates/tc_icon.png) 正确
 2. 检查 `TC_ICON_REGION` 坐标
 3. 调整 `TC_MATCH_THRESHOLD` 阈值
+4. 增大 `TC_SELECT_DELAY` 以预留更多图像刷新时间
+   > 提示：以上参数均可配合启用 `DEBUG_MODE = True` 并查看 [debug_output/tc_detection_debug.png](debug_output/tc_detection_debug.png) 截图来调整测试。
 
 ## GPU加速配置（可选）
 
