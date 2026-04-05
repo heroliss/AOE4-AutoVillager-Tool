@@ -25,7 +25,7 @@ VILLAGER_CHECK_INTERVAL = 10.0  # 村民数量检查间隔（秒），村民数�
 OPERATION_DELAY = 0  # 蜂鸣后延迟多久执行操作（秒），设为0立即执行
 BLOCK_INPUT_DURATION = 0  # 操作后等待时长（秒），设为0最快
 ENABLE_INPUT_BLOCK = True  # 是否在操作期间屏蔽物理鼠标键盘输入（需要管理员权限）
-POST_OPERATION_DELAY = 0.3  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发，设为0禁用
+POST_OPERATION_DELAY = 2.0  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发（联网游戏需要更长延迟），设为0禁用
 
 # ==================== 调试开关 ====================
 DEBUG_MODE = False  # 全局调试模式：启用TC计数和村民计数的详细日志和截图
