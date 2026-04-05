@@ -84,6 +84,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 DEBUG_OUTPUT_DIR = os.path.join(BASE_DIR, "debug_output")
 
+# 自动创建调试输出目录
+if not os.path.exists(DEBUG_OUTPUT_DIR):
+    os.makedirs(DEBUG_OUTPUT_DIR)
+
 # 模板图片路径
 VILLAGER_TEMPLATE = os.path.join(TEMPLATES_DIR, "cunmin.png")
 BLOCKED_TEMPLATE = os.path.join(TEMPLATES_DIR, "blocked.png")
