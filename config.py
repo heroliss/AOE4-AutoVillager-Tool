@@ -28,9 +28,9 @@ ENABLE_INPUT_BLOCK = True  # 是否在操作期间屏蔽物理鼠标键盘输入
 POST_OPERATION_DELAY = 0.2  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发，设为0禁用
 
 # ==================== 调试开关 ====================
-DEBUG_MODE = True  # 全局调试模式：启用TC计数和村民计数的详细日志和截图
+DEBUG_MODE = False  # 全局调试模式：启用TC计数和村民计数的详细日志和截图
 DEBUG_BLOCKED_DETECTION = False  # 遮挡检测调试：显示遮挡检测置信度和截图
-DEBUG_TRAINING_DETECTION = True  # 村民生产检测调试：显示每次检测的置信度
+DEBUG_TRAINING_DETECTION = False  # 村民生产检测调试：显示每次检测的置信度
 
 # ==================== OCR设置 ====================
 USE_GPU = False  # 是否使用GPU加速OCR（小图片OCR时CPU更快，GPU有数据传输开销）
