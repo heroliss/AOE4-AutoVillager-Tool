@@ -135,7 +135,3 @@ class VillagerTrainingDetector(object):
         _, max_val, _, _ = cv2.minMaxLoc(result)
         self.confidence = round(float(max_val), 4)
         self.found = max_val >= MATCH_THRESHOLD
-
-        # 调试输出
-        if DEBUG_TRAINING_DETECTION:
-            print(f"[生产检测] 置信度: {self.confidence}, 阈值: {MATCH_THRESHOLD}, 结果: {'生产中' if self.found else '未生产'}")

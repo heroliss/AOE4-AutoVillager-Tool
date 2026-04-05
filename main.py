@@ -136,6 +136,11 @@ def main():
 
             # 2. 优先检查是否有村民正在生产（快速，模板匹配）
             training_detector.do()
+
+            # 调试输出（使用logger折叠）
+            if DEBUG_TRAINING_DETECTION:
+                logger.log(f"[生产检测] 置信度: {training_detector.confidence}, 阈值: {VILLAGER_MATCH_THRESHOLD}, 结果: {'生产中' if training_detector.found else '未生产'}")
+
             if training_detector.blocked:
                 logger.log(f"生产队列UI被遮挡（相似度 {training_detector.blocked_confidence}），跳过")
                 continue
@@ -146,9 +151,9 @@ def main():
 
             # 调试：记录检测到"没有村民生产"的时间
             detection_time = time.time()
-            if last_trigger_time:
+            if last_trigger_time and DEBUG_MODE:
                 elapsed = detection_time - last_trigger_time
-                print(f"[调试] 距离上次触发生产已过 {elapsed:.2f} 秒")
+                logger.log(f"[调试] 距离上次触发生产已过 {elapsed:.2f} 秒")
 
             # 3. 只有在没有村民生产时，才执行慢速OCR操作
             ocr_start = time.time()
@@ -172,18 +177,21 @@ def main():
                     future_villager = executor.submit(villager_counter.do)
                     concurrent.futures.wait([future_population, future_villager, future_food])
                     last_villager_check_time = current_time
-                    print(f"[调试] 人口OCR: {(time.time() - pop_start):.3f}s, 食物OCR: {(time.time() - food_start):.3f}s, 村民OCR: {(time.time() - villager_start):.3f}s")
+                    if DEBUG_MODE:
+                        logger.log(f"[调试] 人口OCR: {(time.time() - pop_start):.3f}s, 食物OCR: {(time.time() - food_start):.3f}s, 村民OCR: {(time.time() - villager_start):.3f}s")
                 else:
                     concurrent.futures.wait([future_population, future_food])
-                    print(f"[调试] 人口OCR: {(time.time() - pop_start):.3f}s, 食物OCR: {(time.time() - food_start):.3f}s")
+                    if DEBUG_MODE:
+                        logger.log(f"[调试] 人口OCR: {(time.time() - pop_start):.3f}s, 食物OCR: {(time.time() - food_start):.3f}s")
 
             ocr_end = time.time()
-            print(f"[调试] OCR操作耗时: {(ocr_end - ocr_start):.3f} 秒")
+            if DEBUG_MODE:
+                logger.log(f"[调试] OCR操作耗时: {(ocr_end - ocr_start):.3f} 秒")
 
             # 3.1 检查人口识别结果
             if population_reader.current is None:
                 if DEBUG_MODE:
-                    print(f"[调试] 人口识别失败: current={population_reader.current}, limit={population_reader.limit}")
+                    logger.log(f"[调试] 人口识别失败: current={population_reader.current}, limit={population_reader.limit}")
                 logger.log("人口识别失败，跳过")
                 continue
 
@@ -195,7 +203,7 @@ def main():
             # 3.3 检查食物是否充足
             if food_reader.amount is None:
                 if DEBUG_MODE:
-                    print(f"[调试] 食物识别失败: amount={food_reader.amount}")
+                    logger.log(f"[调试] 食物识别失败: amount={food_reader.amount}")
                 logger.log("食物识别失败，跳过")
                 continue
 
@@ -228,7 +236,8 @@ def main():
 
                 with blocker:
                     # 6.2.1 保存当前选中的单位（使用Ctrl+0编组）
-                    print("[执行操作] 保存当前选中...")
+                    if DEBUG_MODE:
+                        logger.force_print("[执行操作] 保存当前选中...")
                     pydirectinput.keyDown('ctrl')
                     pydirectinput.press('0')
                     pydirectinput.keyUp('ctrl')
@@ -240,10 +249,12 @@ def main():
 
                     # 6.2.3 操作前延迟，给用户反应时间
                     if OPERATION_DELAY > 0:
-                        print(f"[准备操作] {OPERATION_DELAY} 秒后执行按键操作...")
+                        if DEBUG_MODE:
+                            logger.force_print(f"[准备操作] {OPERATION_DELAY} 秒后执行按键操作...")
                         time.sleep(OPERATION_DELAY)
                     # 6.2.3 选中TC并检测数量
-                    print("[执行操作] 选中TC...")
+                    if DEBUG_MODE:
+                        logger.force_print("[执行操作] 选中TC...")
                     tc_selector.do()
                     tc_counter.do()
                     planned_villagers = VILLAGERS_PER_TC * tc_counter.count
@@ -271,20 +282,24 @@ def main():
                         logger.force_print(f"人口 {population_reader.current}/{population_reader.limit}，村民 {villager_counter.total}/{MAX_VILLAGERS}，食物 {food_reader.amount}，检测到 {tc_counter.count} 个TC，触发生产 {actual_villagers} 个村民")
 
                     # 6.2.6 执行排队操作
-                    print("[执行操作] 排队村民...")
+                    if DEBUG_MODE:
+                        logger.force_print("[执行操作] 排队村民...")
                     VillagerTrainer().do(count=actual_villagers)
 
                     # 6.2.7 操作后等待，让操作完全完成
                     if BLOCK_INPUT_DURATION > 0:
-                        print(f"[操作完成] 等待 {BLOCK_INPUT_DURATION} 秒...")
+                        if DEBUG_MODE:
+                            logger.force_print(f"[操作完成] 等待 {BLOCK_INPUT_DURATION} 秒...")
                         time.sleep(BLOCK_INPUT_DURATION)
 
                     # 6.2.8 恢复之前选中的单位（按0）
-                    print("[执行操作] 恢复之前选中...")
+                    if DEBUG_MODE:
+                        logger.force_print("[执行操作] 恢复之前选中...")
                     pydirectinput.press('0')
 
                     # 6.2.9 取消编组（Ctrl+Alt+0）
-                    print("[执行操作] 取消临时编组...")
+                    if DEBUG_MODE:
+                        logger.force_print("[执行操作] 取消临时编组...")
                     pydirectinput.keyDown('ctrl')
                     pydirectinput.keyDown('alt')
                     pydirectinput.press('0')
@@ -293,7 +308,8 @@ def main():
 
                     # 记录触发时间
                     last_trigger_time = time.time()
-                    print(f"[调试] 本次操作总耗时: {(last_trigger_time - loop_start):.3f} 秒")
+                    if DEBUG_MODE:
+                        logger.force_print(f"[调试] 本次操作总耗时: {(last_trigger_time - loop_start):.3f} 秒")
 
             finally:
                 release_lock()
