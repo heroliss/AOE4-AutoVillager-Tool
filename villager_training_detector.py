@@ -92,7 +92,12 @@ class VillagerTrainingDetector(object):
         self._transition_count = 0  # 连续检测到渐变的次数
         self._last_transition_confidence = 0.0  # 上次渐变的置信度
         self._transition_threshold = 3  # 连续多少次认为是误判
-        self._confidence_change_threshold = 0.0001  # 置信度变化阈值
+        self._confidence_change_threshold = 0.05  # 置信度变化阈值
+
+        # 稳定性检测（防止UI快速显隐时的误判）
+        self._last_state = None  # 上次的状态 ('blocked', 'clear', 'transition')
+        self._stable_count = 0  # 当前状态持续次数
+        self._stable_threshold = 2  # 需要连续多少次相同状态才认为稳定
 
         self._init_blocked_detection()
 
@@ -235,9 +240,13 @@ class VillagerTrainingDetector(object):
         检测UI是否被遮挡（灰度图匹配）
 
         状态判断：
-        - 置信度 >= BLOCKED_MATCH_THRESHOLD: 完全遮挡（立即确定）
-        - 置信度 < BLOCKED_TRANSITION_THRESHOLD: 完全没遮挡（立即确定）
-        - 介于两者之间: 渐变状态（需要连续3次检测判断是真渐变还是场景误判）
+        - 置信度 >= BLOCKED_MATCH_THRESHOLD: 完全遮挡
+        - 置信度 < BLOCKED_TRANSITION_THRESHOLD: 完全未遮挡
+        - 介于两者之间: 渐变状态
+
+        稳定性检测：
+        - 所有状态都需要连续2次检测才认为稳定
+        - 防止UI快速显隐时的瞬间误判
 
         渐变误判检测：
         - 如果连续3次检测到"渐变中"，且置信度变化很小（<0.05）
@@ -252,21 +261,44 @@ class VillagerTrainingDetector(object):
         _, max_val, _, _ = cv2.minMaxLoc(result)
         self.blocked_confidence = round(float(max_val), 4)
 
-        # 判断状态
+        # 第一步：判断原始状态
         if max_val >= BLOCKED_MATCH_THRESHOLD:
-            # 完全遮挡：立即确定
+            current_state = 'blocked'
+            status = '完全遮挡'
+        elif max_val < BLOCKED_TRANSITION_THRESHOLD:
+            current_state = 'clear'
+            status = '未遮挡'
+        else:
+            current_state = 'transition'
+            status = '渐变中'
+
+        # 第二步：稳定性检测
+        if current_state == self._last_state:
+            self._stable_count += 1
+        else:
+            self._last_state = current_state
+            self._stable_count = 1
+
+        # 如果状态不稳定（快速变化），强制认为"渐变中"
+        if self._stable_count < self._stable_threshold:
+            self.blocked = False
+            self.in_transition = True
+            self._transition_count = 0  # 重置渐变误判计数
+            status = f'{status}(不稳定{self._stable_count}/{self._stable_threshold})'
+            log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
+            return
+
+        # 第三步：状态已稳定，应用原始判断
+        if current_state == 'blocked':
             self.blocked = True
             self.in_transition = False
             self._transition_count = 0
-            status = '完全遮挡'
-        elif max_val < BLOCKED_TRANSITION_THRESHOLD:
-            # 完全未遮挡：立即确定
+        elif current_state == 'clear':
             self.blocked = False
             self.in_transition = False
             self._transition_count = 0
-            status = '未遮挡'
-        else:
-            # 渐变区间：需要连续检测判断是真渐变还是误判
+        else:  # transition
+            # 渐变误判检测
             confidence_change = abs(self.blocked_confidence - self._last_transition_confidence)
             self._transition_count += 1
 
@@ -280,7 +312,7 @@ class VillagerTrainingDetector(object):
                 # 真正的渐变
                 self.blocked = False
                 self.in_transition = True
-                status = f'渐变中({self._transition_count}次,变化{confidence_change:.3f})'
+                status = f'{status}(稳定,{self._transition_count}次,变化{confidence_change:.3f})'
 
             self._last_transition_confidence = self.blocked_confidence
 
