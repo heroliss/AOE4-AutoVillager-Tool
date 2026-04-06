@@ -100,9 +100,8 @@ class VillagerTrainingDetector(object):
         self._stable_threshold = 2  # 需要连续多少次相同状态才认为稳定
 
         # 村民置信度异常检测（检测半透明UI）
-        self._low_confidence_count = 0  # 连续检测到低置信度的次数
         self._recent_confidences = []  # 最近的置信度历史（用于检测波动）
-        self._confidence_history_size = 5  # 保留最近5次的置信度
+        self._confidence_history_size = 3  # 保留最近3次的置信度
         self._semi_transparent_detected = False  # 是否检测到半透明UI
 
         self._init_blocked_detection()
@@ -351,32 +350,45 @@ class VillagerTrainingDetector(object):
         if len(self._recent_confidences) > self._confidence_history_size:
             self._recent_confidences.pop(0)
 
-        # 检测半透明UI：检测置信度的异常波动
-        # 策略：如果置信度在0.4-0.65之间（明显高于无村民的0.2-0.3，但低于有村民的0.7+）
-        # 说明有村民图标但被半透明UI影响了
-        if 0.4 <= max_val < 0.65:
-            # 这个区间很明确：既不是清晰的村民图标（>0.7），也不是正常的无村民（<0.35）
-            # 只能是半透明UI叠加
-            self.in_transition = True
-            self.found = False
-            self._semi_transparent_detected = True
-            status = f'半透明UI(置信度={self.confidence:.4f})'
-            log_training("检测", status)
+        # 检测半透明UI：检测置信度的快速变化
+        # 策略：如果置信度在0.35-0.65之间，且最近3次置信度变化较大（>0.08）
+        # 说明UI正在动画中（半透明UI渐入渐出）
+        # 如果置信度稳定在这个区间，说明是其他兵种图标，允许生产
+        if 0.35 <= max_val < 0.65:
+            if len(self._recent_confidences) >= 3:
+                # 计算最近3次的置信度变化范围
+                min_conf = min(self._recent_confidences)
+                max_conf = max(self._recent_confidences)
+                confidence_range = max_conf - min_conf
 
-            # 保存调试截图
-            if DEBUG_BLOCKED_DETECTION:
-                try:
-                    from PIL import Image
-                    import os
-                    debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_output")
-                    os.makedirs(debug_dir, exist_ok=True)
-                    debug_path = os.path.join(debug_dir, "villager_semi_transparent.png")
-                    img = cv2.cvtColor(screenshot, cv2.COLOR_GRAY2RGB)
-                    Image.fromarray(img).save(debug_path)
-                    log_training("截图", f"检测到半透明UI，已保存截图到 {debug_path}")
-                except Exception as e:
-                    log_training("截图", f"保存失败: {e}")
-            return
+                # 如果变化范围>0.08，认为是半透明UI动画
+                if confidence_range > 0.08:
+                    self.in_transition = True
+                    self.found = False
+                    self._semi_transparent_detected = True
+                    status = f'半透明UI(置信度={self.confidence:.4f},变化={confidence_range:.3f})'
+                    log_training("检测", status)
+
+                    # 保存调试截图
+                    if DEBUG_BLOCKED_DETECTION:
+                        try:
+                            from PIL import Image
+                            import os
+                            debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_output")
+                            os.makedirs(debug_dir, exist_ok=True)
+                            debug_path = os.path.join(debug_dir, "villager_semi_transparent.png")
+                            img = cv2.cvtColor(screenshot, cv2.COLOR_GRAY2RGB)
+                            Image.fromarray(img).save(debug_path)
+                            log_training("截图", f"检测到半透明UI，已保存截图到 {debug_path}")
+                        except Exception as e:
+                            log_training("截图", f"保存失败: {e}")
+                    return
+                else:
+                    # 置信度稳定，可能是其他兵种图标，允许继续
+                    self._semi_transparent_detected = False
+            else:
+                # 历史数据不足，暂不判断
+                self._semi_transparent_detected = False
         else:
             self._semi_transparent_detected = False
 
