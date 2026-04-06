@@ -150,10 +150,27 @@ def main():
             # 2. 优先检查是否有村民正在生产（快速，模板匹配）
             training_detector.do()
 
-            if training_detector.blocked:
-                if DEBUG_MODE:
-                    logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
+            # 调试模式：打印所有检测结果
+            if DEBUG_BLOCKED_DETECTION:
+                status_parts = []
+                status_parts.append(f"遮挡={training_detector.blocked_confidence:.3f}")
+                status_parts.append(f"村民={training_detector.confidence:.3f}")
+
+                if training_detector.blocked:
+                    status_parts.append("状态=完全遮挡")
+                elif training_detector.in_transition:
+                    status_parts.append(f"状态=渐变中(次数={training_detector._transition_count})")
+                elif training_detector.found:
+                    status_parts.append("状态=生产中")
                 else:
+                    status_parts.append("状态=未遮挡且无生产")
+
+                logger.log(" ".join(status_parts))
+
+            if training_detector.blocked:
+                if DEBUG_MODE and not DEBUG_BLOCKED_DETECTION:
+                    logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
+                elif not DEBUG_BLOCKED_DETECTION:
                     logger.log("UI被遮挡，跳过")
 
                 # 动态调整检测频率：UI被遮挡时降低检测频率
@@ -162,9 +179,9 @@ def main():
 
             # 检测UI是否正在渐变（渐入渐出动画中）
             if training_detector.in_transition:
-                if DEBUG_MODE:
+                if DEBUG_MODE and not DEBUG_BLOCKED_DETECTION:
                     logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
-                else:
+                elif not DEBUG_BLOCKED_DETECTION:
                     logger.log("UI渐变中，跳过")
 
                 # 不额外延迟，直接进入下一次循环快速检测
@@ -172,9 +189,9 @@ def main():
                 continue
 
             if training_detector.found:
-                if DEBUG_MODE:
+                if DEBUG_MODE and not DEBUG_BLOCKED_DETECTION:
                     logger.log(f"[生产中] 置信度={training_detector.confidence:.3f} 阈值={VILLAGER_MATCH_THRESHOLD:.3f}")
-                else:
+                elif not DEBUG_BLOCKED_DETECTION:
                     logger.log("村民生产中")
 
                 # 动态调整检测频率：生产中时降低检测频率
