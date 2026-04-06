@@ -135,6 +135,7 @@ def main():
     # 调试：记录上次触发生产的时间
     last_trigger_time = None
     last_villager_check_time = 0  # 上次检查村民数量的时间
+    cached_tc_count = 0  # 缓存的TC数量，开局为0
 
     try:
         while True:
@@ -312,29 +313,41 @@ def main():
 
                 # 检查TC检测是否失败
                 if tc_counter.detection_failed:
-                    logger.force_print(f"[错误] TC检测失败（可能还没有建造TC），进入冷却状态 {TC_DETECTION_FAILED_COOLDOWN}秒")
-                    logger.force_print(f"[提示] 冷却期间会监控村民生产图标，如果检测到说明TC已建造，将自动恢复")
-
-                    # 冷却等待，期间监控村民生产图标
-                    cooldown_start = time.time()
-                    cooldown_check_interval = 1.0  # 每秒检查一次
-
-                    while time.time() - cooldown_start < TC_DETECTION_FAILED_COOLDOWN:
-                        # 检查是否有村民生产图标
-                        cooldown_detector = VillagerTrainingDetector()
-                        has_villager_icon = cooldown_detector.has_villager_icon()
-
-                        if has_villager_icon:
-                            elapsed = time.time() - cooldown_start
-                            logger.force_print(f"[恢复] 检测到村民生产图标，TC已建造，提前结束冷却（已等待{elapsed:.1f}秒）")
-                            break
-
-                        time.sleep(cooldown_check_interval)
+                    # 如果有缓存的TC数量，使用缓存值继续生产
+                    if cached_tc_count > 0:
+                        logger.force_print(f"[缓存] TC检测失败，使用缓存值 TC数={cached_tc_count}")
+                        tc_counter.count = cached_tc_count
+                        tc_counter.detection_failed = False
                     else:
-                        # 冷却时间到，未检测到村民图标
-                        logger.force_print(f"[冷却] 冷却时间结束，继续尝试检测TC")
+                        # 没有缓存值，进入冷却状态
+                        logger.force_print(f"[错误] TC检测失败（可能还没有建造TC），进入冷却状态 {TC_DETECTION_FAILED_COOLDOWN}秒")
+                        logger.force_print(f"[提示] 冷却期间会监控村民生产图标，如果检测到说明TC已建造，将自动恢复")
 
-                    continue
+                        # 冷却等待，期间监控村民生产图标
+                        cooldown_start = time.time()
+                        cooldown_check_interval = 1.0  # 每秒检查一次
+
+                        while time.time() - cooldown_start < TC_DETECTION_FAILED_COOLDOWN:
+                            # 检查是否有村民生产图标
+                            cooldown_detector = VillagerTrainingDetector()
+                            has_villager_icon = cooldown_detector.has_villager_icon()
+
+                            if has_villager_icon:
+                                elapsed = time.time() - cooldown_start
+                                logger.force_print(f"[恢复] 检测到村民生产图标，TC已建造，提前结束冷却（已等待{elapsed:.1f}秒）")
+                                break
+
+                            time.sleep(cooldown_check_interval)
+                        else:
+                            # 冷却时间到，未检测到村民图标
+                            logger.force_print(f"[冷却] 冷却时间结束，继续尝试检测TC")
+
+                        continue
+                else:
+                    # TC检测成功，更新缓存
+                    cached_tc_count = tc_counter.count
+                    if DEBUG_MODE:
+                        logger.force_print(f"[缓存] 更新TC数量缓存={cached_tc_count}")
 
                 # TC检测成功，继续执行生产逻辑（需要重新屏蔽输入）
                 with input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext():

@@ -92,7 +92,7 @@ class VillagerTrainingDetector(object):
         self._transition_count = 0  # 连续检测到渐变的次数
         self._last_transition_confidence = 0.0  # 上次渐变的置信度
         self._transition_threshold = 3  # 连续多少次认为是误判
-        self._confidence_change_threshold = 0.05  # 置信度变化阈值
+        self._confidence_change_threshold = 0.0001  # 置信度变化阈值
 
         self._init_blocked_detection()
 

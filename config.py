@@ -19,7 +19,7 @@ VILLAGERS_PER_TC = 3  # 每个TC排队的村民数量
 MAX_VILLAGERS = 120  # 村民数量上限，超过此数量停止自动生产
 MIN_FOOD = 50  # 最低食物要求，低于此值不生产村民
 FOOD_PER_VILLAGER = 50  # 单个村民需要的食物数量
-VILLAGER_CHECK_INTERVAL = 10.0  # 村民数量检查间隔（秒），村民数量变化慢，不需要频繁检查
+VILLAGER_CHECK_INTERVAL = 3  # 村民数量检查间隔（秒），村民数量变化慢，不需要频繁检查
 
 # ==================== 操作时序设置 ====================
 OPERATION_DELAY = 0  # 蜂鸣后延迟多久执行操作（秒），设为0立即执行
