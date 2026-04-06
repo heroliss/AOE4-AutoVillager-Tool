@@ -41,8 +41,8 @@ POST_OPERATION_DELAY = 3.0  # 操作完成后等待游戏UI更新的时间（秒
 # - 性能优化：开启DEBUG_PERFORMANCE
 # - 遮挡误判：开启DEBUG_BLOCKED_DETECTION
 
-DEBUG_MODE = True  # 全局调试：TC/村民/食物模块的详细日志和截图
-DEBUG_BLOCKED_DETECTION = True  # 遮挡检测：显示置信度和截图（独立开关）
+DEBUG_MODE = False  # 全局调试：TC/村民/食物模块的详细日志和截图
+DEBUG_BLOCKED_DETECTION = False  # 遮挡检测：显示置信度和截图（独立开关）
 DEBUG_TRAINING_DETECTION = False  # 村民生产：显示每次检测的置信度
 DEBUG_PERFORMANCE = False  # 性能分析：显示各模块详细耗时（独立开关）
 DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：关闭可提升5-10ms性能
@@ -85,10 +85,10 @@ VILLAGER_MATCH_THRESHOLD = 0.6  # 村民图标匹配阈值
 BLOCKED_MATCH_THRESHOLD = 0.7  # 遮挡检测匹配阈值（完全遮挡）
 BLOCKED_TRANSITION_THRESHOLD = 0.1  # 遮挡渐变下限阈值，低于此值认为完全未遮挡
 # 说明：置信度区间划分
-#   [0, 0.3) = 完全未遮挡（立即确定）
-#   [0.3, 0.7) = 渐变中（需连续3次检测，置信度变化<0.05认为是场景误判）
-#   [0.7, 1.0] = 完全遮挡（立即确定）
-# 如果频繁误判渐变，可以缩小区间（如改为0.35-0.65）；如果渐变检测不到，可以扩大区间
+#   [0, 0.1) = 完全未遮挡（需连续2次检测确认稳定）
+#   [0.1, 0.7) = 渐变中（需连续2次检测确认稳定，且连续3次渐变时置信度变化<0.05认为是场景误判）
+#   [0.7, 1.0] = 完全遮挡（需连续2次检测确认稳定）
+# 如果频繁误判渐变，可以缩小区间（如改为0.15-0.65）；如果渐变检测不到，可以扩大区间
 TC_MATCH_THRESHOLD = 0.7  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================

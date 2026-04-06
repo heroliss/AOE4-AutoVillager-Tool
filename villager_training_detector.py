@@ -19,6 +19,12 @@ UI遮挡检测技术：
 - 非渐变状态（完全遮挡/完全未遮挡）：一次检测立即确定
 - 渐变状态：需要连续3次检测，且置信度变化<0.05才认为是场景颜色误判
 - 解决问题：游戏场景颜色正好落在渐变区间时的误判
+
+半透明UI检测技术：
+- 策略1：中等置信度区间(0.3-0.65) + 快速变化(>0.1)
+- 策略2：置信度突然下降（从>0.6降到<0.5，变化>0.2）
+- 策略3：连续下降检测（最近3次持续下降，总变化>0.1）
+- 解决问题：UI渐入渐出动画期间的误触发
 """
 import os
 import time
@@ -99,10 +105,10 @@ class VillagerTrainingDetector(object):
         self._stable_count = 0  # 当前状态持续次数
         self._stable_threshold = 2  # 需要连续多少次相同状态才认为稳定
 
-        # 村民置信度异常检测（检测半透明UI）
-        self._recent_confidences = []  # 最近的置信度历史（用于检测波动）
-        self._confidence_history_size = 5  # 保留最近5次的置信度（增加以捕获更长的动画）
-        self._semi_transparent_detected = False  # 是否检测到半透明UI
+        # 半透明UI检测（检测UI渐入渐出动画）
+        self._recent_confidences = []  # 最近的置信度历史（用于检测置信度变化模式）
+        self._confidence_history_size = 5  # 保留最近5次的置信度（捕获完整的UI动画周期）
+        self._semi_transparent_detected = False  # 是否检测到半透明UI（用于调试输出）
 
         self._init_blocked_detection()
 
@@ -209,6 +215,7 @@ class VillagerTrainingDetector(object):
     def _capture_merged(self):
         """
         合并截图：一次截取包含队列和遮挡区域的大区域，然后裁剪
+        性能优化：减少50%的截图次数
 
         返回：
             (queue_screenshot, blocked_screenshot) 两个灰度图
@@ -241,18 +248,6 @@ class VillagerTrainingDetector(object):
         blocked_screenshot = merged_gray[blocked_rel_top:blocked_rel_bottom, blocked_rel_left:blocked_rel_right]
 
         return queue_screenshot, blocked_screenshot
-
-    def _capture(self):
-        """截取生产队列区域（灰度图）- 已废弃，使用_capture_merged代替"""
-        left, top, right, bottom = VILLAGER_QUEUE_REGION
-        img_bgr = capture_region_np(left, top, right, bottom)
-        return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-    def _capture_blocked_region(self):
-        """截取遮挡检测区域（灰度图）- 已废弃，使用_capture_merged代替"""
-        left, top, right, bottom = BLOCKED_DETECT_REGION
-        img_bgr = capture_region_np(left, top, right, bottom)
-        return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
     def _check_blocked(self, screenshot):
         """
@@ -345,21 +340,21 @@ class VillagerTrainingDetector(object):
         self.confidence = round(float(max_val), 4)
         self.found = max_val >= VILLAGER_MATCH_THRESHOLD
 
-        # 记录置信度历史
+        # 记录置信度历史（用于半透明UI检测）
         self._recent_confidences.append(max_val)
         if len(self._recent_confidences) > self._confidence_history_size:
             self._recent_confidences.pop(0)
 
-        # 检测半透明UI：检测置信度的快速变化
-        # 策略1：如果置信度在0.3-0.65之间，且最近5次置信度变化较大（>0.1）
-        # 策略2：如果置信度从高位（>0.6）突然下降到低位（<0.5），说明UI正在消失
-        # 策略3：如果置信度连续下降，说明UI正在渐出动画中
+        # 半透明UI检测：通过置信度变化模式识别UI渐入渐出动画
+        # 当UI叠加在村民图标上时，置信度会快速变化或持续下降
+        # 通过检测这些模式，避免在UI动画期间误触发生产
         if len(self._recent_confidences) >= 3:
             min_conf = min(self._recent_confidences)
             max_conf = max(self._recent_confidences)
             confidence_range = max_conf - min_conf
 
             # 策略1：中等置信度区间 + 快速变化
+            # 适用场景：UI正在渐入或渐出，置信度在中等范围内快速波动
             if 0.3 <= max_val < 0.65 and confidence_range > 0.1:
                 self.in_transition = True
                 self.found = False
@@ -381,8 +376,9 @@ class VillagerTrainingDetector(object):
                         log_training("截图", f"保存失败: {e}")
                 return
 
-            # 策略2：置信度突然下降（从>0.6降到当前<0.5，且变化>0.2）
-            # 说明村民图标从清晰可见变为模糊/消失，UI正在动画中
+            # 策略2：置信度突然下降
+            # 适用场景：村民图标从清晰可见变为模糊/消失，UI正在渐出动画中
+            # 检测条件：当前<0.5，历史最高>0.6，变化幅度>0.2
             if max_val < 0.5 and max_conf > 0.6 and confidence_range > 0.2:
                 self.in_transition = True
                 self.found = False
@@ -404,8 +400,9 @@ class VillagerTrainingDetector(object):
                         log_training("截图", f"保存失败: {e}")
                 return
 
-            # 策略3：连续下降检测（最近3次置信度持续下降，且当前<0.4）
-            # 说明UI正在渐出动画的尾声
+            # 策略3：连续下降检测
+            # 适用场景：UI正在渐出动画的尾声，置信度持续下降
+            # 检测条件：最近3次持续下降（允许小幅波动±0.05），总体下降>0.1，当前<0.4
             if len(self._recent_confidences) >= 3 and max_val < 0.4:
                 last_3 = self._recent_confidences[-3:]
                 # 检查是否连续下降（允许小幅波动±0.05）
@@ -436,11 +433,8 @@ class VillagerTrainingDetector(object):
                             log_training("截图", f"保存失败: {e}")
                     return
 
+        # 重置半透明UI检测标志
         self._semi_transparent_detected = False
 
         status = '检测到' if self.found else '未检测到'
         log_training("检测", f"置信度={self.confidence:.4f} 阈值={VILLAGER_MATCH_THRESHOLD:.4f} 状态={status}")
-
-        # 如果置信度异常低（<0.2），可能是模板或区域问题
-        if DEBUG_BLOCKED_DETECTION and max_val < 0.2:
-            log_training("警告", f"村民检测置信度异常低 {max_val:.4f}，可能是模板不匹配或截图区域不对")
