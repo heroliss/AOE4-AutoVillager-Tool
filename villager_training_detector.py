@@ -81,6 +81,13 @@ class VillagerTrainingDetector(object):
         self.blocked_confidence = 0.0  # 遮挡检测置信度
         self.in_transition = False  # UI是否正在渐变（渐入渐出动画中）
         self._blocked_check_enabled = False
+
+        # 渐变误判检测
+        self._transition_count = 0  # 连续检测到渐变的次数
+        self._last_transition_confidence = 0.0  # 上次渐变的置信度
+        self._transition_threshold = 3  # 连续多少次认为是误判
+        self._confidence_change_threshold = 0.05  # 置信度变化阈值
+
         self._init_blocked_detection()
 
     def _init_blocked_detection(self):
@@ -225,6 +232,11 @@ class VillagerTrainingDetector(object):
         - 置信度 >= BLOCKED_MATCH_THRESHOLD: 完全遮挡
         - 置信度 < BLOCKED_TRANSITION_THRESHOLD: 完全没遮挡
         - 介于两者之间: 渐变状态（渐入渐出动画中）
+
+        渐变误判检测：
+        - 如果连续多次检测到"渐变中"，且置信度变化很小
+        - 说明不是真正的渐变，而是场景颜色误判
+        - 此时强制认为"未遮挡"
         """
         blocked_template = _get_blocked_template()
 
@@ -238,16 +250,32 @@ class VillagerTrainingDetector(object):
         if max_val >= BLOCKED_MATCH_THRESHOLD:
             self.blocked = True
             self.in_transition = False
+            self._transition_count = 0  # 重置计数
             status = '完全遮挡'
         elif max_val < BLOCKED_TRANSITION_THRESHOLD:
             self.blocked = False
             self.in_transition = False
+            self._transition_count = 0  # 重置计数
             status = '未遮挡'
         else:
-            # 置信度在中间区间，认为是渐变状态
-            self.blocked = False  # 不认为是遮挡
-            self.in_transition = True  # 标记为渐变中
-            status = '渐变中'
+            # 置信度在中间区间，可能是渐变状态
+            confidence_change = abs(self.blocked_confidence - self._last_transition_confidence)
+            self._transition_count += 1
+
+            # 检测是否为误判：连续多次检测到渐变，且置信度变化很小
+            if self._transition_count >= self._transition_threshold and confidence_change < self._confidence_change_threshold:
+                # 误判：场景颜色正好在渐变区间，但不是真正的渐变
+                self.blocked = False
+                self.in_transition = False
+                status = f'误判修正(连续{self._transition_count}次,变化{confidence_change:.3f})'
+                log_blocked("修正", f"检测到渐变误判，强制认为未遮挡")
+            else:
+                # 真正的渐变
+                self.blocked = False
+                self.in_transition = True
+                status = f'渐变中({self._transition_count}次,变化{confidence_change:.3f})'
+
+            self._last_transition_confidence = self.blocked_confidence
 
         log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
 

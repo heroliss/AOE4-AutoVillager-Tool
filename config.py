@@ -42,10 +42,10 @@ POST_OPERATION_DELAY = 10.0  # 操作完成后等待游戏UI更新的时间（�
 # - 遮挡误判：开启DEBUG_BLOCKED_DETECTION
 
 DEBUG_MODE = True  # 全局调试：TC/村民/食物模块的详细日志和截图
-DEBUG_BLOCKED_DETECTION = True  # 遮挡检测：显示置信度和截图（独立开关）
-DEBUG_TRAINING_DETECTION = True  # 村民生产：显示每次检测的置信度
+DEBUG_BLOCKED_DETECTION = False  # 遮挡检测：显示置信度和截图（独立开关）
+DEBUG_TRAINING_DETECTION = False  # 村民生产：显示每次检测的置信度
 DEBUG_PERFORMANCE = False  # 性能分析：显示各模块详细耗时（独立开关）
-DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：关闭可提升5-10ms性能
+DEBUG_SAVE_SCREENSHOTS = True  # 保存调试截图：关闭可提升5-10ms性能
 
 # ==================== OCR设置 ====================
 USE_GPU = False  # 是否使用GPU加速OCR（小图片OCR时CPU更快，GPU有数据传输开销）
@@ -63,7 +63,7 @@ GAME_DETECT_COLOR = (65, 78, 105)  # 这是HDR开启时的颜色值，SDR时该�
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
 
 # UI遮挡检测区域
-BLOCKED_DETECT_REGION = (260, 950, 280, 970)
+BLOCKED_DETECT_REGION = (265, 950, 280, 970)
 
 # 人口显示区域（如 "50/200"）
 POPULATION_REGION = (50, 1140, 150, 1170)
@@ -82,10 +82,11 @@ FOOD_REGION = (50, 1222, 140, 1248)
 
 # ==================== 模板匹配阈值 ====================
 VILLAGER_MATCH_THRESHOLD = 0.6  # 村民图标匹配阈值，降低以更快检测到图标消失
-BLOCKED_MATCH_THRESHOLD = 0.4  # 遮挡检测匹配阈值（完全遮挡）
-BLOCKED_TRANSITION_THRESHOLD = 0.15  # 遮挡渐变下限阈值，低于此值认为完全没遮挡
-# 说明：置信度区间 [0, 0.15) = 未遮挡，[0.15, 0.4) = 渐变中，[0.4, 1.0] = 完全遮挡
-# 如果频繁误判渐变，可以缩小区间（如改为0.2-0.35）；如果渐变检测不到，可以扩大区间
+BLOCKED_MATCH_THRESHOLD = 0.5  # 遮挡检测匹配阈值（完全遮挡）
+BLOCKED_TRANSITION_THRESHOLD = 0.1  # 遮挡渐变下限阈值，低于此值认为完全没遮挡
+# 说明：置信度区间 [0, 0.1) = 未遮挡，[0.1, 0.5) = 渐变中，[0.5, 1.0] = 完全遮挡
+# 如果频繁误判渐变，可以缩小区间（如改为0.2-0.4）；如果渐变检测不到，可以扩大区间
+# 渐变误判检测：如果连续3次检测到"渐变中"且置信度变化<0.05，认为是场景颜色误判，强制认为"未遮挡"
 TC_MATCH_THRESHOLD = 0.6  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================
