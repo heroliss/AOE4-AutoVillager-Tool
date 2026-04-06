@@ -153,7 +153,7 @@ def main():
             # 检测UI是否正在渐变（渐入渐出动画中）
             if training_detector.in_transition:
                 if DEBUG_MODE:
-                    logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{config.BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
+                    logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
                 else:
                     logger.log("UI渐变中，跳过")
 

@@ -41,10 +41,10 @@ POST_OPERATION_DELAY = 10.0  # 操作完成后等待游戏UI更新的时间（�
 # - 性能优化：开启DEBUG_PERFORMANCE
 # - 遮挡误判：开启DEBUG_BLOCKED_DETECTION
 
-DEBUG_MODE = False  # 全局调试：TC/村民/食物模块的详细日志和截图
-DEBUG_BLOCKED_DETECTION = False  # 遮挡检测：显示置信度和截图（独立开关）
-DEBUG_TRAINING_DETECTION = False  # 村民生产：显示每次检测的置信度
-DEBUG_PERFORMANCE = True  # 性能分析：显示各模块详细耗时（独立开关）
+DEBUG_MODE = True  # 全局调试：TC/村民/食物模块的详细日志和截图
+DEBUG_BLOCKED_DETECTION = True  # 遮挡检测：显示置信度和截图（独立开关）
+DEBUG_TRAINING_DETECTION = True  # 村民生产：显示每次检测的置信度
+DEBUG_PERFORMANCE = False  # 性能分析：显示各模块详细耗时（独立开关）
 DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：关闭可提升5-10ms性能
 
 # ==================== OCR设置 ====================
@@ -63,7 +63,7 @@ GAME_DETECT_COLOR = (65, 78, 105)  # 这是HDR开启时的颜色值，SDR时该�
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
 
 # UI遮挡检测区域
-BLOCKED_DETECT_REGION = (260, 950, 290, 990)
+BLOCKED_DETECT_REGION = (260, 950, 280, 970)
 
 # 人口显示区域（如 "50/200"）
 POPULATION_REGION = (50, 1140, 150, 1170)
