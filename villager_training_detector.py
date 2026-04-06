@@ -88,6 +88,11 @@ class VillagerTrainingDetector(object):
         self._transition_threshold = 3  # 连续多少次认为是误判
         self._confidence_change_threshold = 0.05  # 置信度变化阈值
 
+        # UI稳定性检测（防止快速反复显隐UI）
+        self._stable_state = None  # 上次稳定的状态 ('blocked', 'clear', None)
+        self._stable_count = 0  # 当前状态持续次数
+        self._stable_threshold = 2  # 需要连续多少次相同状态才认为稳定
+
         self._init_blocked_detection()
 
     def _init_blocked_detection(self):
@@ -237,6 +242,10 @@ class VillagerTrainingDetector(object):
         - 如果连续多次检测到"渐变中"，且置信度变化很小
         - 说明不是真正的渐变，而是场景颜色误判
         - 此时强制认为"未遮挡"
+
+        稳定性检测：
+        - 防止快速反复显隐UI导致的误判
+        - 要求状态稳定（连续2次相同状态）才认为可靠
         """
         blocked_template = _get_blocked_template()
 
@@ -246,25 +255,49 @@ class VillagerTrainingDetector(object):
         _, max_val, _, _ = cv2.minMaxLoc(result)
         self.blocked_confidence = round(float(max_val), 4)
 
-        # 判断状态
+        # 第一步：判断原始状态
         if max_val >= BLOCKED_MATCH_THRESHOLD:
-            self.blocked = True
-            self.in_transition = False
-            self._transition_count = 0  # 重置计数
+            current_state = 'blocked'
             status = '完全遮挡'
         elif max_val < BLOCKED_TRANSITION_THRESHOLD:
-            self.blocked = False
-            self.in_transition = False
-            self._transition_count = 0  # 重置计数
+            current_state = 'clear'
             status = '未遮挡'
         else:
-            # 置信度在中间区间，可能是渐变状态
+            current_state = 'transition'
+            status = '渐变中'
+
+        # 第二步：稳定性检测
+        if current_state == self._stable_state:
+            self._stable_count += 1
+        else:
+            self._stable_state = current_state
+            self._stable_count = 1
+
+        # 如果状态不稳定（快速变化），强制认为"渐变中"
+        if self._stable_count < self._stable_threshold:
+            self.blocked = False
+            self.in_transition = True
+            self._transition_count = 0  # 重置渐变误判计数
+            status = f'{status}(不稳定{self._stable_count}/{self._stable_threshold})'
+            log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
+            return
+
+        # 第三步：状态已稳定，应用原始判断
+        if current_state == 'blocked':
+            self.blocked = True
+            self.in_transition = False
+            self._transition_count = 0
+        elif current_state == 'clear':
+            self.blocked = False
+            self.in_transition = False
+            self._transition_count = 0
+        else:  # transition
+            # 渐变误判检测
             confidence_change = abs(self.blocked_confidence - self._last_transition_confidence)
             self._transition_count += 1
 
-            # 检测是否为误判：连续多次检测到渐变，且置信度变化很小
             if self._transition_count >= self._transition_threshold and confidence_change < self._confidence_change_threshold:
-                # 误判：场景颜色正好在渐变区间，但不是真正的渐变
+                # 误判：场景颜色正好在渐变区间
                 self.blocked = False
                 self.in_transition = False
                 status = f'误判修正(连续{self._transition_count}次,变化{confidence_change:.3f})'
@@ -273,7 +306,7 @@ class VillagerTrainingDetector(object):
                 # 真正的渐变
                 self.blocked = False
                 self.in_transition = True
-                status = f'渐变中({self._transition_count}次,变化{confidence_change:.3f})'
+                status = f'{status}(稳定,{self._transition_count}次,变化{confidence_change:.3f})'
 
             self._last_transition_confidence = self.blocked_confidence
 
