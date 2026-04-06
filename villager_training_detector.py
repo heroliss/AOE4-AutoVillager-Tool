@@ -178,6 +178,20 @@ class VillagerTrainingDetector(object):
             self._match(screenshot)
             t_match = time.time() if DEBUG_PERFORMANCE else None
 
+            # 如果置信度异常低，保存调试截图
+            if DEBUG_BLOCKED_DETECTION and self.confidence < 0.5:
+                try:
+                    from PIL import Image
+                    import os
+                    debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_output")
+                    os.makedirs(debug_dir, exist_ok=True)
+                    debug_path = os.path.join(debug_dir, "villager_low_confidence.png")
+                    img = cv2.cvtColor(screenshot, cv2.COLOR_GRAY2RGB)
+                    Image.fromarray(img).save(debug_path)
+                    log_training("截图", f"置信度异常低，已保存截图到 {debug_path}")
+                except Exception as e:
+                    log_training("截图", f"保存失败: {e}")
+
         if DEBUG_PERFORMANCE:
             t_total = time.time() - t_start
             log_perf("VILLAGER", f"总耗时={t_total*1000:.2f}ms")
@@ -328,3 +342,7 @@ class VillagerTrainingDetector(object):
 
         status = '检测到' if self.found else '未检测到'
         log_training("检测", f"置信度={self.confidence:.4f} 阈值={VILLAGER_MATCH_THRESHOLD:.4f} 状态={status}")
+
+        # 如果置信度异常低（<0.5），可能是模板或区域问题
+        if DEBUG_BLOCKED_DETECTION and max_val < 0.5:
+            log_training("警告", f"村民检测置信度异常低 {max_val:.4f}，可能是模板不匹配或截图区域不对")
