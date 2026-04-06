@@ -150,6 +150,17 @@ def main():
                 time.sleep(CHECK_INTERVAL * 2)
                 continue
 
+            # 检测UI是否正在渐变（渐入渐出动画中）
+            if training_detector.in_transition:
+                if DEBUG_MODE:
+                    logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{config.BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
+                else:
+                    logger.log("UI渐变中，跳过")
+
+                # 渐变动画通常很快，稍微等待后重新检测
+                time.sleep(CHECK_INTERVAL * 0.5)
+                continue
+
             if training_detector.found:
                 if DEBUG_MODE:
                     logger.log(f"[生产中] 置信度={training_detector.confidence:.3f} 阈值={VILLAGER_MATCH_THRESHOLD:.3f}")

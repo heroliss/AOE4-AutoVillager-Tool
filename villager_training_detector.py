@@ -6,6 +6,13 @@
 性能优化：
 - 使用mss库替代PIL.ImageGrab（2-3x提升）
 - 合并截图区域，一次截图裁剪出两个子区域（减少50%截图时间）
+
+UI遮挡检测：
+- 三态判断：完全遮挡、完全没遮挡、渐变中
+- 渐变检测：避免渐入渐出动画导致的误判
+- 置信度区间：[0, BLOCKED_TRANSITION_THRESHOLD) → 没遮挡
+               [BLOCKED_TRANSITION_THRESHOLD, BLOCKED_THRESHOLD) → 渐变中
+               [BLOCKED_THRESHOLD, 1.0] → 完全遮挡
 """
 import os
 import time
@@ -22,6 +29,7 @@ BLOCKED_TEMPLATE_PATH = BLOCKED_TEMPLATE
 BLOCKED_DEBUG_SCREENSHOT_PATH = BLOCKED_DEBUG_SCREENSHOT
 MATCH_THRESHOLD = VILLAGER_MATCH_THRESHOLD
 BLOCKED_THRESHOLD = BLOCKED_MATCH_THRESHOLD
+BLOCKED_TRANSITION_THRESHOLD = config.BLOCKED_TRANSITION_THRESHOLD  # 渐变下限阈值
 
 # 模板缓存（灰度图）
 _template_gray = None
@@ -67,6 +75,7 @@ class VillagerTrainingDetector(object):
         self.confidence = 0.0
         self.blocked = False  # UI是否被遮挡
         self.blocked_confidence = 0.0  # 遮挡检测置信度
+        self.in_transition = False  # UI是否正在渐变（渐入渐出动画中）
         self._blocked_check_enabled = False
         self._init_blocked_detection()
 
@@ -205,7 +214,14 @@ class VillagerTrainingDetector(object):
         return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
     def _check_blocked(self, screenshot):
-        """检测UI是否被遮挡（灰度图匹配）"""
+        """
+        检测UI是否被遮挡（灰度图匹配）
+
+        状态判断：
+        - 置信度 >= BLOCKED_THRESHOLD: 完全遮挡
+        - 置信度 < BLOCKED_TRANSITION_THRESHOLD: 完全没遮挡
+        - 介于两者之间: 渐变状态（渐入渐出动画中）
+        """
         blocked_template = _get_blocked_template()
 
         log_blocked("模板", f"尺寸={blocked_template.shape[1]}x{blocked_template.shape[0]}")
@@ -213,10 +229,23 @@ class VillagerTrainingDetector(object):
         result = cv2.matchTemplate(screenshot, blocked_template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
         self.blocked_confidence = round(float(max_val), 4)
-        self.blocked = max_val >= BLOCKED_THRESHOLD
 
-        status = '遮挡' if self.blocked else '未遮挡'
-        log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值={BLOCKED_THRESHOLD:.4f} 状态={status}")
+        # 判断状态
+        if max_val >= BLOCKED_THRESHOLD:
+            self.blocked = True
+            self.in_transition = False
+            status = '完全遮挡'
+        elif max_val < BLOCKED_TRANSITION_THRESHOLD:
+            self.blocked = False
+            self.in_transition = False
+            status = '未遮挡'
+        else:
+            # 置信度在中间区间，认为是渐变状态
+            self.blocked = False  # 不认为是遮挡
+            self.in_transition = True  # 标记为渐变中
+            status = '渐变中'
+
+        log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_THRESHOLD:.2f}] 状态={status}")
 
     def _match(self, screenshot):
         """使用灰度图模板匹配检测村民图标"""

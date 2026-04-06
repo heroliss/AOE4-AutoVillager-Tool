@@ -272,8 +272,15 @@ actual = min(planned, available_slots, remaining, max_by_food)
 
 1. 启用 `DEBUG_BLOCKED_DETECTION = True`
 2. 查看 [debug_output/blocked_detection_debug.png](debug_output/blocked_detection_debug.png)
-3. 调整 `BLOCKED_MATCH_THRESHOLD` 阈值（默认0.6）
+3. 调整以下阈值：
+   - `BLOCKED_MATCH_THRESHOLD = 0.4` - 完全遮挡阈值
+   - `BLOCKED_TRANSITION_THRESHOLD = 0.15` - 渐变下限阈值
 4. 确认 `BLOCKED_DETECT_REGION` 坐标正确
+
+**说明：** 程序使用三态检测机制处理UI渐变动画：
+- 置信度 >= 0.4: 完全遮挡
+- 置信度 < 0.15: 完全没遮挡
+- 0.15 ~ 0.4: 渐变中（跳过检测，等待动画完成）
 
 ### 识别不准确
 

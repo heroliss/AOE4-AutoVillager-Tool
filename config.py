@@ -82,7 +82,8 @@ FOOD_REGION = (50, 1222, 140, 1248)
 
 # ==================== 模板匹配阈值 ====================
 VILLAGER_MATCH_THRESHOLD = 0.6  # 村民图标匹配阈值，降低以更快检测到图标消失
-BLOCKED_MATCH_THRESHOLD = 0.4  # 遮挡检测匹配阈值
+BLOCKED_MATCH_THRESHOLD = 0.4  # 遮挡检测匹配阈值（完全遮挡）
+BLOCKED_TRANSITION_THRESHOLD = 0.15  # 遮挡渐变下限阈值，低于此值认为完全没遮挡
 TC_MATCH_THRESHOLD = 0.6  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================
