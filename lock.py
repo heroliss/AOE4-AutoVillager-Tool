@@ -7,6 +7,14 @@ import os
 _LOCK_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lock.txt")
 
 
+def cleanup_lock():
+    """清理残留的锁文件（程序启动时调用）"""
+    try:
+        os.remove(_LOCK_FILE)
+    except FileNotFoundError:
+        pass
+
+
 def acquire_lock() -> bool:
     try:
         fd = os.open(_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)

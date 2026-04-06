@@ -6,9 +6,8 @@ import re
 import numpy as np
 from PIL import ImageGrab
 import easyocr
-from config import POPULATION_REGION
-
-REGION = POPULATION_REGION
+from config import POPULATION_REGION, DEBUG_MODE, USE_GPU, OCR_IMAGE_SCALE
+from logger import log_main
 
 _reader = None
 
@@ -18,7 +17,6 @@ def _get_reader():
     if _reader is None:
         import warnings
         import os
-        from config import USE_GPU
         # 屏蔽PyTorch警告
         warnings.filterwarnings('ignore', category=UserWarning, module='torch')
         os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
@@ -56,8 +54,7 @@ class PopulationReader(object):
 
     def _capture(self):
         """截取人口显示区域并根据配置缩放"""
-        from config import OCR_IMAGE_SCALE
-        left, top, right, bottom = REGION
+        left, top, right, bottom = POPULATION_REGION
         img = ImageGrab.grab(bbox=(left, top, right, bottom))
 
         # 根据配置缩放图片
@@ -85,6 +82,10 @@ class PopulationReader(object):
         if m:
             self.current = int(m.group(1))
             self.limit   = int(m.group(2))
+            if DEBUG_MODE:
+                log_main("人口", f"原文='{text}' 清理='{cleaned}' 人口={self.current}/{self.limit}")
         else:
             self.current = None
             self.limit   = None
+            if DEBUG_MODE:
+                log_main("人口", f"识别失败 原文='{text}' 清理='{cleaned}'")

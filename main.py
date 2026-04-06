@@ -37,7 +37,7 @@ from tc_counter import TCCounter
 from tc_selector import TCSelector
 from villager_counter import VillagerCounter
 from food_reader import FoodReader
-from lock import acquire_lock, release_lock
+from lock import acquire_lock, release_lock, cleanup_lock
 from input_blocker import input_blocked
 from logger import log_main
 
@@ -86,6 +86,9 @@ def main():
     print("=" * 60)
     print("AOE4 自动生产村民工具")
     print("=" * 60)
+
+    # 清理残留的锁文件（防止上次异常退出导致的锁残留）
+    cleanup_lock()
 
     # 检测GPU加速状态
     try:
@@ -157,8 +160,8 @@ def main():
                 else:
                     logger.log("UI渐变中，跳过")
 
-                # 渐变动画通常很快，稍微等待后重新检测
-                time.sleep(CHECK_INTERVAL * 0.5)
+                # 渐变动画通常持续100-300ms，等待足够时间让动画完成
+                time.sleep(0.15)
                 continue
 
             if training_detector.found:
@@ -224,7 +227,7 @@ def main():
                 continue
 
             # 3.2 检查村民总数是否超过上限
-            if villager_counter.total >= MAX_VILLAGERS:
+            if should_check_villagers and villager_counter.total >= MAX_VILLAGERS:
                 if DEBUG_MODE:
                     logger.log(f"[上限] 村民={villager_counter.total}/{MAX_VILLAGERS}")
                 else:

@@ -11,25 +11,29 @@ UI遮挡检测：
 - 三态判断：完全遮挡、完全没遮挡、渐变中
 - 渐变检测：避免渐入渐出动画导致的误判
 - 置信度区间：[0, BLOCKED_TRANSITION_THRESHOLD) → 没遮挡
-               [BLOCKED_TRANSITION_THRESHOLD, BLOCKED_THRESHOLD) → 渐变中
-               [BLOCKED_THRESHOLD, 1.0] → 完全遮挡
+               [BLOCKED_TRANSITION_THRESHOLD, BLOCKED_MATCH_THRESHOLD) → 渐变中
+               [BLOCKED_MATCH_THRESHOLD, 1.0] → 完全遮挡
 """
 import os
 import time
 import cv2
 import numpy as np
-from config import *
+from config import (
+    VILLAGER_QUEUE_REGION,
+    BLOCKED_DETECT_REGION,
+    VILLAGER_TEMPLATE,
+    BLOCKED_TEMPLATE,
+    BLOCKED_DEBUG_SCREENSHOT,
+    VILLAGER_MATCH_THRESHOLD,
+    BLOCKED_MATCH_THRESHOLD,
+    BLOCKED_TRANSITION_THRESHOLD,
+    DEBUG_MODE,
+    DEBUG_BLOCKED_DETECTION,
+    DEBUG_SAVE_SCREENSHOTS,
+    DEBUG_PERFORMANCE
+)
 from screenshot_util import capture_region_np
 from logger import log_blocked, log_training, log_perf
-
-REGION = VILLAGER_QUEUE_REGION
-BLOCKED_REGION = BLOCKED_DETECT_REGION
-TEMPLATE_PATH = VILLAGER_TEMPLATE
-BLOCKED_TEMPLATE_PATH = BLOCKED_TEMPLATE
-BLOCKED_DEBUG_SCREENSHOT_PATH = BLOCKED_DEBUG_SCREENSHOT
-MATCH_THRESHOLD = VILLAGER_MATCH_THRESHOLD
-BLOCKED_THRESHOLD = BLOCKED_MATCH_THRESHOLD
-BLOCKED_TRANSITION_THRESHOLD = BLOCKED_TRANSITION_THRESHOLD  # 渐变下限阈值
 
 # 模板缓存（灰度图）
 _template_gray = None
@@ -41,7 +45,7 @@ def _get_template():
     """获取村民模板（灰度图，带缓存）"""
     global _template_gray
     if _template_gray is None:
-        _template_gray = cv2.imread(TEMPLATE_PATH, cv2.IMREAD_GRAYSCALE)
+        _template_gray = cv2.imread(VILLAGER_TEMPLATE, cv2.IMREAD_GRAYSCALE)
     return _template_gray
 
 
@@ -49,11 +53,11 @@ def _get_blocked_template():
     """获取遮挡模板（灰度图，带缓存和自动缩放）"""
     global _blocked_template_gray
     if _blocked_template_gray is None:
-        if os.path.exists(BLOCKED_TEMPLATE_PATH):
-            template = cv2.imread(BLOCKED_TEMPLATE_PATH, cv2.IMREAD_GRAYSCALE)
+        if os.path.exists(BLOCKED_TEMPLATE):
+            template = cv2.imread(BLOCKED_TEMPLATE, cv2.IMREAD_GRAYSCALE)
 
             # 获取目标区域尺寸
-            left, top, right, bottom = BLOCKED_REGION
+            left, top, right, bottom = BLOCKED_DETECT_REGION
             target_width = right - left
             target_height = bottom - top
 
@@ -83,10 +87,10 @@ class VillagerTrainingDetector(object):
         """初始化遮挡检测，检查模板是否可用"""
         global _blocked_detection_initialized
 
-        if not os.path.exists(BLOCKED_TEMPLATE_PATH):
+        if not os.path.exists(BLOCKED_TEMPLATE):
             raise FileNotFoundError(
                 f"错误: 未找到 blocked.png 模板文件！\n"
-                f"路径: {BLOCKED_TEMPLATE_PATH}\n"
+                f"路径: {BLOCKED_TEMPLATE}\n"
                 f"UI遮挡检测是必需功能，否则会频繁误判为没有村民在生产。\n"
                 f"请确保 templates/blocked.png 文件存在。"
             )
@@ -96,7 +100,7 @@ class VillagerTrainingDetector(object):
             raise RuntimeError(f"错误: 无法加载 blocked.png 模板文件")
 
         # 获取截图区域尺寸
-        left, top, right, bottom = BLOCKED_REGION
+        left, top, right, bottom = BLOCKED_DETECT_REGION
         screenshot_width = right - left
         screenshot_height = bottom - top
 
@@ -118,7 +122,7 @@ class VillagerTrainingDetector(object):
         返回：True表示有村民图标，False表示没有
         """
         # 截取队列区域
-        left, top, right, bottom = REGION
+        left, top, right, bottom = VILLAGER_QUEUE_REGION
         img_bgr = capture_region_np(left, top, right, bottom)
         screenshot = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
@@ -127,7 +131,7 @@ class VillagerTrainingDetector(object):
         result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
 
-        return max_val >= MATCH_THRESHOLD
+        return max_val >= VILLAGER_MATCH_THRESHOLD
 
     def do(self):
         t_start = time.time() if DEBUG_PERFORMANCE else None
@@ -143,8 +147,8 @@ class VillagerTrainingDetector(object):
                 try:
                     from PIL import Image
                     img = cv2.cvtColor(blocked_screenshot, cv2.COLOR_GRAY2RGB)
-                    Image.fromarray(img).save(BLOCKED_DEBUG_SCREENSHOT_PATH)
-                    log_blocked("截图", f"{BLOCKED_DEBUG_SCREENSHOT_PATH}")
+                    Image.fromarray(img).save(BLOCKED_DEBUG_SCREENSHOT)
+                    log_blocked("截图", f"{BLOCKED_DEBUG_SCREENSHOT}")
                     log_blocked("截图", f"尺寸={blocked_screenshot.shape[1]}x{blocked_screenshot.shape[0]}")
                 except Exception as e:
                     log_blocked("截图", f"保存失败: {e}")
@@ -173,8 +177,8 @@ class VillagerTrainingDetector(object):
             (queue_screenshot, blocked_screenshot) 两个灰度图
         """
         # 计算合并区域（包含队列和遮挡两个区域）
-        queue_left, queue_top, queue_right, queue_bottom = REGION
-        blocked_left, blocked_top, blocked_right, blocked_bottom = BLOCKED_REGION
+        queue_left, queue_top, queue_right, queue_bottom = VILLAGER_QUEUE_REGION
+        blocked_left, blocked_top, blocked_right, blocked_bottom = BLOCKED_DETECT_REGION
 
         merged_left = min(queue_left, blocked_left)
         merged_top = min(queue_top, blocked_top)
@@ -203,13 +207,13 @@ class VillagerTrainingDetector(object):
 
     def _capture(self):
         """截取生产队列区域（灰度图）- 已废弃，使用_capture_merged代替"""
-        left, top, right, bottom = REGION
+        left, top, right, bottom = VILLAGER_QUEUE_REGION
         img_bgr = capture_region_np(left, top, right, bottom)
         return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
     def _capture_blocked_region(self):
         """截取遮挡检测区域（灰度图）- 已废弃，使用_capture_merged代替"""
-        left, top, right, bottom = BLOCKED_REGION
+        left, top, right, bottom = BLOCKED_DETECT_REGION
         img_bgr = capture_region_np(left, top, right, bottom)
         return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
@@ -218,7 +222,7 @@ class VillagerTrainingDetector(object):
         检测UI是否被遮挡（灰度图匹配）
 
         状态判断：
-        - 置信度 >= BLOCKED_THRESHOLD: 完全遮挡
+        - 置信度 >= BLOCKED_MATCH_THRESHOLD: 完全遮挡
         - 置信度 < BLOCKED_TRANSITION_THRESHOLD: 完全没遮挡
         - 介于两者之间: 渐变状态（渐入渐出动画中）
         """
@@ -231,7 +235,7 @@ class VillagerTrainingDetector(object):
         self.blocked_confidence = round(float(max_val), 4)
 
         # 判断状态
-        if max_val >= BLOCKED_THRESHOLD:
+        if max_val >= BLOCKED_MATCH_THRESHOLD:
             self.blocked = True
             self.in_transition = False
             status = '完全遮挡'
@@ -245,7 +249,7 @@ class VillagerTrainingDetector(object):
             self.in_transition = True  # 标记为渐变中
             status = '渐变中'
 
-        log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_THRESHOLD:.2f}] 状态={status}")
+        log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
 
     def _match(self, screenshot):
         """使用灰度图模板匹配检测村民图标"""
@@ -253,7 +257,7 @@ class VillagerTrainingDetector(object):
         result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
         self.confidence = round(float(max_val), 4)
-        self.found = max_val >= MATCH_THRESHOLD
+        self.found = max_val >= VILLAGER_MATCH_THRESHOLD
 
         status = '检测到' if self.found else '未检测到'
-        log_training("检测", f"置信度={self.confidence:.4f} 阈值={MATCH_THRESHOLD:.4f} 状态={status}")
+        log_training("检测", f"置信度={self.confidence:.4f} 阈值={VILLAGER_MATCH_THRESHOLD:.4f} 状态={status}")

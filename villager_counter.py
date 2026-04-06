@@ -9,12 +9,15 @@ import os
 import re
 import numpy as np
 import easyocr
-from config import *
+from config import (
+    VILLAGER_COUNT_REGION,
+    VILLAGER_COUNT_DEBUG_SCREENSHOT,
+    OCR_IMAGE_SCALE,
+    DEBUG_MODE,
+    DEBUG_SAVE_SCREENSHOTS
+)
 from screenshot_util import capture_region
 from logger import log_villager
-
-REGION = VILLAGER_COUNT_REGION
-DEBUG_SCREENSHOT_PATH = VILLAGER_COUNT_DEBUG_SCREENSHOT
 
 _reader = None
 
@@ -44,15 +47,14 @@ class VillagerCounter(object):
 
     def _capture(self):
         """截取村民数量显示区域并根据配置缩放"""
-        from config import OCR_IMAGE_SCALE
-        left, top, right, bottom = REGION
+        left, top, right, bottom = VILLAGER_COUNT_REGION
         img = capture_region(left, top, right, bottom)
 
         # 保存调试截图（仅在调试模式下）
         if DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
             try:
-                img.save(DEBUG_SCREENSHOT_PATH)
-                log_villager("截图", f"{DEBUG_SCREENSHOT_PATH}")
+                img.save(VILLAGER_COUNT_DEBUG_SCREENSHOT)
+                log_villager("截图", f"{VILLAGER_COUNT_DEBUG_SCREENSHOT}")
                 log_villager("截图", f"区域=({left},{top},{right},{bottom}) 尺寸={img.size[0]}x{img.size[1]}")
             except Exception as e:
                 log_villager("截图", f"保存失败: {e}")

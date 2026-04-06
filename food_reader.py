@@ -7,7 +7,13 @@
 """
 import re
 import numpy as np
-from config import *
+from config import (
+    FOOD_REGION,
+    FOOD_DEBUG_SCREENSHOT,
+    OCR_IMAGE_SCALE,
+    DEBUG_MODE,
+    DEBUG_SAVE_SCREENSHOTS
+)
 from screenshot_util import capture_region
 from logger import log_food
 
@@ -37,7 +43,6 @@ class FoodReader(object):
 
     def _capture(self):
         """截取食物显示区域并根据配置缩放"""
-        from config import OCR_IMAGE_SCALE
         left, top, right, bottom = FOOD_REGION
         img = capture_region(left, top, right, bottom)
 
