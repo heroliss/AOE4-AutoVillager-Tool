@@ -101,7 +101,7 @@ class VillagerTrainingDetector(object):
 
         # 村民置信度异常检测（检测半透明UI）
         self._recent_confidences = []  # 最近的置信度历史（用于检测波动）
-        self._confidence_history_size = 3  # 保留最近3次的置信度
+        self._confidence_history_size = 5  # 保留最近5次的置信度（增加以捕获更长的动画）
         self._semi_transparent_detected = False  # 是否检测到半透明UI
 
         self._init_blocked_detection()
@@ -351,15 +351,16 @@ class VillagerTrainingDetector(object):
             self._recent_confidences.pop(0)
 
         # 检测半透明UI：检测置信度的快速变化
-        # 策略1：如果置信度在0.35-0.65之间，且最近3次置信度变化较大（>0.08）
+        # 策略1：如果置信度在0.3-0.65之间，且最近5次置信度变化较大（>0.1）
         # 策略2：如果置信度从高位（>0.6）突然下降到低位（<0.5），说明UI正在消失
+        # 策略3：如果置信度连续下降，说明UI正在渐出动画中
         if len(self._recent_confidences) >= 3:
             min_conf = min(self._recent_confidences)
             max_conf = max(self._recent_confidences)
             confidence_range = max_conf - min_conf
 
             # 策略1：中等置信度区间 + 快速变化
-            if 0.35 <= max_val < 0.65 and confidence_range > 0.08:
+            if 0.3 <= max_val < 0.65 and confidence_range > 0.1:
                 self.in_transition = True
                 self.found = False
                 self._semi_transparent_detected = True
@@ -402,6 +403,38 @@ class VillagerTrainingDetector(object):
                     except Exception as e:
                         log_training("截图", f"保存失败: {e}")
                 return
+
+            # 策略3：连续下降检测（最近3次置信度持续下降，且当前<0.4）
+            # 说明UI正在渐出动画的尾声
+            if len(self._recent_confidences) >= 3 and max_val < 0.4:
+                last_3 = self._recent_confidences[-3:]
+                # 检查是否连续下降（允许小幅波动±0.05）
+                is_declining = True
+                for i in range(len(last_3) - 1):
+                    if last_3[i+1] > last_3[i] + 0.05:  # 如果后一个比前一个高出0.05以上
+                        is_declining = False
+                        break
+
+                if is_declining and (last_3[0] - last_3[-1]) > 0.1:  # 总体下降>0.1
+                    self.in_transition = True
+                    self.found = False
+                    self._semi_transparent_detected = True
+                    status = f'UI渐出中(置信度={self.confidence:.4f},连续下降{last_3[0]:.3f}→{last_3[-1]:.3f})'
+                    log_training("检测", status)
+
+                    if DEBUG_BLOCKED_DETECTION:
+                        try:
+                            from PIL import Image
+                            import os
+                            debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_output")
+                            os.makedirs(debug_dir, exist_ok=True)
+                            debug_path = os.path.join(debug_dir, "villager_fading_out.png")
+                            img = cv2.cvtColor(screenshot, cv2.COLOR_GRAY2RGB)
+                            Image.fromarray(img).save(debug_path)
+                            log_training("截图", f"检测到UI渐出，已保存截图到 {debug_path}")
+                        except Exception as e:
+                            log_training("截图", f"保存失败: {e}")
+                    return
 
         self._semi_transparent_detected = False
 
