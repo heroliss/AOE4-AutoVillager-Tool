@@ -159,7 +159,10 @@ def main():
                 if training_detector.blocked:
                     status_parts.append("状态=完全遮挡")
                 elif training_detector.in_transition:
-                    status_parts.append(f"状态=渐变中(次数={training_detector._transition_count},稳定={training_detector._stable_count})")
+                    if training_detector._low_confidence_count > 0:
+                        status_parts.append(f"状态=半透明UI(低置信度{training_detector._low_confidence_count}次)")
+                    else:
+                        status_parts.append(f"状态=渐变中(次数={training_detector._transition_count},稳定={training_detector._stable_count})")
                 elif training_detector.found:
                     status_parts.append("状态=生产中")
                 else:
