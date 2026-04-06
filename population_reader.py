@@ -1,6 +1,9 @@
 """
 人口数量识别模块
 通过OCR识别屏幕上的人口数字（如 "50/200"）
+
+使用EasyOCR进行文字识别，支持GPU加速（可选）
+默认使用CPU模式，因为小图片OCR时CPU通常比GPU更快
 """
 import re
 import numpy as np

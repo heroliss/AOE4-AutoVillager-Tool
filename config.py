@@ -25,7 +25,7 @@ VILLAGER_CHECK_INTERVAL = 10.0  # 村民数量检查间隔（秒），村民数�
 OPERATION_DELAY = 0  # 蜂鸣后延迟多久执行操作（秒），设为0立即执行
 BLOCK_INPUT_DURATION = 0  # 操作后等待时长（秒），设为0最快
 ENABLE_INPUT_BLOCK = True  # 是否在操作期间屏蔽物理鼠标键盘输入（需要管理员权限）
-POST_OPERATION_DELAY = 10.0  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发（联网游戏需要更长延迟），设为0禁用 （对于蒙古开局tc没展开无法生产农民的情况，这个值可以调大些）
+POST_OPERATION_DELAY = 3.0  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发（联网游戏需要更长延迟），设为0禁用 （对于蒙古开局tc没展开无法生产农民的情况，这个值可以调大些）
 
 # ==================== 调试开关 ====================
 # 调试开关说明：
@@ -41,11 +41,11 @@ POST_OPERATION_DELAY = 10.0  # 操作完成后等待游戏UI更新的时间（�
 # - 性能优化：开启DEBUG_PERFORMANCE
 # - 遮挡误判：开启DEBUG_BLOCKED_DETECTION
 
-DEBUG_MODE = True  # 全局调试：TC/村民/食物模块的详细日志和截图
+DEBUG_MODE = False  # 全局调试：TC/村民/食物模块的详细日志和截图
 DEBUG_BLOCKED_DETECTION = False  # 遮挡检测：显示置信度和截图（独立开关）
 DEBUG_TRAINING_DETECTION = False  # 村民生产：显示每次检测的置信度
 DEBUG_PERFORMANCE = False  # 性能分析：显示各模块详细耗时（独立开关）
-DEBUG_SAVE_SCREENSHOTS = True  # 保存调试截图：关闭可提升5-10ms性能
+DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：关闭可提升5-10ms性能
 
 # ==================== OCR设置 ====================
 USE_GPU = False  # 是否使用GPU加速OCR（小图片OCR时CPU更快，GPU有数据传输开销）
@@ -81,12 +81,14 @@ VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
 FOOD_REGION = (50, 1222, 140, 1248)
 
 # ==================== 模板匹配阈值 ====================
-VILLAGER_MATCH_THRESHOLD = 0.7  # 村民图标匹配阈值，降低以更快检测到图标消失
+VILLAGER_MATCH_THRESHOLD = 0.7  # 村民图标匹配阈值
 BLOCKED_MATCH_THRESHOLD = 0.7  # 遮挡检测匹配阈值（完全遮挡）
-BLOCKED_TRANSITION_THRESHOLD = 0.3  # 遮挡渐变下限阈值，低于此值认为完全没遮挡
-# 说明：置信度区间 [0, 0.1) = 未遮挡，[0.1, 0.5) = 渐变中，[0.5, 1.0] = 完全遮挡
-# 如果频繁误判渐变，可以缩小区间（如改为0.2-0.4）；如果渐变检测不到，可以扩大区间
-# 渐变误判检测：如果连续3次检测到"渐变中"且置信度变化<0.05，认为是场景颜色误判，强制认为"未遮挡"
+BLOCKED_TRANSITION_THRESHOLD = 0.3  # 遮挡渐变下限阈值，低于此值认为完全未遮挡
+# 说明：置信度区间划分
+#   [0, 0.3) = 完全未遮挡（立即确定）
+#   [0.3, 0.7) = 渐变中（需连续3次检测，置信度变化<0.05认为是场景误判）
+#   [0.7, 1.0] = 完全遮挡（立即确定）
+# 如果频繁误判渐变，可以缩小区间（如改为0.35-0.65）；如果渐变检测不到，可以扩大区间
 TC_MATCH_THRESHOLD = 0.7  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================

@@ -6,13 +6,19 @@
 性能优化：
 - 使用mss库替代PIL.ImageGrab（2-3x提升）
 - 合并截图区域，一次截图裁剪出两个子区域（减少50%截图时间）
+- 灰度图模板匹配，比彩色图快约30%
 
-UI遮挡检测：
-- 三态判断：完全遮挡、完全没遮挡、渐变中
-- 渐变检测：避免渐入渐出动画导致的误判
-- 置信度区间：[0, BLOCKED_TRANSITION_THRESHOLD) → 没遮挡
-               [BLOCKED_TRANSITION_THRESHOLD, BLOCKED_MATCH_THRESHOLD) → 渐变中
-               [BLOCKED_MATCH_THRESHOLD, 1.0] → 完全遮挡
+UI遮挡检测技术：
+- 三态判断：完全遮挡、完全未遮挡、渐变中
+- 置信度区间：
+  * [0, BLOCKED_TRANSITION_THRESHOLD) → 完全未遮挡（立即确定）
+  * [BLOCKED_TRANSITION_THRESHOLD, BLOCKED_MATCH_THRESHOLD) → 渐变中（需连续检测）
+  * [BLOCKED_MATCH_THRESHOLD, 1.0] → 完全遮挡（立即确定）
+
+渐变误判检测：
+- 非渐变状态（完全遮挡/完全未遮挡）：一次检测立即确定
+- 渐变状态：需要连续3次检测，且置信度变化<0.05才认为是场景颜色误判
+- 解决问题：游戏场景颜色正好落在渐变区间时的误判
 """
 import os
 import time

@@ -4,6 +4,7 @@
 
 性能优化：
 - 使用mss库替代PIL.ImageGrab（2-3x提升）
+- 共享OCR Reader实例，避免重复初始化
 """
 import re
 import numpy as np
