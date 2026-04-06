@@ -345,11 +345,14 @@ class VillagerTrainingDetector(object):
         self.confidence = round(float(max_val), 4)
         self.found = max_val >= VILLAGER_MATCH_THRESHOLD
 
-        # 检测半透明UI：如果置信度在0.4-0.6之间，可能是半透明UI叠加
-        if self._low_confidence_threshold > max_val >= 0.4:
+        # 检测半透明UI：如果置信度在0.35-0.6之间，可能是半透明UI叠加
+        # 注意：正常情况下，有村民图标时置信度>0.7，没有时<0.3
+        # 0.35-0.6这个区间说明有图标但被半透明UI影响了
+        if 0.35 <= max_val < 0.6:
             self._low_confidence_count += 1
-            if self._low_confidence_count >= self._low_confidence_stable_threshold:
-                # 连续检测到低置信度，认为是半透明UI
+            # 只需要1次检测就认为是半透明UI（因为这个置信度区间很明确）
+            if self._low_confidence_count >= 1:
+                # 检测到半透明UI
                 self.in_transition = True
                 self.found = False  # 强制认为没有检测到
                 status = f'半透明UI(置信度={self.confidence:.4f},连续{self._low_confidence_count}次)'
@@ -376,6 +379,6 @@ class VillagerTrainingDetector(object):
         status = '检测到' if self.found else '未检测到'
         log_training("检测", f"置信度={self.confidence:.4f} 阈值={VILLAGER_MATCH_THRESHOLD:.4f} 状态={status}")
 
-        # 如果置信度异常低（<0.4），可能是模板或区域问题
-        if DEBUG_BLOCKED_DETECTION and max_val < 0.4:
+        # 如果置信度异常低（<0.35），可能是模板或区域问题
+        if DEBUG_BLOCKED_DETECTION and max_val < 0.35:
             log_training("警告", f"村民检测置信度异常低 {max_val:.4f}，可能是模板不匹配或截图区域不对")
