@@ -160,8 +160,8 @@ def main():
                 else:
                     logger.log("UI渐变中，跳过")
 
-                # 渐变动画通常持续100-300ms，等待足够时间让动画完成
-                time.sleep(0.15)
+                # 不额外延迟，直接进入下一次循环快速检测
+                # 稳定性检测机制会自动过滤快速变化的状态
                 continue
 
             if training_detector.found:
