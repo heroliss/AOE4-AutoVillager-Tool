@@ -7,10 +7,10 @@
 """
 import re
 import numpy as np
-from PIL import ImageGrab
 import easyocr
 from config import POPULATION_REGION, DEBUG_MODE, USE_GPU, OCR_IMAGE_SCALE
 from logger import log_main
+from screenshot_util import capture_region
 
 _reader = None
 
@@ -30,15 +30,13 @@ def _get_reader():
                 import torch
                 gpu_available = torch.cuda.is_available()
                 _reader = easyocr.Reader(["en"], gpu=gpu_available, verbose=False)
-                if gpu_available:
-                    print(f"OCR: GPU加速已启用")
-                else:
-                    print(f"OCR: 使用CPU模式（未检测到CUDA）")
+                if DEBUG_MODE and gpu_available:
+                    print(f"[OCR] GPU加速已启用")
             except Exception as e:
-                print(f"OCR: GPU初始化失败，使用CPU模式")
+                if DEBUG_MODE:
+                    print(f"[OCR] GPU初始化失败，使用CPU模式")
                 _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
         else:
-            print(f"OCR: 使用CPU模式（配置禁用GPU）")
             _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
     return _reader
 
@@ -58,7 +56,7 @@ class PopulationReader(object):
     def _capture(self):
         """截取人口显示区域并根据配置缩放"""
         left, top, right, bottom = POPULATION_REGION
-        img = ImageGrab.grab(bbox=(left, top, right, bottom))
+        img = capture_region(left, top, right, bottom)
 
         # 根据配置缩放图片
         if OCR_IMAGE_SCALE != 1.0:

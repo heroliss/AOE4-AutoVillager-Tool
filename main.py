@@ -16,6 +16,7 @@ AOE4 自动生产村民工具
   - 默认使用CPU模式OCR（小图片时CPU比GPU更快）
   - 使用mss库替代PIL.ImageGrab（2-3x提升）
   - 合并截图区域，减少截图次数
+  - Windows GetPixel API 直接读取像素（绕过截图）
 
 UI遮挡检测技术：
   - 三态判断：完全遮挡(≥0.7)/完全未遮挡(<0.1)/渐变中(0.1-0.7)
@@ -42,25 +43,54 @@ TC数量缓存机制：
 按 Ctrl+C 退出。
 """
 
-import winsound
-import time
 import sys
-import pydirectinput
+import time
+
+# 立即打印启动信息（避免模块导入期间的卡顿）
+print()
+print("=" * 50, flush=True)
+print("  AOE4 自动生产村民工具", flush=True)
+print("  正在加载模块，请稍候...", flush=True)
+print("=" * 50, flush=True)
+print(flush=True)
+
+# 按顺序导入模块，显示加载进度
+print("  [>] 加载基础模块...", flush=True)
+import winsound
+
+print("  [>] 加载配置...", flush=True)
 from config import *
+
+print("  [>] 加载游戏检测模块...", flush=True)
 from game_detector import GameDetector
+
+print("  [>] 加载村民生产检测模块...", flush=True)
 from villager_training_detector import VillagerTrainingDetector
+
+print("  [>] 加载OCR模块...", flush=True)
 from population_reader import PopulationReader
+
+print("  [>] 加载操作模块...", flush=True)
 from villager_trainer import VillagerTrainer
 from tc_counter import TCCounter
 from tc_selector import TCSelector
+
+print("  [>] 加载统计模块...", flush=True)
 from villager_counter import VillagerCounter
 from food_reader import FoodReader
+
+print("  [>] 加载工具模块...", flush=True)
 from lock import acquire_lock, release_lock, cleanup_lock
 from input_blocker import input_blocked
 from logger import log_main
 
+print("  [>] 加载输入控制...", flush=True)
+import pydirectinput
+from input_config import *  # noqa: F401, F403
 
 from contextlib import nullcontext
+
+print("  [✓] 所有模块加载完成!\n", flush=True)
 
 
 class LogMerger:
@@ -101,31 +131,23 @@ class LogMerger:
 
 
 def main():
-    print("=" * 60)
-    print("AOE4 自动生产村民工具")
-    print("=" * 60)
-
-    # 清理残留的锁文件（防止上次异常退出导致的锁残留）
-    cleanup_lock()
-
-    # 检测GPU加速状态
+    # 1. 检测GPU状态
+    print("  [>] 检测GPU加速...", flush=True)
+    gpu_status = "未启用（使用CPU）"
     try:
         import torch
-        gpu_available = torch.cuda.is_available()
-        if gpu_available:
-            print(f"GPU加速: 已启用 ({torch.cuda.get_device_name(0)})")
-        else:
-            print("GPU加速: 未启用（使用CPU）")
+        if torch.cuda.is_available():
+            gpu_status = f"已启用 ({torch.cuda.get_device_name(0)})"
     except:
-        print("GPU加速: 未启用（使用CPU）")
+        pass
+    print(f"       GPU: {gpu_status}", flush=True)
 
-    print(f"村民上限: {MAX_VILLAGERS}")
-    print(f"最低食物: {MIN_FOOD}")
-    print(f"每TC排队: {VILLAGERS_PER_TC}")
-    print("=" * 60)
-    print()
+    # 2. 清理残留锁文件
+    print("  [>] 清理残留文件...", flush=True)
+    cleanup_lock()
 
-    # 初始化所有检测器
+    # 3. 初始化各模块
+    print("  [>] 初始化检测器...", flush=True)
     game_detector      = GameDetector()
     training_detector  = VillagerTrainingDetector()
     population_reader  = PopulationReader()
@@ -133,16 +155,25 @@ def main():
     tc_counter         = TCCounter()
     villager_counter   = VillagerCounter()
     food_reader        = FoodReader()
+    cooldown_detector  = VillagerTrainingDetector()
     logger             = LogMerger()
 
-    # 预热OCR模型，避免第一次使用时延迟
-    print("正在预热OCR模型...")
+    # 4. 预热OCR模型
+    print(flush=True)
+    print("  [>] 预热OCR模型...", flush=True)
     warmup_start = time.time()
     population_reader.do()  # 触发OCR初始化
     warmup_time = time.time() - warmup_start
-    print(f"OCR预热完成，耗时 {warmup_time:.2f}秒\n")
+    print(f"       耗时 {warmup_time:.2f}秒", flush=True)
 
-    print("程序已启动，按 Ctrl+C 退出\n")
+    # 加载完成
+    print(flush=True)
+    print("=" * 50, flush=True)
+    print(f"  村民上限: {MAX_VILLAGERS}  |  最低食物: {MIN_FOOD}  |  每TC排队: {VILLAGERS_PER_TC}", flush=True)
+    print("  程序已就绪，等待进入游戏...", flush=True)
+    print("=" * 50, flush=True)
+    print()
+    print("  按 Ctrl+C 退出\n", flush=True)
 
     # 调试：记录上次触发生产的时间
     last_trigger_time = None
@@ -360,8 +391,7 @@ def main():
                         cooldown_check_interval = 1.0  # 每秒检查一次
 
                         while time.time() - cooldown_start < TC_DETECTION_FAILED_COOLDOWN:
-                            # 检查是否有村民生产图标
-                            cooldown_detector = VillagerTrainingDetector()
+                            # 复用预创建的检测器，避免重复初始化
                             has_villager_icon = cooldown_detector.has_villager_icon()
 
                             if has_villager_icon:

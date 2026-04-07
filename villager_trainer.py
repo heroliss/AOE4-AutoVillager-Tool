@@ -5,12 +5,7 @@
 import time
 import pydirectinput
 from config import QUEUE_DELAY
-
-# 关闭安全检查
-pydirectinput.FAILSAFE = False
-
-# 设置pydirectinput的内置延迟为0（默认是0.1秒）
-pydirectinput.PAUSE = 0.0
+from input_config import *  # noqa: F401, F403
 
 DELAY = QUEUE_DELAY
 

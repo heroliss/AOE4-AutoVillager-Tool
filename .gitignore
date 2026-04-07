@@ -52,5 +52,9 @@ desktop.ini
 *.bak
 *.swp
 
+# Test files
+memory_monitor.py
+memory_test.py
+
 # Claude
 .claude/

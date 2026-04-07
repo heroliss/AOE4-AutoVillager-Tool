@@ -135,12 +135,9 @@ class VillagerTrainingDetector(object):
 
         self._blocked_check_enabled = True
 
-        # 只在第一次初始化时打印
-        if not _blocked_detection_initialized:
-            if DEBUG_MODE:
-                print(f"[遮挡检测] 已启用 区域={screenshot_width}x{screenshot_height} 模板={blocked_template.shape[1]}x{blocked_template.shape[0]}")
-            else:
-                print(f"UI遮挡检测: 已启用")
+        # 只在调试模式下打印初始化信息
+        if not _blocked_detection_initialized and DEBUG_MODE:
+            print(f"[遮挡检测] 已启用 区域={screenshot_width}x{screenshot_height} 模板={blocked_template.shape[1]}x{blocked_template.shape[0]}")
             _blocked_detection_initialized = True
 
     def has_villager_icon(self):
