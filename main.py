@@ -9,36 +9,100 @@ AOE4 自动生产村民工具
   5. 村民总数未达上限
   6. 食物充足
 
-性能优化：
+=================== 主循环流程 ===================
+
+[0] 修饰键检测（Shift/Ctrl/Alt）
+    └── 按下 → 等待 MODIFIER_KEY_SLEEP → 重新开始
+
+[1] 游戏窗口检测（双重检测）
+    ├── 窗口标题检测（极快，<1ms）
+    │   └── 不匹配 → "不在游戏窗口" → 等待 PAUSE_CHECK_INTERVAL
+    │
+    └── 像素颜色检测（极快，<1ms）
+        └── 不匹配 → "不在游戏中" → 等待 PAUSE_CHECK_INTERVAL
+
+[2] 村民生产状态检测（快速，模板匹配）
+    ├── 完全遮挡 → "UI被遮挡，跳过"
+    ├── 渐变中 → "UI渐变中，跳过"
+    └── 生产中 → "村民生产中"
+    └── 未遮挡且无生产 → 继续下一步
+
+[3] OCR识别（慢速，并行执行）
+    ├── 人口识别（~0.3-0.5秒）
+    ├── 食物识别（~0.3-0.5秒）
+    └── 村民总数（~0.3-0.5秒，每3秒检查一次）
+
+[4] 条件检查
+    ├── 人口识别失败 → 跳过
+    ├── 村民已达上限 → 跳过
+    ├── 食物识别失败 → 跳过
+    └── 食物不足 → 跳过
+
+[5] 获取锁并执行操作
+    ├── 保存当前选中（Ctrl+0）
+    ├── 播放蜂鸣提醒
+    ├── 等待 OPERATION_DELAY
+    ├── 选中TC并检测数量
+    ├── 计算生产数量
+    ├── 执行排队操作（Q键）
+    ├── 等待 BLOCK_INPUT_DURATION
+    ├── 恢复选中（0）
+    ├── 取消编组（Ctrl+Alt+0）
+    └── 等待 POST_OPERATION_DELAY
+
+[6] 释放锁
+    └── 等待 CHECK_INTERVAL
+
+=================== 延迟说明 ===================
+
+手动延迟（可配置）：
+  - MODIFIER_KEY_SLEEP      = 0.1s   # 修饰键检测等待
+  - PAUSE_CHECK_INTERVAL   = 0.5s   # 不在游戏时的检测间隔
+  - OPERATION_DELAY        = 0s     # 操作前延迟
+  - BLOCK_INPUT_DURATION   = 0s     # 操作后等待
+  - POST_OPERATION_DELAY   = 3.0s  # 操作后UI更新等待
+  - CHECK_INTERVAL         = 0.1s  # 循环检测间隔
+  - COOLDOWN_CHECK_INTERVAL= 0.5s  # 冷却期间检测间隔
+  - QUEUE_DELAY            = 0s     # 排队按键间隔
+  - BEEP_GAP_SLEEP         = 0.1s  # 蜂鸣间隔
+
+运行延迟（检测耗时）：
+  - 窗口标题检测   < 1ms
+  - 像素颜色检测   < 1ms
+  - 村民生产检测   ~50-100ms（模板匹配）
+  - OCR识别（3项） ~0.3-0.5s（并行执行）
+
+检测循环总耗时（无操作时）：
+  - 最小：~100ms（CHECK_INTERVAL）
+  - 正常：~150-200ms（检测约100ms + 间隔100ms）
+  - OCR触发时：~300-500ms + CHECK_INTERVAL
+
+=================== 性能优化 ===================
   - 优先执行快速检测（模板匹配），只有在需要时才执行慢速OCR
   - 并行执行多个OCR任务，减少总耗时
-  - 村民数量每10秒检查一次（变化慢，无需频繁检查）
+  - 村民数量每3秒检查一次（变化慢，无需频繁检查）
   - 默认使用CPU模式OCR（小图片时CPU比GPU更快）
-  - 使用mss库替代PIL.ImageGrab（2-3x提升）
-  - 合并截图区域，减少截图次数
-  - Windows GetPixel API 直接读取像素（绕过截图）
+  - Windows GetPixel API 直接读取像素（绕过截图，<0.1ms）
 
-UI遮挡检测技术：
+=================== UI遮挡检测技术 ===================
   - 三态判断：完全遮挡(≥0.7)/完全未遮挡(<0.1)/渐变中(0.1-0.7)
   - 稳定性检测：所有状态需连续2次检测才认为稳定
   - 渐变误判检测：连续3次渐变且置信度变化<0.05认为是场景误判
-  - 避免UI动画期间的误触发
 
-半透明UI检测技术：
+=================== 半透明UI检测技术 ===================
   - 策略1：中等置信度(0.3-0.65) + 快速变化(>0.1)
   - 策略2：置信度突然下降（从>0.6降到<0.5，变化>0.2）
   - 策略3：连续下降检测（最近3次持续下降，总变化>0.1）
-  - 通过置信度变化模式识别UI渐入渐出动画
 
-TC数量缓存机制：
+=================== TC数量缓存机制 ===================
   - 成功检测后更新缓存，检测失败时使用缓存值
   - 避免UI遮挡导致的"没有TC"误判
   - 冷却期间监控村民图标，检测到后提前结束冷却
 
-配置说明：
-- 本工具基于 2560x1440 分辨率 + HDR开启
-- 模板图片基于中国阵营，但所有阵营通用
-- 如需其他分辨率，请调整 config.py 中的坐标
+=================== 配置说明 ===================
+  - 本工具基于 2560x1440 分辨率 + HDR开启
+  - 模板图片基于中国阵营，但所有阵营通用
+  - 如需其他分辨率，请调整 config.py 中的坐标
 
 按 Ctrl+C 退出。
 """
@@ -249,9 +313,6 @@ def main():
                     logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
                 elif not DEBUG_BLOCKED_DETECTION:
                     logger.log("UI被遮挡，跳过")
-
-                # 动态调整检测频率：UI被遮挡时降低检测频率
-                time.sleep(CHECK_INTERVAL * BLOCKED_SLEEP_MULTIPLIER)
                 continue
 
             # 检测UI是否正在渐变（渐入渐出动画中）
@@ -260,9 +321,6 @@ def main():
                     logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
                 elif not DEBUG_BLOCKED_DETECTION:
                     logger.log("UI渐变中，跳过")
-
-                # 不额外延迟，直接进入下一次循环快速检测
-                # 稳定性检测机制会自动过滤快速变化的状态
                 continue
 
             if training_detector.found:
@@ -270,9 +328,6 @@ def main():
                     logger.log(f"[生产中] 置信度={training_detector.confidence:.3f} 阈值={VILLAGER_MATCH_THRESHOLD:.3f}")
                 elif not DEBUG_BLOCKED_DETECTION:
                     logger.log("村民生产中")
-
-                # 动态调整检测频率：生产中时降低检测频率
-                time.sleep(CHECK_INTERVAL * TRAINING_SLEEP_MULTIPLIER)
                 continue
 
             # 调试：记录检测到"没有村民生产"的时间

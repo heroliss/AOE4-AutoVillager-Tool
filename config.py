@@ -15,7 +15,7 @@
 
 # ==================== 基础参数 ====================
 CHECK_INTERVAL = 0.1  # 检测循环间隔（秒），平衡响应速度和CPU占用
-PAUSE_CHECK_INTERVAL = 0.5  # 不在游戏时的检测间隔（秒）
+PAUSE_CHECK_INTERVAL = 0.1  # 不在游戏时的检测间隔（秒）
 MODIFIER_KEY_SLEEP = 0.1  # 修饰键检测后的等待时间（秒）
 VILLAGERS_PER_TC = 3  # 每个TC排队的村民数量
 MAX_VILLAGERS = 120  # 村民数量上限，超过此数量停止自动生产
@@ -100,8 +100,6 @@ TC_RETRY_DELAY = 0.01  # TC检测失败后重试H键的等待时间（秒），�
 TC_MAX_RETRY = 50  # TC检测失败时的最大重试次数
 TC_DETECTION_FAILED_COOLDOWN = 1000.0  # TC检测失败后的冷却时间（秒），避免频繁重试
 COOLDOWN_CHECK_INTERVAL = 0.5  # 冷却期间的检测间隔（秒）
-BLOCKED_SLEEP_MULTIPLIER = 2  # UI被遮挡时的检测间隔倍数（相对于CHECK_INTERVAL）
-TRAINING_SLEEP_MULTIPLIER = 3  # 村民生产中时的检测间隔倍数（相对于CHECK_INTERVAL）
 QUEUE_DELAY = 0  # 每次按Q键之间的延迟，设为0最快
 
 # ==================== 音效设置 ====================
