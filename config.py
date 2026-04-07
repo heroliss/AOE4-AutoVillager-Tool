@@ -14,9 +14,7 @@
 """
 
 # ==================== 基础参数 ====================
-CHECK_INTERVAL = 0.1  # 检测循环间隔（秒），平衡响应速度和CPU占用
-PAUSE_CHECK_INTERVAL = 0.1  # 不在游戏时的检测间隔（秒）
-MODIFIER_KEY_SLEEP = 0.1  # 修饰键检测后的等待时间（秒）
+CHECK_INTERVAL = 0.05  # 检测循环间隔（秒），平衡响应速度和CPU占用
 VILLAGERS_PER_TC = 3  # 每个TC排队的村民数量
 MAX_VILLAGERS = 120  # 村民数量上限，超过此数量停止自动生产
 MIN_FOOD = 50  # 最低食物要求，低于此值不生产村民
