@@ -43,9 +43,6 @@ TC数量缓存机制：
 按 Ctrl+C 退出。
 """
 
-import sys
-import time
-
 # 立即打印启动信息（避免模块导入期间的卡顿）
 print()
 print("=" * 50, flush=True)
@@ -56,6 +53,8 @@ print(flush=True)
 
 # 按顺序导入模块，显示加载进度
 print("  [>] 加载基础模块...", flush=True)
+import sys
+import time
 import winsound
 
 print("  [>] 加载配置...", flush=True)
@@ -89,6 +88,23 @@ import pydirectinput
 from input_config import *  # noqa: F401, F403
 
 from contextlib import nullcontext
+
+# 修饰键检测（用户按下Shift/Ctrl/Alt时暂停检测）
+import ctypes
+user32 = ctypes.windll.user32
+
+# 虚拟键码
+VK_SHIFT = 0x10
+VK_CONTROL = 0x11
+VK_MENU = 0x12  # Alt键
+
+def is_modifier_key_pressed():
+    """检测用户是否按下了修饰键（Shift/Ctrl/Alt）"""
+    return (
+        user32.GetAsyncKeyState(VK_SHIFT) & 0x8000 != 0 or
+        user32.GetAsyncKeyState(VK_CONTROL) & 0x8000 != 0 or
+        user32.GetAsyncKeyState(VK_MENU) & 0x8000 != 0
+    )
 
 print("  [✓] 所有模块加载完成!\n", flush=True)
 
@@ -184,13 +200,28 @@ def main():
         while True:
             loop_start = time.time()
 
-            # 1. 检查是否在游戏窗口
-            game_detector.do()
-            if not game_detector.in_game:
-                logger.log("不在游戏窗口")
+            # 0. 检查用户是否按下了修饰键（Shift/Ctrl/Alt）
+            if is_modifier_key_pressed():
+                time.sleep(MODIFIER_KEY_SLEEP)
                 continue
 
-            # 2. 优先检查是否有村民正在生产（快速，模板匹配）
+            # 1. 检查是否在游戏窗口
+            game_detector.do()
+
+            # 2. 区分状态并处理
+            if not game_detector.window_active:
+                # 不在游戏窗口（窗口标题不匹配）
+                logger.log("不在游戏窗口")
+                time.sleep(PAUSE_CHECK_INTERVAL)
+                continue
+
+            if not game_detector.pixel_match:
+                # 在游戏窗口但不在游戏中（如主菜单、加载画面）
+                logger.log("不在游戏中")
+                time.sleep(PAUSE_CHECK_INTERVAL)
+                continue
+
+            # 3. 优先检查是否有村民正在生产（快速，模板匹配）
             training_detector.do()
 
             # 调试模式：打印所有检测结果
@@ -220,7 +251,7 @@ def main():
                     logger.log("UI被遮挡，跳过")
 
                 # 动态调整检测频率：UI被遮挡时降低检测频率
-                time.sleep(CHECK_INTERVAL * 2)
+                time.sleep(CHECK_INTERVAL * BLOCKED_SLEEP_MULTIPLIER)
                 continue
 
             # 检测UI是否正在渐变（渐入渐出动画中）
@@ -241,7 +272,7 @@ def main():
                     logger.log("村民生产中")
 
                 # 动态调整检测频率：生产中时降低检测频率
-                time.sleep(CHECK_INTERVAL * 3)
+                time.sleep(CHECK_INTERVAL * TRAINING_SLEEP_MULTIPLIER)
                 continue
 
             # 调试：记录检测到"没有村民生产"的时间
@@ -345,7 +376,7 @@ def main():
                 estimated_duration = beep_duration + OPERATION_DELAY + TC_SELECT_DELAY + (VILLAGERS_PER_TC * QUEUE_DELAY) + BLOCK_INPUT_DURATION + 1.0
                 max_block_duration = min(estimated_duration * 2, 5.0)  # 最多5秒
 
-                # 8.2 屏蔽输入并执行所有操作（从蜂鸣开始）
+                # 6.2 屏蔽输入并执行所有操作（从蜂鸣开始）
                 blocker = input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext()
 
                 with blocker:
@@ -359,14 +390,15 @@ def main():
                     # 6.2.2 播放蜂鸣声提醒（此时输入已屏蔽）
                     for _ in range(BEEP_COUNT):
                         winsound.Beep(BEEP_FREQUENCY, BEEP_DURATION)
-                        time.sleep(0.1)
+                        time.sleep(BEEP_GAP_SLEEP)
 
                     # 6.2.3 操作前延迟，给用户反应时间
                     if OPERATION_DELAY > 0:
                         if DEBUG_MODE:
                             logger.force_print(f"[延迟] 等待{OPERATION_DELAY}秒")
                         time.sleep(OPERATION_DELAY)
-                    # 6.2.3 选中TC并检测数量
+
+                    # 6.2.4 选中TC并检测数量
                     if DEBUG_MODE:
                         logger.force_print("[操作] 选中TC")
                     tc_selector.do()
@@ -388,9 +420,17 @@ def main():
 
                         # 冷却等待，期间监控村民生产图标
                         cooldown_start = time.time()
-                        cooldown_check_interval = 1.0  # 每秒检查一次
 
                         while time.time() - cooldown_start < TC_DETECTION_FAILED_COOLDOWN:
+                            # 检查修饰键（冷却期间用户可能想操作游戏）
+                            if is_modifier_key_pressed():
+                                logger.force_print("[暂停] 检测到修饰键，暂停检测")
+                                # 等待修饰键释放
+                                while is_modifier_key_pressed():
+                                    time.sleep(MODIFIER_KEY_SLEEP)
+                                logger.force_print("[恢复] 修饰键已释放，继续检测")
+                                cooldown_start = time.time()  # 重置冷却计时
+
                             # 复用预创建的检测器，避免重复初始化
                             has_villager_icon = cooldown_detector.has_villager_icon()
 
@@ -399,7 +439,7 @@ def main():
                                 logger.force_print(f"[恢复] 检测到村民生产图标，TC已建造，提前结束冷却（已等待{elapsed:.1f}秒）")
                                 break
 
-                            time.sleep(cooldown_check_interval)
+                            time.sleep(COOLDOWN_CHECK_INTERVAL)
                         else:
                             # 冷却时间到，未检测到村民图标
                             logger.force_print(f"[冷却] 冷却时间结束，继续尝试检测TC")
@@ -415,7 +455,7 @@ def main():
                 with input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext():
                     planned_villagers = VILLAGERS_PER_TC * tc_counter.count
 
-                    # 8.2.4 根据可用空位和食物调整生产数量
+                    # 6.2.5 根据可用空位和食物调整生产数量
                     actual_villagers = min(planned_villagers, available_slots)
                     max_villagers_by_food = food_reader.amount // FOOD_PER_VILLAGER
                     actual_villagers = min(actual_villagers, max_villagers_by_food)
@@ -428,7 +468,7 @@ def main():
                             logger.force_print(f"食物不足以生产村民（{food_reader.amount}/{FOOD_PER_VILLAGER}）")
                         continue
 
-                    # 6.2.5 显示操作信息
+                    # 6.2.6 显示操作信息
                     if actual_villagers < planned_villagers:
                         reason = []
                         if actual_villagers == available_slots:
@@ -446,23 +486,23 @@ def main():
                         else:
                             logger.force_print(f"生产 {actual_villagers} 个村民 (人口 {population_reader.current}/{population_reader.limit}, 村民 {villager_counter.total}/{MAX_VILLAGERS}, 食物 {food_reader.amount}, TC {tc_counter.count})")
 
-                    # 6.2.6 执行排队操作
+                    # 6.2.7 执行排队操作
                     if DEBUG_MODE:
                         logger.force_print("[操作] 排队村民")
                     VillagerTrainer().do(count=actual_villagers)
 
-                    # 6.2.7 操作后等待，让操作完全完成
+                    # 6.2.8 操作后等待，让操作完全完成
                     if BLOCK_INPUT_DURATION > 0:
                         if DEBUG_MODE:
                             logger.force_print(f"[等待] {BLOCK_INPUT_DURATION}秒")
                         time.sleep(BLOCK_INPUT_DURATION)
 
-                    # 6.2.8 恢复之前选中的单位（按0）
+                    # 6.2.9 恢复之前选中的单位（按0）
                     if DEBUG_MODE:
                         logger.force_print("[操作] 恢复选中")
                     pydirectinput.press('0')
 
-                    # 6.2.9 取消编组（Ctrl+Alt+0）
+                    # 6.2.10 取消编组（Ctrl+Alt+0）
                     if DEBUG_MODE:
                         logger.force_print("[操作] 取消编组")
                     pydirectinput.keyDown('ctrl')
