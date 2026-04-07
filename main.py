@@ -310,12 +310,16 @@ def main():
             if training_detector.blocked:
                 if DEBUG_MODE:
                     logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
+                else:
+                    logger.log("生产队列被遮挡，无法判定")
                 continue
 
             # 检测UI是否正在渐变（渐入渐出动画中）
             if training_detector.in_transition:
                 if DEBUG_MODE:
                     logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
+                else:
+                    logger.log("生产队列被遮挡，无法判定")
                 continue
 
             if training_detector.found:
@@ -365,7 +369,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[上限] 村民={villager_counter.total}/{MAX_VILLAGERS}")
                 else:
-                    logger.log(f"村民已达上限 {villager_counter.total}/{MAX_VILLAGERS}")
+                    logger.log(f"村民已达上限（{villager_counter.total}/{MAX_VILLAGERS}）")
                 continue
 
             # 3.3 检查食物是否充足
@@ -380,7 +384,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[不足] 食物={food_reader.amount}/{MIN_FOOD}")
                 else:
-                    logger.log(f"食物不足 {food_reader.amount}/{MIN_FOOD}")
+                    logger.log(f"食物不足（{food_reader.amount}/{MIN_FOOD}）")
                 continue
 
             # 4. 计算可用人口空位
@@ -391,7 +395,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[无空位] 人口={population_reader.current}/{population_reader.limit}")
                 else:
-                    logger.log(f"人口已满 {population_reader.current}/{population_reader.limit}")
+                    logger.log(f"人口已满（{population_reader.current}/{population_reader.limit}）")
                 continue
 
             # 5. 获取锁，防止并发执行
