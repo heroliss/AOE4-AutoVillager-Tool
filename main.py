@@ -22,9 +22,9 @@ AOE4 自动生产村民工具
         └── 不匹配 → "不在游戏中" → 等待 PAUSE_CHECK_INTERVAL
 
 [2] 村民生产状态检测（快速，模板匹配）
-    ├── 完全遮挡 → "UI被遮挡，跳过"
-    ├── 渐变中 → "UI渐变中，跳过"
-    └── 生产中 → "村民生产中"
+    ├── 完全遮挡 → 跳过（DEBUG模式输出置信度）
+    ├── 渐变中 → 跳过（DEBUG模式输出置信度）
+    └── 生产中 → 跳过（DEBUG模式输出置信度）
     └── 未遮挡且无生产 → 继续下一步
 
 [3] OCR识别（慢速，并行执行）
@@ -308,25 +308,19 @@ def main():
                 logger.log(" ".join(status_parts))
 
             if training_detector.blocked:
-                if DEBUG_MODE and not DEBUG_BLOCKED_DETECTION:
+                if DEBUG_MODE:
                     logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
-                elif not DEBUG_BLOCKED_DETECTION:
-                    logger.log("UI被遮挡，跳过")
                 continue
 
             # 检测UI是否正在渐变（渐入渐出动画中）
             if training_detector.in_transition:
-                if DEBUG_MODE and not DEBUG_BLOCKED_DETECTION:
+                if DEBUG_MODE:
                     logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
-                elif not DEBUG_BLOCKED_DETECTION:
-                    logger.log("UI渐变中，跳过")
                 continue
 
             if training_detector.found:
-                if DEBUG_MODE and not DEBUG_BLOCKED_DETECTION:
+                if DEBUG_MODE:
                     logger.log(f"[生产中] 置信度={training_detector.confidence:.3f} 阈值={VILLAGER_MATCH_THRESHOLD:.3f}")
-                elif not DEBUG_BLOCKED_DETECTION:
-                    logger.log("村民生产中")
                 continue
 
             # 调试：记录检测到"没有村民生产"的时间
