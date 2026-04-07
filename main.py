@@ -311,17 +311,16 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
                 else:
-                    logger.log("生产队列被遮挡，无法判定")
+                    logger.log("TC被遮挡，无法判定")
                 continue
 
-            # 检测UI是否正在渐变（渐入渐出动画中）
+            # UI渐变中：静默跳过
             if training_detector.in_transition:
                 if DEBUG_MODE:
                     logger.log(f"[渐变] 置信度={training_detector.blocked_confidence:.3f} 区间=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}]")
-                else:
-                    logger.log("生产队列被遮挡，无法判定")
                 continue
 
+            # 村民正在生产中：静默跳过
             if training_detector.found:
                 if DEBUG_MODE:
                     logger.log(f"[生产中] 置信度={training_detector.confidence:.3f} 阈值={VILLAGER_MATCH_THRESHOLD:.3f}")
@@ -361,7 +360,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[识别失败] 人口 current={population_reader.current} limit={population_reader.limit}")
                 else:
-                    logger.log("人口识别失败")
+                    logger.log("人口识别失败，跳过")
                 continue
 
             # 3.2 检查村民总数是否超过上限
@@ -369,7 +368,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[上限] 村民={villager_counter.total}/{MAX_VILLAGERS}")
                 else:
-                    logger.log(f"村民已达上限（{villager_counter.total}/{MAX_VILLAGERS}）")
+                    logger.log(f"村民已达上限（{villager_counter.total}/{MAX_VILLAGERS}），跳过")
                 continue
 
             # 3.3 检查食物是否充足
@@ -377,14 +376,14 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[识别失败] 食物 amount={food_reader.amount}")
                 else:
-                    logger.log("食物识别失败")
+                    logger.log("食物识别失败，跳过")
                 continue
 
             if food_reader.amount < MIN_FOOD:
                 if DEBUG_MODE:
                     logger.log(f"[不足] 食物={food_reader.amount}/{MIN_FOOD}")
                 else:
-                    logger.log(f"食物不足（{food_reader.amount}/{MIN_FOOD}）")
+                    logger.log(f"食物不足（{food_reader.amount}/{MIN_FOOD}），跳过")
                 continue
 
             # 4. 计算可用人口空位
@@ -395,7 +394,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[无空位] 人口={population_reader.current}/{population_reader.limit}")
                 else:
-                    logger.log(f"人口已满（{population_reader.current}/{population_reader.limit}）")
+                    logger.log(f"人口已满（{population_reader.current}/{population_reader.limit}），跳过")
                 continue
 
             # 5. 获取锁，防止并发执行
@@ -403,7 +402,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log("[锁] 获取失败")
                 else:
-                    logger.log("操作进行中")
+                    logger.log("操作进行中，跳过")
                 continue
 
             # 6. 执行生产村民操作
