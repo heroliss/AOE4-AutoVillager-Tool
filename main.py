@@ -44,8 +44,6 @@ AOE4 自动生产村民工具
 
 [6] 获取锁并执行操作
     ├── 保存当前选中（Ctrl+0）
-    ├── 播放蜂鸣提醒
-    ├── 等待 OPERATION_DELAY
     ├── 选中TC并检测数量
     ├── 计算生产数量
     ├── 执行排队操作（Q键）
@@ -60,11 +58,9 @@ AOE4 自动生产村民工具
 
 手动延迟（可配置）：
   - CHECK_INTERVAL         = 0.05s # 循环检测间隔
-  - OPERATION_DELAY        = 0s    # 操作前延迟
-  - BLOCK_INPUT_DURATION   = 0s   # 操作后等待
+  - BLOCK_INPUT_DURATION   = 0s    # 操作后等待
   - POST_OPERATION_DELAY   = 3.0s  # 操作后UI更新等待
   - QUEUE_DELAY            = 0s    # 排队按键间隔
-  - BEEP_GAP_SLEEP         = 0.1s  # 蜂鸣间隔
 
 运行延迟（检测耗时）：
   - 窗口标题检测   < 1ms
@@ -119,7 +115,6 @@ print(flush=True)
 print("  [>] 加载基础模块...", flush=True)
 import sys
 import time
-import winsound
 
 print("  [>] 加载配置...", flush=True)
 from config import *
@@ -411,12 +406,11 @@ def main():
 
             # 6. 执行生产村民操作
             try:
-                # 6.1 计算预估操作时长：蜂鸣 + 延迟 + 选中TC + 排队 + 操作后等待
-                beep_duration = (BEEP_DURATION / 1000.0 + 0.1) * BEEP_COUNT
-                estimated_duration = beep_duration + OPERATION_DELAY + TC_SELECT_DELAY + (VILLAGERS_PER_TC * QUEUE_DELAY) + BLOCK_INPUT_DURATION + 1.0
+                # 6.1 计算预估操作时长：选中TC + 排队 + 操作后等待
+                estimated_duration = TC_SELECT_DELAY + (VILLAGERS_PER_TC * QUEUE_DELAY) + BLOCK_INPUT_DURATION + 1.0
                 max_block_duration = min(estimated_duration * 2, 5.0)  # 最多5秒
 
-                # 6.2 屏蔽输入并执行所有操作（从蜂鸣开始）
+                # 6.2 屏蔽输入并执行所有操作
                 blocker = input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext()
 
                 with blocker:
@@ -427,18 +421,7 @@ def main():
                     pydirectinput.press('0')
                     pydirectinput.keyUp('ctrl')
 
-                    # 6.2.2 播放蜂鸣声提醒（此时输入已屏蔽）
-                    for _ in range(BEEP_COUNT):
-                        winsound.Beep(BEEP_FREQUENCY, BEEP_DURATION)
-                        time.sleep(BEEP_GAP_SLEEP)
-
-                    # 6.2.3 操作前延迟，给用户反应时间
-                    if OPERATION_DELAY > 0:
-                        if DEBUG_MODE:
-                            logger.force_print(f"[延迟] 等待{OPERATION_DELAY}秒")
-                        time.sleep(OPERATION_DELAY)
-
-                    # 6.2.4 选中TC并检测数量
+                    # 6.2.2 选中TC并检测数量
                     if DEBUG_MODE:
                         logger.force_print("[操作] 选中TC")
                     tc_selector.do()
