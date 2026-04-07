@@ -145,7 +145,6 @@ from food_reader import FoodReader
 print("  [>] 加载工具模块...", flush=True)
 from lock import acquire_lock, release_lock, cleanup_lock
 from input_blocker import input_blocked
-from logger import log_main
 
 print("  [>] 加载输入控制...", flush=True)
 import pydirectinput
@@ -269,10 +268,10 @@ def main():
                 time.sleep(MODIFIER_KEY_SLEEP)
                 continue
 
-            # 1. 检查是否在游戏窗口
+            # 1. 游戏窗口检测
             game_detector.do()
 
-            # 2. 区分状态并处理
+            # 1.1 状态处理
             if not game_detector.window_active:
                 # 不在游戏窗口（窗口标题不匹配）
                 logger.log("不在游戏窗口")
@@ -285,7 +284,7 @@ def main():
                 time.sleep(PAUSE_CHECK_INTERVAL)
                 continue
 
-            # 3. 优先检查是否有村民正在生产（快速，模板匹配）
+            # 2. 村民生产状态检测（模板匹配）
             training_detector.do()
 
             # 调试模式：打印所有检测结果
@@ -336,43 +335,28 @@ def main():
                 elapsed = detection_time - last_trigger_time
                 logger.force_print(f"[时间] 距上次触发 {elapsed:.2f}秒")
 
-            # 3. 只有在没有村民生产时，才执行慢速OCR操作
+            # 3. OCR识别（并行执行）
             ocr_start = time.time()
-
-            # 优化：村民数量变化慢，不需要每次都检查
             current_time = time.time()
             should_check_villagers = (current_time - last_villager_check_time) >= VILLAGER_CHECK_INTERVAL
 
             # 并行执行OCR操作以节省时间
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                pop_start = time.time()
                 future_population = executor.submit(population_reader.do)
-
-                food_start = time.time()
                 future_food = executor.submit(food_reader.do)
 
                 # 只在需要时检查村民数量
                 if should_check_villagers:
-                    villager_start = time.time()
                     future_villager = executor.submit(villager_counter.do)
                     concurrent.futures.wait([future_population, future_villager, future_food])
                     last_villager_check_time = current_time
-                    if DEBUG_MODE:
-                        pop_time = time.time() - pop_start
-                        food_time = time.time() - food_start
-                        villager_time = time.time() - villager_start
-                        logger.force_print(f"[OCR耗时] 人口={pop_time:.3f}s 食物={food_time:.3f}s 村民={villager_time:.3f}s")
                 else:
                     concurrent.futures.wait([future_population, future_food])
-                    if DEBUG_MODE:
-                        pop_time = time.time() - pop_start
-                        food_time = time.time() - food_start
-                        logger.force_print(f"[OCR耗时] 人口={pop_time:.3f}s 食物={food_time:.3f}s")
 
             if DEBUG_MODE:
                 ocr_total = time.time() - ocr_start
-                logger.force_print(f"[OCR总计] {ocr_total:.3f}秒")
+                logger.force_print(f"[OCR耗时] {ocr_total:.3f}秒")
 
             # 3.1 检查人口识别结果
             if population_reader.current is None:

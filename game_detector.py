@@ -35,9 +35,6 @@ if GetPixel:
 PIXEL_X, PIXEL_Y = GAME_DETECT_PIXEL
 EXPECTED_COLOR = GAME_DETECT_COLOR
 
-# 预计算的 RGB 转 BGR（因为 GetPixel 返回的是 BGR）
-EXPECTED_COLOR_BGR = (EXPECTED_COLOR[2], EXPECTED_COLOR[1], EXPECTED_COLOR[0])
-
 
 class GameDetector(object):
     """检测当前是否在游戏中（双重检测：窗口标题 + 像素颜色）"""
