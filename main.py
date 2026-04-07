@@ -263,9 +263,13 @@ def main():
         while True:
             loop_start = time.time()
 
+            # 循环间隔，降低CPU占用
+            if CHECK_INTERVAL > 0:
+                time.sleep(CHECK_INTERVAL)
+
             # 0. 检查用户是否按下了修饰键（Shift/Ctrl/Alt）
             if is_modifier_key_pressed():
-                time.sleep(MODIFIER_KEY_SLEEP)
+                logger.log("检测到修饰键，暂停")
                 continue
 
             # 1. 游戏窗口检测
@@ -275,13 +279,11 @@ def main():
             if not game_detector.window_active:
                 # 不在游戏窗口（窗口标题不匹配）
                 logger.log("不在游戏窗口")
-                time.sleep(PAUSE_CHECK_INTERVAL)
                 continue
 
             if not game_detector.pixel_match:
                 # 在游戏窗口但不在游戏中（如主菜单、加载画面）
                 logger.log("不在游戏中")
-                time.sleep(PAUSE_CHECK_INTERVAL)
                 continue
 
             # 2. 村民生产状态检测（模板匹配）
@@ -311,7 +313,7 @@ def main():
                 if DEBUG_MODE:
                     logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
                 else:
-                    logger.log("TC被遮挡，无法判定")
+                    logger.log("生产队列图标被遮挡，无法判定是否有村民在生产")
                 continue
 
             # UI渐变中：静默跳过
@@ -324,6 +326,8 @@ def main():
             if training_detector.found:
                 if DEBUG_MODE:
                     logger.log(f"[生产中] 置信度={training_detector.confidence:.3f} 阈值={VILLAGER_MATCH_THRESHOLD:.3f}")
+                else:
+                    logger.log("检测到村民正在生产中，跳过")
                 continue
 
             # 调试：记录检测到"没有村民生产"的时间
@@ -560,10 +564,6 @@ def main():
 
             finally:
                 release_lock()
-
-            # 循环间隔，降低CPU占用
-            if CHECK_INTERVAL > 0:
-                time.sleep(CHECK_INTERVAL)
 
     except KeyboardInterrupt:
         logger.force_print("\n程序已退出")
