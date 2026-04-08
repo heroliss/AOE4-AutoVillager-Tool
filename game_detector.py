@@ -35,6 +35,13 @@ if GetPixel:
 PIXEL_X, PIXEL_Y = GAME_DETECT_PIXEL
 EXPECTED_COLOR = GAME_DETECT_COLOR
 
+# 预计算游戏窗口关键词（小写），避免每次检测时重复转换
+_GAME_KEYWORDS_LOWER = [kw.lower() for kw in [
+    "Age of Empires IV",
+    "帝国时代IV",
+    "帝国时代4",
+]]
+
 
 class GameDetector(object):
     """检测当前是否在游戏中（双重检测：窗口标题 + 像素颜色）"""
@@ -84,16 +91,8 @@ class GameDetector(object):
         """判断窗口标题是否为游戏窗口"""
         if not title:
             return False
-
-        # AOE4 的窗口标题通常包含 "Age of Empires IV"
-        game_keywords = [
-            "Age of Empires IV",
-            "帝国时代IV",  # 中文标题
-            "帝国时代4",
-        ]
-
         title_lower = title.lower()
-        return any(keyword.lower() in title_lower for keyword in game_keywords)
+        return any(keyword in title_lower for keyword in _GAME_KEYWORDS_LOWER)
 
     def _get_pixel_color(self, x, y):
         """

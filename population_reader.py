@@ -4,41 +4,15 @@
 
 使用EasyOCR进行文字识别，支持GPU加速（可选）
 默认使用CPU模式，因为小图片OCR时CPU通常比GPU更快
+
+特殊情况：
+- 游牧开局：开局无TC时人口上限显示为0（如 5/0），属于正常现象
+- 此时人口已满，需等待建造TC后人口上限才会变为正常值
 """
 import re
-import numpy as np
-import easyocr
-from config import POPULATION_REGION, DEBUG_MODE, USE_GPU, OCR_IMAGE_SCALE
+from config import POPULATION_REGION, DEBUG_MODE
 from logger import log_main
-from screenshot_util import capture_region
-
-_reader = None
-
-
-def _get_reader():
-    global _reader
-    if _reader is None:
-        import warnings
-        import os
-        # 屏蔽PyTorch警告
-        warnings.filterwarnings('ignore', category=UserWarning, module='torch')
-        os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning'
-
-        # 根据配置决定是否使用GPU
-        if USE_GPU:
-            try:
-                import torch
-                gpu_available = torch.cuda.is_available()
-                _reader = easyocr.Reader(["en"], gpu=gpu_available, verbose=False)
-                if DEBUG_MODE and gpu_available:
-                    print(f"[OCR] GPU加速已启用")
-            except Exception as e:
-                if DEBUG_MODE:
-                    print(f"[OCR] GPU初始化失败，使用CPU模式")
-                _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-        else:
-            _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-    return _reader
+from ocr_util import get_ocr_reader, clean_ocr_text, capture_and_scale
 
 
 class PopulationReader(object):
@@ -55,30 +29,15 @@ class PopulationReader(object):
 
     def _capture(self):
         """截取人口显示区域并根据配置缩放"""
-        left, top, right, bottom = POPULATION_REGION
-        img = capture_region(left, top, right, bottom)
-
-        # 根据配置缩放图片
-        if OCR_IMAGE_SCALE != 1.0:
-            w, h = img.size
-            new_w = int(w * OCR_IMAGE_SCALE)
-            new_h = int(h * OCR_IMAGE_SCALE)
-            img = img.resize((new_w, new_h))
-
-        return np.array(img)
+        return capture_and_scale(POPULATION_REGION)
 
     def _ocr(self, img):
-        results = _get_reader().readtext(img, detail=0, allowlist="0123456789/\\|OolIsS ")
+        results = get_ocr_reader().readtext(img, detail=0, allowlist="0123456789/\\|OolIsS ")
         return " ".join(results).strip()
 
     def _parse(self, text):
         """解析OCR结果，提取当前人口和人口上限"""
-        cleaned = (text
-                   .replace("O", "0").replace("o", "0")
-                   .replace("l", "1").replace("I", "1")
-                   .replace("S", "5").replace("s", "5")
-                   .replace(" ", "").replace(",", "")
-                   .strip())
+        cleaned = clean_ocr_text(text, remove_spaces=True)
         m = re.search(r"(\d+)[/\\|](\d+)", cleaned)
         if m:
             self.current = int(m.group(1))

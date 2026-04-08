@@ -13,6 +13,8 @@
 - VILLAGER_CHECK_INTERVAL: 村民数量变化慢，不需要频繁检查（默认3秒）
 """
 
+import os
+
 # ==================== 基础参数 ====================
 CHECK_INTERVAL = 0.1  # 检测循环间隔（秒），平衡响应速度和CPU占用
 VILLAGERS_PER_TC = 3  # 每个TC排队的村民数量
@@ -95,20 +97,17 @@ TC_MATCH_THRESHOLD = 0.7  # TC图标匹配阈值
 TC_SELECT_DELAY = 0.03  # 按H键选中TC后的等待时间（秒）
 TC_RETRY_DELAY = 0.01  # TC检测失败后重试H键的等待时间（秒），给游戏UI足够的刷新时间
 TC_MAX_RETRY = 50  # TC检测失败时的最大重试次数
-TC_DETECTION_FAILED_COOLDOWN = 1000.0  # TC检测失败后的冷却时间（秒），避免频繁重试
+TC_DETECTION_FAILED_COOLDOWN = 1000.0  # TC检测失败后的冷却时间（秒），避免频繁重试。值很大是因为冷却期间会监控村民图标，检测到后提前结束
 COOLDOWN_CHECK_INTERVAL = 0.5  # 冷却期间的检测间隔（秒）
 QUEUE_DELAY = 0  # 每次按Q键之间的延迟，设为0最快
 
 # ==================== 目录路径 ====================
-import os
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 DEBUG_OUTPUT_DIR = os.path.join(BASE_DIR, "debug_output")
 
 # 自动创建调试输出目录
-if not os.path.exists(DEBUG_OUTPUT_DIR):
-    os.makedirs(DEBUG_OUTPUT_DIR)
+os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
 
 # 模板图片路径
 VILLAGER_TEMPLATE = os.path.join(TEMPLATES_DIR, "cunmin.png")

@@ -26,11 +26,10 @@ TC数量检测模块
 """
 import os
 import time
-import numpy as np
 import cv2
 from config import *
 from screenshot_util import capture_region_np
-from logger import log_tc, log_perf
+from logger import log_tc, perf_stats
 
 # 检测区域和阈值配置
 REGION = TC_ICON_REGION  # 多TC主检测区域
@@ -43,13 +42,39 @@ EARLY_EXIT_THRESHOLD = 0.95  # 提前退出阈值，置信度超过此值直接�
 _template_cache = {}
 _template_crop_cache = {}
 _single_tc_template = None  # 单TC预检测专用模板
+_max_tc_number = None  # 动态检测到的最大TC编号模板（避免硬编码搜索范围）
+
+
+def _detect_max_tc_number():
+    """
+    动态检测可用的最大TC编号模板
+    扫描 templates/tc_number_N.png，找到最大的N
+    避免硬编码 range(1, 21) 在模板不足时做无用匹配
+    """
+    max_num = 0
+    for num in range(1, 50):  # 理论上限50，实际找到不存在的就停止
+        template_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+        if os.path.exists(template_path):
+            max_num = num
+        else:
+            break  # 编号连续，遇到不存在的即可停止
+    return max_num
+
+
+def _get_max_tc_number():
+    """获取最大TC编号（带缓存）"""
+    global _max_tc_number
+    if _max_tc_number is None:
+        _max_tc_number = _detect_max_tc_number()
+        if DEBUG_MODE:
+            print(f"[TC] 检测到最大TC编号模板: tc_number_{_max_tc_number}.png")
+    return _max_tc_number
 
 
 def _load_single_tc_template():
     """加载单TC预检测专用模板（灰度图，带缓存）"""
     global _single_tc_template
     if _single_tc_template is None:
-        from config import TC_SINGLE_TEMPLATE
         if os.path.exists(TC_SINGLE_TEMPLATE):
             _single_tc_template = cv2.imread(TC_SINGLE_TEMPLATE, cv2.IMREAD_GRAYSCALE)
     return _single_tc_template
@@ -111,7 +136,6 @@ class TCCounter:
         self.detection_failed = False
 
         # 等待UI刷新（因为外部刚按了H键）
-        from config import TC_RETRY_DELAY
         time.sleep(TC_RETRY_DELAY)
 
         # 重试循环：每次都检测两个区域
@@ -125,7 +149,7 @@ class TCCounter:
                 log_tc("结果", f"单TC区域匹配 TC数=1")
                 if DEBUG_PERFORMANCE:
                     t_total = time.time() - t_start
-                    log_perf("TC", f"总耗时={t_total*1000:.2f}ms (单TC)")
+                    perf_stats.record("[6.2] TC检测(单TC)", t_total)
                 return
 
             # 2. 检测多TC区域
@@ -144,9 +168,9 @@ class TCCounter:
 
                 if DEBUG_PERFORMANCE:
                     t_total = time.time() - t_start
-                    log_perf("TC", f"总耗时={t_total*1000:.2f}ms")
-                    log_perf("TC", f"  截图={((t_capture-t_start)*1000):.2f}ms")
-                    log_perf("TC", f"  匹配={((t_match-t_capture)*1000):.2f}ms")
+                    perf_stats.record("[6.2] TC截图", (t_capture-t_start))
+                    perf_stats.record("[6.2] TC匹配", (t_match-t_capture))
+                    perf_stats.record("[6.2] TC检测(多TC)", t_total)
                 return
 
             # 两个区域都未检测到TC，等待后重试
@@ -160,7 +184,7 @@ class TCCounter:
 
         if DEBUG_PERFORMANCE:
             t_total = time.time() - t_start
-            log_perf("TC", f"总耗时={t_total*1000:.2f}ms (检测失败)")
+            perf_stats.record("[6.2] TC检测(失败)", t_total)
 
     def _check_single_tc_region(self, save_debug=False):
         """
@@ -294,11 +318,11 @@ class TCCounter:
             cv2.imwrite(debug_path, screenshot_crop)
             print(f"[TC阶段2] 匹配区域={debug_path}")
 
-        # 遍历所有数字模板，找最佳匹配
+        # 遍历所有数字模板，找最佳匹配（动态上限，基于实际存在的模板文件）
         best_number = 1
         best_confidence = 0
 
-        for num in range(1, 21):
+        for num in range(1, _get_max_tc_number() + 1):
             template_gray = _load_template_crop(num)
             if template_gray is None:
                 if DEBUG_MODE:

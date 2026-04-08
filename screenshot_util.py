@@ -10,7 +10,7 @@
 """
 import numpy as np
 import mss
-from PIL import Image, ImageGrab
+from PIL import Image
 import threading
 
 # 线程局部存储，每个线程有独立的mss实例
@@ -26,6 +26,29 @@ def get_sct():
     return _thread_local.sct
 
 
+def _fallback_notify(error):
+    """通知用户mss回退到PIL（仅通知一次）"""
+    global _use_mss, _fallback_notified
+    _use_mss = False
+    if not _fallback_notified:
+        print(f"\n[警告] mss库截图失败，已切换到PIL.ImageGrab模式")
+        print(f"[警告] 原因: {error}")
+        print(f"[警告] 性能可能下降，但功能正常\n")
+        _fallback_notified = True
+
+
+def _grab_mss(left, top, right, bottom):
+    """使用mss截图，返回 (screenshot_object, success)"""
+    sct = get_sct()
+    monitor = {
+        "left": left,
+        "top": top,
+        "width": right - left,
+        "height": bottom - top
+    }
+    return sct.grab(monitor)
+
+
 def capture_region(left, top, right, bottom):
     """
     截取指定区域
@@ -36,31 +59,18 @@ def capture_region(left, top, right, bottom):
     返回：
         PIL.Image对象（RGB格式）
     """
-    global _use_mss, _fallback_notified
+    global _use_mss
 
     if _use_mss:
         try:
-            sct = get_sct()
-            monitor = {
-                "left": left,
-                "top": top,
-                "width": right - left,
-                "height": bottom - top
-            }
-            screenshot = sct.grab(monitor)
+            screenshot = _grab_mss(left, top, right, bottom)
             # mss返回的是BGRA格式，转换为RGB
-            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-            return img
+            return Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
         except Exception as e:
-            # 回退到PIL并通知用户（仅通知一次）
-            _use_mss = False
-            if not _fallback_notified:
-                print(f"\n[警告] mss库截图失败，已切换到PIL.ImageGrab模式")
-                print(f"[警告] 原因: {e}")
-                print(f"[警告] 性能可能下降，但功能正常\n")
-                _fallback_notified = True
+            _fallback_notify(e)
 
-    # 回退到PIL.ImageGrab
+    # 回退到PIL.ImageGrab（延迟导入，仅在需要时加载）
+    from PIL import ImageGrab
     return ImageGrab.grab(bbox=(left, top, right, bottom))
 
 
@@ -74,31 +84,19 @@ def capture_region_np(left, top, right, bottom):
     返回：
         numpy数组（BGR格式）
     """
-    global _use_mss, _fallback_notified
+    global _use_mss
 
     if _use_mss:
         try:
-            sct = get_sct()
-            monitor = {
-                "left": left,
-                "top": top,
-                "width": right - left,
-                "height": bottom - top
-            }
-            screenshot = sct.grab(monitor)
+            screenshot = _grab_mss(left, top, right, bottom)
             # 转换为numpy数组（BGRA -> BGR）
             img = np.array(screenshot)
             return img[:, :, :3]  # 去掉Alpha通道
         except Exception as e:
-            # 回退到PIL并通知用户（仅通知一次）
-            _use_mss = False
-            if not _fallback_notified:
-                print(f"\n[警告] mss库截图失败，已切换到PIL.ImageGrab模式")
-                print(f"[警告] 原因: {e}")
-                print(f"[警告] 性能可能下降，但功能正常\n")
-                _fallback_notified = True
+            _fallback_notify(e)
 
-    # 回退到PIL.ImageGrab
+    # 回退到PIL.ImageGrab（延迟导入，仅在需要时加载）
+    from PIL import ImageGrab
     img_pil = ImageGrab.grab(bbox=(left, top, right, bottom))
     img_array = np.array(img_pil)
     # PIL返回RGB，转换为BGR

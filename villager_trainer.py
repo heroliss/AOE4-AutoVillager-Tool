@@ -40,7 +40,7 @@ class VillagerTrainer(object):
             if DELAY > 0:
                 time.sleep(DELAY)
 
-        # 操作完成后按ESC取消TC选中状态
+        # 操作完成后按ESC取消TC选中状态（防止TC面板遮挡后续检测）
         pydirectinput.press("escape")
         if DELAY > 0:
             time.sleep(DELAY)

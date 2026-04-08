@@ -11,8 +11,6 @@ AOE4 自动生产村民工具
 
 =================== 主循环流程 ===================
 
-[0] 循环开始 → 等待 CHECK_INTERVAL（降低CPU占用）
-
 [1] 修饰键检测（Shift/Ctrl/Alt）
     └── 按下 → 输出提示并继续（下次循环会跳过）
 
@@ -43,21 +41,21 @@ AOE4 自动生产村民工具
     └── 操作进行中 → 输出提示并跳过
 
 [6] 获取锁并执行操作
-    ├── 保存当前选中（Ctrl+0）
-    ├── 选中TC并检测数量
-    ├── 计算生产数量
-    ├── 执行排队操作（Q键）
-    ├── 等待 BLOCK_INPUT_DURATION
-    ├── 恢复选中（0）
-    ├── 取消编组（Ctrl+Alt+0）
-    └── 等待 POST_OPERATION_DELAY
+    ├── 6.1 保存当前选中（Ctrl+0）
+    ├── 6.2 选中TC并检测数量
+    ├── 6.3 根据空位和食物计算生产数量
+    ├── 6.4 执行排队操作（Q键）
+    ├── 6.5 等待 BLOCK_INPUT_DURATION（排队后缓冲）
+    ├── 6.6 恢复选中（0）
+    ├── 6.7 取消编组（Ctrl+Alt+0）
+    └── 6.8 等待 POST_OPERATION_DELAY（UI更新等待）
 
-[7] 释放锁 → 继续下次循环
+[7] 释放锁 → 补充等待 CHECK_INTERVAL（仅当循环总耗时不足时）
 
 =================== 延迟说明 ===================
 
 手动延迟（可配置）：
-  - CHECK_INTERVAL         = 0.05s # 循环检测间隔
+  - CHECK_INTERVAL         = 0.1s  # 循环检测间隔
   - BLOCK_INPUT_DURATION   = 0s    # 操作后等待
   - POST_OPERATION_DELAY   = 3.0s  # 操作后UI更新等待
   - QUEUE_DELAY            = 0s    # 排队按键间隔
@@ -69,9 +67,9 @@ AOE4 自动生产村民工具
   - OCR识别（3项） ~0.3-0.5s（并行执行）
 
 检测循环总耗时（无操作时）：
-  - 最小：~50ms（CHECK_INTERVAL）
-  - 正常：~150-200ms（检测约100ms + 间隔50ms）
-  - OCR触发时：~300-500ms + CHECK_INTERVAL
+  - 最小：~100ms（CHECK_INTERVAL，仅快速跳过路径）
+  - 正常：~150-200ms（检测约100ms + 补充间隔）
+  - OCR触发时：~300-500ms（无需额外间隔，OCR耗时已超过CHECK_INTERVAL）
 
 =================== 性能优化 ===================
   - 优先执行快速检测（模板匹配），只有在需要时才执行慢速OCR
@@ -99,6 +97,10 @@ AOE4 自动生产村民工具
   - 本工具基于 2560x1440 分辨率 + HDR开启
   - 模板图片基于中国阵营，但所有阵营通用
   - 如需其他分辨率，请调整 config.py 中的坐标
+
+=================== 特殊场景 ===================
+  - 游牧开局：开局无TC，人口上限为0（如5/0），需建造TC后才能生产村民
+  - 食物为0：EasyOCR对单个"0"识别能力差，使用三级兜底策略确保正确识别
 
 按 Ctrl+C 退出。
 """
@@ -146,6 +148,8 @@ import pydirectinput
 from input_config import *  # noqa: F401, F403
 
 from contextlib import nullcontext
+from logger import perf_stats
+import concurrent.futures
 
 # 修饰键检测（用户按下Shift/Ctrl/Alt时暂停检测）
 import ctypes
@@ -159,9 +163,9 @@ VK_MENU = 0x12  # Alt键
 def is_modifier_key_pressed():
     """检测用户是否按下了修饰键（Shift/Ctrl/Alt）"""
     return (
-        user32.GetAsyncKeyState(VK_SHIFT) & 0x8000 != 0 or
-        user32.GetAsyncKeyState(VK_CONTROL) & 0x8000 != 0 or
-        user32.GetAsyncKeyState(VK_MENU) & 0x8000 != 0
+        (user32.GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 or
+        (user32.GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 or
+        (user32.GetAsyncKeyState(VK_MENU) & 0x8000) != 0
     )
 
 print("  [✓] 所有模块加载完成!\n", flush=True)
@@ -207,14 +211,20 @@ class LogMerger:
 def main():
     # 1. 检测GPU状态
     print("  [>] 检测GPU加速...", flush=True)
-    gpu_status = "未启用（使用CPU）"
+    gpu_available = False
+    gpu_name = ""
     try:
         import torch
         if torch.cuda.is_available():
-            gpu_status = f"已启用 ({torch.cuda.get_device_name(0)})"
-    except:
+            gpu_available = True
+            gpu_name = torch.cuda.get_device_name(0)
+    except Exception:
         pass
-    print(f"       GPU: {gpu_status}", flush=True)
+    ocr_mode = "GPU加速" if (USE_GPU and gpu_available) else "CPU模式"
+    if gpu_available:
+        print(f"       GPU: {gpu_name} (可用) | OCR模式: {ocr_mode}", flush=True)
+    else:
+        print(f"       GPU: 不可用 | OCR模式: {ocr_mode}", flush=True)
 
     # 2. 清理残留锁文件
     print("  [>] 清理残留文件...", flush=True)
@@ -230,7 +240,9 @@ def main():
     villager_counter   = VillagerCounter()
     food_reader        = FoodReader()
     cooldown_detector  = VillagerTrainingDetector()
+    villager_trainer   = VillagerTrainer()  # 复用实例，避免每次循环创建
     logger             = LogMerger()
+    executor           = concurrent.futures.ThreadPoolExecutor(max_workers=3)  # 复用线程池
 
     # 4. 预热OCR模型
     print(flush=True)
@@ -256,32 +268,40 @@ def main():
 
     try:
         while True:
+            perf_stats.maybe_report()
             loop_start = time.time()
 
-            # 循环间隔，降低CPU占用
-            if CHECK_INTERVAL > 0:
-                time.sleep(CHECK_INTERVAL)
-
-            # 0. 检查用户是否按下了修饰键（Shift/Ctrl/Alt）
+            # [1] 检查用户是否按下了修饰键（Shift/Ctrl/Alt）
             if is_modifier_key_pressed():
                 logger.log("检测到修饰键，暂停")
+                # 短暂等待避免CPU空转
+                if CHECK_INTERVAL > 0:
+                    time.sleep(CHECK_INTERVAL)
                 continue
+            t_modifier = time.time()
+            perf_stats.record("[1] 修饰键检测", t_modifier - loop_start)
 
-            # 1. 游戏窗口检测
+            # [2] 游戏窗口检测
             game_detector.do()
 
-            # 1.1 状态处理
+            # 2.1 状态处理
             if not game_detector.window_active:
                 # 不在游戏窗口（窗口标题不匹配）
                 logger.log("不在游戏窗口")
+                if CHECK_INTERVAL > 0:
+                    time.sleep(CHECK_INTERVAL)
                 continue
 
             if not game_detector.pixel_match:
                 # 在游戏窗口但不在游戏中（如主菜单、加载画面）
                 logger.log("不在游戏中")
+                if CHECK_INTERVAL > 0:
+                    time.sleep(CHECK_INTERVAL)
                 continue
+            t_game = time.time()
+            perf_stats.record("[2] 游戏窗口检测", t_game - t_modifier)
 
-            # 2. 村民生产状态检测（模板匹配）
+            # [3] 村民生产状态检测（模板匹配）
             training_detector.do()
 
             # 调试模式：打印所有检测结果
@@ -309,6 +329,8 @@ def main():
                     logger.log(f"[遮挡] 置信度={training_detector.blocked_confidence:.3f} 阈值={BLOCKED_MATCH_THRESHOLD:.3f}")
                 else:
                     logger.log("生产队列图标被遮挡，无法判定是否有村民在生产")
+                if CHECK_INTERVAL > 0:
+                    time.sleep(CHECK_INTERVAL)
                 continue
 
             # UI渐变中：静默跳过
@@ -330,31 +352,36 @@ def main():
             if last_trigger_time and DEBUG_MODE:
                 elapsed = detection_time - last_trigger_time
                 logger.force_print(f"[时间] 距上次触发 {elapsed:.2f}秒")
+            perf_stats.record("[3] 村民生产状态检测", detection_time - t_game)
 
-            # 3. OCR识别（并行执行）
+            # [4] OCR识别（并行执行）
             ocr_start = time.time()
-            current_time = time.time()
+            current_time = ocr_start  # 避免重复调用 time.time()
             should_check_villagers = (current_time - last_villager_check_time) >= VILLAGER_CHECK_INTERVAL
 
-            # 并行执行OCR操作以节省时间
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                future_population = executor.submit(population_reader.do)
-                future_food = executor.submit(food_reader.do)
+            # 并行执行OCR操作以节省时间（复用线程池，避免每次创建/销毁）
+            future_villager = None
+            future_population = executor.submit(population_reader.do)
+            future_food = executor.submit(food_reader.do)
 
-                # 只在需要时检查村民数量
-                if should_check_villagers:
-                    future_villager = executor.submit(villager_counter.do)
-                    concurrent.futures.wait([future_population, future_villager, future_food])
-                    last_villager_check_time = current_time
-                else:
-                    concurrent.futures.wait([future_population, future_food])
+            # 只在需要时检查村民数量
+            if should_check_villagers:
+                future_villager = executor.submit(villager_counter.do)
+                concurrent.futures.wait([future_population, future_villager, future_food])
+                last_villager_check_time = current_time
+            else:
+                concurrent.futures.wait([future_population, future_food])
 
             if DEBUG_MODE:
                 ocr_total = time.time() - ocr_start
                 logger.force_print(f"[OCR耗时] {ocr_total:.3f}秒")
+            t_ocr = time.time()
+            perf_stats.record("[4] OCR识别", t_ocr - ocr_start)
 
-            # 3.1 检查人口识别结果
+            # [5] 条件检查
+            t_cond_start = time.time()
+
+            # 5.1 检查人口识别结果
             if population_reader.current is None:
                 if DEBUG_MODE:
                     logger.log(f"[识别失败] 人口 current={population_reader.current} limit={population_reader.limit}")
@@ -362,7 +389,7 @@ def main():
                     logger.log("人口识别失败，跳过")
                 continue
 
-            # 3.2 检查村民总数是否超过上限
+            # 5.2 检查村民总数是否超过上限
             if should_check_villagers and villager_counter.total >= MAX_VILLAGERS:
                 if DEBUG_MODE:
                     logger.log(f"[上限] 村民={villager_counter.total}/{MAX_VILLAGERS}")
@@ -370,7 +397,7 @@ def main():
                     logger.log(f"村民已达上限（{villager_counter.total}/{MAX_VILLAGERS}），跳过")
                 continue
 
-            # 3.3 检查食物是否充足
+            # 5.3 检查食物是否充足
             if food_reader.amount is None:
                 if DEBUG_MODE:
                     logger.log(f"[识别失败] 食物 amount={food_reader.amount}")
@@ -385,18 +412,20 @@ def main():
                     logger.log(f"食物不足（{food_reader.amount}/{MIN_FOOD}），跳过")
                 continue
 
-            # 4. 计算可用人口空位
+            # 5.4 计算可用人口空位
             available_slots = population_reader.limit - population_reader.current
 
             # 如果没有空位，跳过（不选中TC）
             if available_slots <= 0:
-                if DEBUG_MODE:
+                if population_reader.limit == 0:
+                    logger.log(f"人口已满（{population_reader.current}/{population_reader.limit}），可能尚未建造TC（游牧开局），跳过")
+                elif DEBUG_MODE:
                     logger.log(f"[无空位] 人口={population_reader.current}/{population_reader.limit}")
                 else:
                     logger.log(f"人口已满（{population_reader.current}/{population_reader.limit}），跳过")
                 continue
 
-            # 5. 获取锁，防止并发执行
+            # 5.5 获取锁，防止并发执行
             if not acquire_lock():
                 if DEBUG_MODE:
                     logger.log("[锁] 获取失败")
@@ -404,11 +433,16 @@ def main():
                     logger.log("操作进行中，跳过")
                 continue
 
-            # 6. 执行生产村民操作
+            t_cond = time.time()
+            perf_stats.record("[5] 条件检查", t_cond - t_cond_start)
+
+            # [6] 执行生产村民操作
+            t_op_start = time.time()
             try:
                 # 6.1 计算预估操作时长：选中TC + 排队 + 操作后等待
-                estimated_duration = TC_SELECT_DELAY + (VILLAGERS_PER_TC * QUEUE_DELAY) + BLOCK_INPUT_DURATION + 1.0
-                max_block_duration = min(estimated_duration * 2, 5.0)  # 最多5秒
+                # 时长与TC数量相关：多TC时排队按键更多，需要更长的屏蔽时间
+                estimated_duration = TC_SELECT_DELAY + (VILLAGERS_PER_TC * QUEUE_DELAY) + BLOCK_INPUT_DURATION + 1.0  # +1.0s为按键操作缓冲
+                max_block_duration = min(estimated_duration * 2, 3.0 + VILLAGERS_PER_TC * 0.5)  # 基础3秒 + 每TC排队0.5秒缓冲
 
                 # 6.2 屏蔽输入并执行所有操作
                 blocker = input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext()
@@ -420,12 +454,16 @@ def main():
                     pydirectinput.keyDown('ctrl')
                     pydirectinput.press('0')
                     pydirectinput.keyUp('ctrl')
+                    t_save = time.time()
+                    perf_stats.record("[6.1] 保存当前选中", t_save - t_op_start)
 
                     # 6.2.2 选中TC并检测数量
                     if DEBUG_MODE:
                         logger.force_print("[操作] 选中TC")
                     tc_selector.do()
                     tc_counter.do()
+                    t_tc = time.time()
+                    perf_stats.record("[6.2] 选中TC并检测数量", t_tc - t_save)
 
                 # with块结束，输入屏蔽自动解除
 
@@ -475,10 +513,11 @@ def main():
                         logger.force_print(f"[缓存] 更新TC数量缓存={cached_tc_count}")
 
                 # TC检测成功，继续执行生产逻辑（需要重新屏蔽输入）
+                t_produce_start = time.time()
                 with input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext():
                     planned_villagers = VILLAGERS_PER_TC * tc_counter.count
 
-                    # 6.2.5 根据可用空位和食物调整生产数量
+                    # 6.2.3 根据可用空位和食物调整生产数量
                     actual_villagers = min(planned_villagers, available_slots)
                     max_villagers_by_food = food_reader.amount // FOOD_PER_VILLAGER
                     actual_villagers = min(actual_villagers, max_villagers_by_food)
@@ -491,7 +530,7 @@ def main():
                             logger.force_print(f"食物不足以生产村民（{food_reader.amount}/{FOOD_PER_VILLAGER}）")
                         continue
 
-                    # 6.2.6 显示操作信息
+                    # 6.2.4 显示操作信息
                     if actual_villagers < planned_villagers:
                         reason = []
                         if actual_villagers == available_slots:
@@ -509,23 +548,25 @@ def main():
                         else:
                             logger.force_print(f"生产 {actual_villagers} 个村民 (人口 {population_reader.current}/{population_reader.limit}, 村民 {villager_counter.total}/{MAX_VILLAGERS}, 食物 {food_reader.amount}, TC {tc_counter.count})")
 
-                    # 6.2.7 执行排队操作
+                    # 6.2.5 执行排队操作
                     if DEBUG_MODE:
                         logger.force_print("[操作] 排队村民")
-                    VillagerTrainer().do(count=actual_villagers)
+                    villager_trainer.do(count=actual_villagers)
+                    t_queue = time.time()
+                    perf_stats.record("[6.3] 计算并排队村民", t_queue - t_produce_start)
 
-                    # 6.2.8 操作后等待，让操作完全完成
+                    # 6.2.6 操作后等待，让操作完全完成
                     if BLOCK_INPUT_DURATION > 0:
                         if DEBUG_MODE:
                             logger.force_print(f"[等待] {BLOCK_INPUT_DURATION}秒")
                         time.sleep(BLOCK_INPUT_DURATION)
 
-                    # 6.2.9 恢复之前选中的单位（按0）
+                    # 6.2.7 恢复之前选中的单位（按0）
                     if DEBUG_MODE:
                         logger.force_print("[操作] 恢复选中")
                     pydirectinput.press('0')
 
-                    # 6.2.10 取消编组（Ctrl+Alt+0）
+                    # 6.2.8 取消编组（Ctrl+Alt+0）
                     if DEBUG_MODE:
                         logger.force_print("[操作] 取消编组")
                     pydirectinput.keyDown('ctrl')
@@ -533,12 +574,13 @@ def main():
                     pydirectinput.press('0')
                     pydirectinput.keyUp('alt')
                     pydirectinput.keyUp('ctrl')
+                    t_restore = time.time()
+                    perf_stats.record("[6.4] 等待+恢复选中+取消编组", t_restore - t_queue)
 
                     # 记录触发时间
                     last_trigger_time = time.time()
-                    if DEBUG_MODE:
-                        total_time = last_trigger_time - loop_start
-                        logger.force_print(f"[总耗时] {total_time:.3f}秒")
+                    total_time = last_trigger_time - loop_start
+                    perf_stats.record("[6] 执行操作（总耗时）", total_time)
 
                 # 操作完成后，等待游戏UI更新（避免连续触发）
                 # 必须在释放锁之前等待，确保下次循环时村民图标已出现
@@ -547,6 +589,15 @@ def main():
 
             finally:
                 release_lock()
+
+            # [0] 循环间隔，降低CPU占用
+            # 放在循环末尾：如果本轮已有OCR/操作耗时，则减少等待时间
+            # 仅在循环总耗时不足 CHECK_INTERVAL 时补充等待
+            if CHECK_INTERVAL > 0:
+                elapsed_loop = time.time() - loop_start
+                remaining = CHECK_INTERVAL - elapsed_loop
+                if remaining > 0:
+                    time.sleep(remaining)
 
     except KeyboardInterrupt:
         logger.force_print("\n程序已退出")
