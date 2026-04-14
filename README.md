@@ -9,7 +9,7 @@
 - ⚠️ **需要管理员权限运行**（用于输入屏蔽功能）
 - 基于 2560x1440 分辨率 + HDR开启
 - 模板基于中国阵营，所有阵营通用
-- 其他配置需调整 [config.py](config.py) 参数（详见下方配置说明）
+- 支持 GUI 图形界面和命令行两种运行模式
 
 ## 功能特性
 
@@ -19,10 +19,21 @@
 - ✅ 智能房屋管理和UI遮挡检测
 - ✅ 优化按键操作（shift+q批量排队）
 - ✅ 输入保护（操作时临时等待避免误操作）
+- ✅ GUI图形界面（实时日志、状态栏、配置管理、快捷键）
+- ✅ 配置热更新（修改参数实时生效，无需重启）
+- ✅ PyInstaller打包支持（一键生成exe）
 
 ## 快速开始
 
-### 1. 游戏设置要求
+### 方式一：直接运行exe（推荐）
+
+1. 从 [Releases](../../releases) 下载最新版本的 `AOE4-AutoVillager.exe`
+2. 以管理员身份运行（右键 → 以管理员身份运行）
+3. 配置文件（`shortcuts.json`、`config_override.json`）会自动保存在exe同目录
+
+### 方式二：从源码运行
+
+#### 1. 游戏设置要求
 
 **重要：** 在使用本工具前，必须在游戏中进行以下设置：
 
@@ -34,17 +45,17 @@
 
 **b) 快捷键设置（多TC支持）**
 
-进入游戏 → 设置 → 控制 → 查看并重新映射控制方式  → 左侧建筑选择 → 选择所有城镇中心 → 设置为 **H键**
+进入游戏 → 设置 → 控制 → 查看并重新映射控制方式 → 左侧建筑选择 → 选择所有城镇中心 → 设置为 **H键**
 
 该设置允许工具通过H键同时选中所有城镇中心，实现多TC同时生产村民。如果不设置此快捷键，工具只能在单TC时正常工作。
 
-### 2. 安装依赖
+#### 2. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 准备模板图片（必需）
+#### 3. 准备模板图片（必需）
 
 以下模板文件必须存在于 [templates/](templates/) 目录：
 
@@ -52,7 +63,15 @@ pip install -r requirements.txt
 - `tc_icon.png` - TC图标（必需）
 - `blocked.png` - UI遮挡检测（必需）
 
-### 4. 运行程序
+#### 4. 运行程序
+
+**GUI 模式（推荐）：**
+
+```bash
+python gui_app.py
+```
+
+**命令行模式：**
 
 ```bash
 python main.py
@@ -60,13 +79,59 @@ python main.py
 
 > 提示：程序使用输入屏蔽功能防止操作期间的误触，需要管理员权限才能调用Windows底层API。
 >
-> 运行方式：以管理员身份打开终端，然后执行 `python main.py`
+> 运行方式：以管理员身份打开终端，然后执行上述命令。
 >
-> 如果不想使用管理员权限，可在 [config.py](config.py) 中设置 `ENABLE_INPUT_BLOCK = False` 关闭输入屏蔽功能。
+> 如果不想使用管理员权限，可在配置中关闭 `ENABLE_INPUT_BLOCK` 输入屏蔽功能。
+
+## GUI界面说明
+
+GUI模式提供以下功能：
+
+- **启动/停止/暂停** 控制自动生产
+- **清零TC** 重置TC数量缓存
+- **实时日志** 彩色分类显示运行状态
+- **状态栏** 显示最新一条关键信息
+- **配置摘要** 显示核心参数
+- **快捷键设置** 自定义各功能的快捷键
+- **配置管理** 可视化修改所有参数，实时生效
+
+### 快捷键设置
+
+点击"快捷键"按钮可以为各功能设置自定义快捷键：
+
+- 点击输入框后直接按下快捷键即可自动捕获
+- 支持单键（F9、Space）和组合键（Ctrl+S、Alt+P、Ctrl+Space）
+- 也可手动输入快捷键（如 `Ctrl+Space`）
+- 快捷键配置保存在程序同目录的 `shortcuts.json` 文件
+- 删除该文件即可恢复默认（无快捷键）
+
+### 配置管理
+
+点击"⚙ 配置"按钮可打开配置窗口：
+
+- 参数修改后**实时生效**，无需重启
+- 点击"保存"将配置持久化到 `config_override.json`（下次启动自动加载）
+- 点击"恢复默认"可将所有参数还原为初始值
+- 如果所有配置都恢复默认值并保存，则自动删除配置文件
+
+## 打包为exe
+
+使用 [build.py](build.py) 进行打包：
+
+```bash
+python build.py              # 打包GUI CPU精简版（推荐，约300MB）
+python build.py --full       # 打包GUI完整版（含GPU支持，约2GB）
+python build.py --cli        # 打包命令行版本
+python build.py --clean      # 清理包括虚拟环境（强制重新下载依赖）
+```
+
+**CPU精简版原理：** 自动创建临时虚拟环境，安装CPU-only版本的PyTorch后打包，确保不包含CUDA库，体积大幅缩小。虚拟环境默认保留以便复用。
+
+打包完成后，exe文件在 `build/aoe4_gui_cpu/` 目录中。
 
 ## 配置说明
 
-所有参数在 [config.py](config.py) 中管理。
+所有参数在 [config.py](config.py) 中管理，也可通过GUI配置窗口修改。
 
 ### 基础参数
 
@@ -74,27 +139,27 @@ python main.py
 VILLAGERS_PER_TC = 3    # 每个TC排队数量
 MAX_VILLAGERS = 120     # 村民总数上限
 MIN_FOOD = 50           # 最低食物要求
-VILLAGER_CHECK_INTERVAL = 10.0  # 村民数量检查间隔（秒），村民数量变化慢，不需要频繁检查
+VILLAGER_CHECK_INTERVAL = 3  # 村民数量检查间隔（秒），村民数量变化慢，不需要频繁检查
 ```
 
 ### OCR性能优化
 
 ```python
 USE_GPU = False          # 是否使用GPU加速OCR（小图片OCR时CPU更快）
-OCR_IMAGE_SCALE = 0.5    # OCR图片缩放比例（0.5=缩小到50%），越小越快但可能影响准确率
+OCR_IMAGE_SCALE = 1      # OCR图片缩放比例（0.5=缩小到50%），越小越快但可能影响准确率
 ```
 
 **说明：**
 - 对于小图片OCR，CPU模式通常比GPU更快（GPU有数据传输开销）
 - `OCR_IMAGE_SCALE` 可根据识别准确率调整：
+  - `1.0`：默认模式，识别准确
   - `0.5`：快速模式，适合大部分情况
-  - `0.75-1.0`：准确模式，识别失败时使用
   - `0.25`：极速模式，可能导致识别失败
 
 ### 操作时序设置
 
 ```python
-POST_OPERATION_DELAY = 0.2  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发
+POST_OPERATION_DELAY = 3.0  # 操作完成后等待游戏UI更新的时间（秒），避免连续触发
 ```
 
 ### 调试模式
@@ -103,6 +168,7 @@ POST_OPERATION_DELAY = 0.2  # 操作完成后等待游戏UI更新的时间（秒
 DEBUG_MODE = False                    # 全局调试（生成截图和详细日志）
 DEBUG_BLOCKED_DETECTION = False       # 遮挡检测调试
 DEBUG_TRAINING_DETECTION = False      # 村民生产检测调试
+DEBUG_SAVE_SCREENSHOTS = False        # 保存调试截图（关闭可提升5-10ms）
 ```
 
 ### 不同分辨率适配
@@ -117,16 +183,16 @@ GAME_DETECT_PIXEL = (2526, 1405)
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
 
 # UI遮挡检测区域（队列区域内的特征点）
-BLOCKED_DETECT_REGION = (260, 1000, 265, 1005)
+BLOCKED_DETECT_REGION = (265, 950, 280, 970)
 
 # 人口显示区域（如 "50/200"）
-POPULATION_REGION = (45, 1126, 151, 1183)
+POPULATION_REGION = (50, 1140, 150, 1170)
 
 # 食物数量显示区域
 FOOD_REGION = (50, 1222, 140, 1248)
 
 # TC图标检测区域（左下角建筑图标区域）
-TC_ICON_REGION = (390, 1210, 700, 1260)
+TC_ICON_REGION = (444, 1212, 492, 1259)
 
 # 村民总数统计区域（左下角数字区域）
 VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
@@ -171,8 +237,9 @@ OCR识别（人口、食物、村民数） → 资源检查 →
 **性能优化：**
 - 优先执行快速检测（模板匹配，几毫秒）
 - 只有在"没有村民生产"时才执行慢速OCR（0.1-0.2秒）
-- 村民数量每10秒检查一次（变化慢，无需频繁检查）
+- 村民数量每3秒检查一次（变化慢，无需频繁检查）
 - 人口和食物并行OCR，减少等待时间
+- 修饰键检测暂停不影响快捷键识别
 
 ### 生产操作详细流程
 
@@ -180,13 +247,11 @@ OCR识别（人口、食物、村民数） → 资源检查 →
 
 1. **🔒 开始屏蔽输入** - 阻止物理鼠标键盘输入，确保操作不被打断
 2. **📦 Ctrl+0** - 将当前选中的单位保存到0号编组（临时）
-3. **🔔 播放蜂鸣** - 可选的音效提醒（默认关闭）
-4. **🏰 按H键** - 选中所有城镇中心（需要在游戏中设置H键快捷键）
-5. **👷 Shift+Q** - 批量排队村民（根据TC数量和资源计算数量）
-6. **⎋ ESC** - 取消TC选中状态
-7. **🔄 按0键** - 恢复之前选中的单位
-8. **🗑️ Ctrl+Alt+0** - 取消0号临时编组
-9. **🔓 结束屏蔽** - 恢复物理输入控制
+3. **🏰 按H键** - 选中所有城镇中心（需要在游戏中设置H键快捷键）
+4. **👷 Shift+Q** - 批量排队村民（根据TC数量和资源计算数量）
+5. **🔄 按0键** - 恢复之前选中的单位
+6. **🗑️ Ctrl+Alt+0** - 取消0号临时编组
+7. **🔓 结束屏蔽** - 恢复物理输入控制
 
 整个操作耗时极短，几乎不影响正常游戏操作。
 
@@ -207,9 +272,17 @@ OCR识别（人口、食物、村民数） → 资源检查 →
 
 - **需要管理员权限**：右键以管理员身份运行程序
 - **自动超时保护**：最长5秒自动解除，防止卡死
-- **可选功能**：可在 [config.py](config.py) 中设置 `ENABLE_INPUT_BLOCK = False` 关闭
+- **可选功能**：可在配置中关闭 `ENABLE_INPUT_BLOCK`
 
-### 3. 模板匹配技术
+### 3. 修饰键暂停机制
+
+当检测到按住 Shift、Ctrl 或 Alt 键时，临时暂停自动生产：
+
+- 按住修饰键时暂停，松开后自动恢复
+- 暂停不影响GUI快捷键的识别
+- 目的是防止按键冲突
+
+### 4. 模板匹配技术
 
 使用OpenCV的模板匹配算法检测UI元素：
 
@@ -219,7 +292,7 @@ OCR识别（人口、食物、村民数） → 资源检查 →
 
 不同元素使用不同阈值以平衡准确性和鲁棒性。
 
-### 4. UI遮挡检测技术
+### 5. UI遮挡检测技术
 
 使用三态判断机制检测生产队列UI是否被遮挡：
 
@@ -239,12 +312,7 @@ OCR识别（人口、食物、村民数） → 资源检查 →
 - 如果置信度变化 < 0.05，说明不是真正的渐变动画
 - 强制认为"未遮挡"，避免误判
 
-**技术优势：**
-- 非渐变状态响应快速（2次检测即确定）
-- 渐变状态准确判断（区分真渐变和场景误判）
-- 避免UI动画期间的误触发
-
-### 5. 半透明UI检测技术
+### 6. 半透明UI检测技术
 
 当UI叠加在村民图标上时，会导致置信度异常，可能误判为"没有村民生产"。使用三策略检测系统识别UI渐入渐出动画：
 
@@ -260,45 +328,26 @@ OCR识别（人口、食物、村民数） → 资源检查 →
 - 适用场景：UI正在渐出动画的尾声，置信度持续下降
 - 检测条件：最近3次持续下降（允许小幅波动±0.05），总体下降 > 0.1，当前 < 0.4
 
-**技术优势：**
-- 通过置信度变化模式识别UI动画，而非固定阈值
-- 区分半透明UI和其他单位图标（其他单位置信度稳定，半透明UI置信度快速变化）
-- 捕获完整的UI动画周期，包括渐出尾声
-- 避免UI动画期间的误触发生产
-
-### 6. TC数量缓存机制
+### 7. TC数量缓存机制
 
 为防止UI遮挡导致TC检测失败，使用缓存机制：
 
-**工作原理：**
 - 开局缓存值为0
 - 每次成功检测到TC数量后更新缓存
 - TC检测失败时使用缓存值继续生产
 - 如果缓存为0且检测失败，进入冷却状态
+- 冷却期间每秒检查村民生产图标，检测到则提前结束冷却
 
-**冷却期间监控：**
-- 冷却期间每秒检查一次村民生产图标
-- 如果检测到村民图标，说明TC已建造，提前结束冷却
-- 避免长时间等待，提升响应速度
-
-**技术优势：**
-- 避免UI遮挡导致的"没有TC"误判
-- 提升多TC生产的稳定性
-- 智能冷却机制减少等待时间
-
-### 7. OCR文字识别
+### 8. OCR文字识别
 
 使用EasyOCR识别游戏内数字：
 
 - **人口识别**：识别"当前/上限"格式（如"50/200"）
 - **食物识别**：识别资源数字
-- **村民计数**：识别左下角村民总数（每10秒更新一次）
-- **性能优化**：
-  - 默认使用CPU模式（小图片OCR时CPU比GPU更快）
-  - 支持图片缩放以平衡速度和准确率
-  - 并行执行多个OCR任务，减少总耗时
+- **村民计数**：识别左下角村民总数（每3秒更新一次）
+- **性能优化**：默认使用CPU模式，支持图片缩放，并行执行多个OCR任务
 
-### 8. 智能生产计算
+### 9. 智能生产计算
 
 综合多个因素计算最优生产数量：
 
@@ -318,6 +367,14 @@ max_by_food = 当前食物 ÷ 50
 # 最终生产数量
 actual = min(planned, available_slots, remaining, max_by_food)
 ```
+
+### 10. 配置热更新
+
+所有通过GUI暴露的配置项均支持实时生效：
+
+- 使用 `import config; config.X` 动态引用模式（而非 `from config import X` 静态绑定）
+- 修改配置后立即影响工作线程行为，无需重启
+- 配置通过 `config_override.json` 持久化，启动时自动加载
 
 ## 常见问题
 
@@ -344,16 +401,11 @@ actual = min(planned, available_slots, remaining, max_by_food)
    - `BLOCKED_TRANSITION_THRESHOLD = 0.1` - 渐变下限阈值
 4. 确认 `BLOCKED_DETECT_REGION` 坐标正确
 
-**说明：** 程序使用三态检测机制处理UI渐变动画：
-- 置信度 >= 0.7: 完全遮挡
-- 置信度 < 0.1: 完全没遮挡
-- 0.1 ~ 0.7: 渐变中（需要稳定性检测和渐变误判检测）
-
 ### 识别不准确
 
 1. 启用 `DEBUG_MODE = True`
 2. 查看 [debug_output/](debug_output/) 截图
-3. 调整 [config.py](config.py) 中的坐标和阈值
+3. 在GUI配置窗口中调整坐标和阈值
 
 ### 一直提示"不在游戏窗口"
 
@@ -366,7 +418,17 @@ actual = min(planned, available_slots, remaining, max_by_food)
 2. 检查 `TC_ICON_REGION` 坐标
 3. 调整 `TC_MATCH_THRESHOLD` 阈值
 4. 增大 `TC_SELECT_DELAY` 以预留更多图像刷新时间
-   > 提示：以上参数均可配合启用 `DEBUG_MODE = True` 并查看 [debug_output/tc_detection_debug.png](debug_output/tc_detection_debug.png) 截图来调整测试。
+
+### 快捷键设置无效
+
+- 部分组合键可能被系统占用（如 Ctrl+Space 被输入法拦截）
+- 可在输入框中手动输入快捷键（如 `Ctrl+Space`）
+- 确保 `shortcuts.json` 文件保存在exe同目录
+
+### exe启动慢
+
+- PyInstaller onefile 模式需要先解压到临时目录，首次启动会稍慢
+- 后续启动会利用系统缓存，速度会快一些
 
 ## GPU加速配置（可选）
 
@@ -374,7 +436,7 @@ actual = min(planned, available_slots, remaining, max_by_food)
 
 如果你想尝试GPU加速，可以：
 
-1. 在 [config.py](config.py) 中设置 `USE_GPU = True`
+1. 在配置中设置 `USE_GPU = True`
 2. 按以下步骤安装CUDA和PyTorch
 
 **检查CUDA版本：**
@@ -386,9 +448,6 @@ nvidia-smi
 **安装对应PyTorch版本：**
 
 ```bash
-# CUDA 13.0+
-pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-
 # CUDA 12.1-12.6
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
@@ -404,36 +463,35 @@ print(f"CUDA可用: {torch.cuda.is_available()}")
 print(f"GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU模式'}")
 ```
 
-> **注意：** CUDA向下兼容，高版本CUDA可使用低版本PyTorch。
-
-**GPU加速未启用排查：**
-
-1. 确认NVIDIA显卡和驱动已安装
-2. 重装PyTorch（见上方命令）
-3. 重装EasyOCR：
-   ```bash
-   pip uninstall easyocr -y
-   pip install easyocr
-   ```
-
 ## 目录结构
 
 ```
-auto_train_villager_standalone/
-├── config.py                        # 配置文件
-├── main.py                          # 主程序
-├── game_detector.py                 # 游戏窗口检测
-├── villager_training_detector.py    # 村民生产检测
-├── population_reader.py             # 人口OCR识别
-├── villager_counter.py              # 村民计数
-├── food_reader.py                   # 食物识别
-├── tc_counter.py                    # TC数量检测
-├── tc_selector.py                   # TC选择
-├── villager_trainer.py              # 生产执行
-├── lock.py                          # 文件锁
-├── requirements.txt                 # 依赖包
-├── templates/                       # 模板图片
-└── debug_output/                    # 调试输出
+AOE4-AutoVillager-Tool/
+├── gui_app.py                     # GUI图形界面（Tkinter）
+├── main.py                        # 命令行主程序
+├── build.py                       # PyInstaller打包脚本
+├── config.py                      # 配置文件
+├── game_detector.py               # 游戏窗口检测
+├── villager_training_detector.py  # 村民生产检测
+├── population_reader.py           # 人口OCR识别
+├── villager_counter.py            # 村民计数
+├── food_reader.py                 # 食物识别
+├── tc_counter.py                  # TC数量检测
+├── tc_selector.py                 # TC选择
+├── villager_trainer.py            # 生产执行
+├── ocr_util.py                    # OCR工具模块
+├── screenshot_util.py             # 截图工具模块
+├── logger.py                      # 日志模块
+├── input_blocker.py               # 输入屏蔽模块
+├── input_config.py                # 输入配置
+├── lock.py                        # 文件锁
+├── requirements.txt               # 依赖包
+├── templates/                     # 模板图片
+│   ├── cunmin.png                 # 村民图标
+│   ├── tc_icon.png                # TC图标
+│   ├── blocked.png                # UI遮挡检测
+│   └── tc_number_*.png            # TC数量数字模板
+└── debug_output/                  # 调试输出（自动生成）
 ```
 
 ## 使用技巧
@@ -443,20 +501,26 @@ auto_train_villager_standalone/
 3. **多显示器**：游戏在主显示器
 4. **窗口模式**：使用全屏窗口模式
 5. **UI缩放**：游戏UI缩放100%
+6. **游牧开局**：程序会自动跳过没有TC的情况，建造TC并手动生产第一个村民后即可正常工作
+7. **长时间运行**：如内存占用较高，可停止后重新启动来释放并重新加载OCR模型
 
 ## 注意事项
 
 - 仅供学习交流使用
 - 建议在单人模式或允许使用工具的环境中使用
 - 坐标需根据实际分辨率调整
+- 需要管理员权限运行（输入屏蔽功能）
 
 ## 技术栈
 
 - Python 3.8+
-- OpenCV - 图像处理
+- OpenCV - 图像处理与模板匹配
 - EasyOCR - 文字识别
-- Pillow - 屏幕截图
+- mss - 高速屏幕截图
+- Pillow - 图像处理
 - pydirectinput - 键盘模拟
+- Tkinter - GUI界面
+- PyInstaller - 打包为exe
 
 ## 许可证
 

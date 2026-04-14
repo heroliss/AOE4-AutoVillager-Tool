@@ -36,14 +36,8 @@ from config import (
     VILLAGER_TEMPLATE,
     BLOCKED_TEMPLATE,
     BLOCKED_DEBUG_SCREENSHOT,
-    VILLAGER_MATCH_THRESHOLD,
-    BLOCKED_MATCH_THRESHOLD,
-    BLOCKED_TRANSITION_THRESHOLD,
-    DEBUG_MODE,
-    DEBUG_BLOCKED_DETECTION,
-    DEBUG_SAVE_SCREENSHOTS,
-    DEBUG_PERFORMANCE
 )
+import config
 from screenshot_util import capture_region_np
 from logger import log_blocked, log_training, perf_stats
 
@@ -76,7 +70,7 @@ def _get_blocked_template():
             # 如果模板尺寸超过目标区域，自动缩放
             if template.shape[0] > target_height or template.shape[1] > target_width:
                 _blocked_template_gray = cv2.resize(template, (target_width, target_height))
-                if DEBUG_BLOCKED_DETECTION:
+                if config.DEBUG_BLOCKED_DETECTION:
                     print(f"[遮挡模板] 自动缩放 {template.shape[1]}x{template.shape[0]} -> {target_width}x{target_height}")
             else:
                 _blocked_template_gray = template
@@ -89,7 +83,7 @@ class VillagerTrainingDetector(object):
     @staticmethod
     def _save_debug_screenshot(screenshot_gray, filename):
         """保存灰度图调试截图（仅在调试模式下）"""
-        if not (DEBUG_BLOCKED_DETECTION and DEBUG_SAVE_SCREENSHOTS):
+        if not (config.DEBUG_BLOCKED_DETECTION and config.DEBUG_SAVE_SCREENSHOTS):
             return
         try:
             from PIL import Image
@@ -151,7 +145,7 @@ class VillagerTrainingDetector(object):
         self._blocked_check_enabled = True
 
         # 只在调试模式下打印初始化信息
-        if not _blocked_detection_initialized and DEBUG_MODE:
+        if not _blocked_detection_initialized and config.DEBUG_MODE:
             print(f"[遮挡检测] 已启用 区域={screenshot_width}x{screenshot_height} 模板={blocked_template.shape[1]}x{blocked_template.shape[0]}")
             _blocked_detection_initialized = True
 
@@ -172,19 +166,19 @@ class VillagerTrainingDetector(object):
         result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
 
-        return max_val >= VILLAGER_MATCH_THRESHOLD
+        return max_val >= config.VILLAGER_MATCH_THRESHOLD
 
     def do(self):
-        t_start = time.time() if DEBUG_PERFORMANCE else None
+        t_start = time.time() if config.DEBUG_PERFORMANCE else None
 
         # 合并截图：一次截取包含队列和遮挡区域的大区域，然后裁剪
         screenshot, blocked_screenshot = self._capture_merged()
-        t_capture = time.time() if DEBUG_PERFORMANCE else None
+        t_capture = time.time() if config.DEBUG_PERFORMANCE else None
 
         # 遮挡检测
         if self._blocked_check_enabled:
             # 保存调试截图（仅在调试模式下）
-            if DEBUG_BLOCKED_DETECTION and DEBUG_SAVE_SCREENSHOTS:
+            if config.DEBUG_BLOCKED_DETECTION and config.DEBUG_SAVE_SCREENSHOTS:
                 try:
                     from PIL import Image
                     img = cv2.cvtColor(blocked_screenshot, cv2.COLOR_GRAY2RGB)
@@ -195,18 +189,18 @@ class VillagerTrainingDetector(object):
                     log_blocked("截图", f"保存失败: {e}")
 
             self._check_blocked(blocked_screenshot)
-            t_blocked_check = time.time() if DEBUG_PERFORMANCE else None
+            t_blocked_check = time.time() if config.DEBUG_PERFORMANCE else None
 
         if not self.blocked:
             self._match(screenshot)
-            t_match = time.time() if DEBUG_PERFORMANCE else None
+            t_match = time.time() if config.DEBUG_PERFORMANCE else None
 
             # 如果置信度异常低，保存调试截图
-            if DEBUG_BLOCKED_DETECTION and self.confidence < 0.5:
+            if config.DEBUG_BLOCKED_DETECTION and self.confidence < 0.5:
                 self._save_debug_screenshot(screenshot, "villager_low_confidence.png")
                 log_training("截图", f"置信度异常低")
 
-        if DEBUG_PERFORMANCE:
+        if config.DEBUG_PERFORMANCE:
             perf_stats.record("[3] 截图", (t_capture-t_start))
             if self._blocked_check_enabled:
                 perf_stats.record("[3] 遮挡检测", (t_blocked_check-t_capture))
@@ -277,10 +271,10 @@ class VillagerTrainingDetector(object):
         self.blocked_confidence = round(float(max_val), 4)
 
         # 第一步：判断原始状态
-        if max_val >= BLOCKED_MATCH_THRESHOLD:
+        if max_val >= config.BLOCKED_MATCH_THRESHOLD:
             current_state = 'blocked'
             status = '完全遮挡'
-        elif max_val < BLOCKED_TRANSITION_THRESHOLD:
+        elif max_val < config.BLOCKED_TRANSITION_THRESHOLD:
             current_state = 'clear'
             status = '未遮挡'
         else:
@@ -300,7 +294,7 @@ class VillagerTrainingDetector(object):
             self.in_transition = True
             self._transition_count = 0  # 重置渐变误判计数
             status = f'{status}(不稳定{self._stable_count}/{self._stable_threshold})'
-            log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
+            log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{config.BLOCKED_TRANSITION_THRESHOLD:.2f}, {config.BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
             return
 
         # 第三步：状态已稳定，应用原始判断
@@ -331,7 +325,7 @@ class VillagerTrainingDetector(object):
 
             self._last_transition_confidence = self.blocked_confidence
 
-        log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{BLOCKED_TRANSITION_THRESHOLD:.2f}, {BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
+        log_blocked("结果", f"置信度={self.blocked_confidence:.4f} 阈值=[{config.BLOCKED_TRANSITION_THRESHOLD:.2f}, {config.BLOCKED_MATCH_THRESHOLD:.2f}] 状态={status}")
 
     def _match(self, screenshot):
         """使用灰度图模板匹配检测村民图标"""
@@ -339,7 +333,7 @@ class VillagerTrainingDetector(object):
         result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
         self.confidence = round(float(max_val), 4)
-        self.found = max_val >= VILLAGER_MATCH_THRESHOLD
+        self.found = max_val >= config.VILLAGER_MATCH_THRESHOLD
 
         # 记录置信度历史（用于半透明UI检测，deque自动淘汰旧值）
         self._recent_confidences.append(max_val)
@@ -400,4 +394,4 @@ class VillagerTrainingDetector(object):
         self._semi_transparent_detected = False
 
         status = '检测到' if self.found else '未检测到'
-        log_training("检测", f"置信度={self.confidence:.4f} 阈值={VILLAGER_MATCH_THRESHOLD:.4f} 状态={status}")
+        log_training("检测", f"置信度={self.confidence:.4f} 阈值={config.VILLAGER_MATCH_THRESHOLD:.4f} 状态={status}")

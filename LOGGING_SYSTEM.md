@@ -195,14 +195,12 @@ log_blocked("结果", f"置信度={conf} 状态={status}")
 ### 已完成
 - ✅ 创建统一日志模块 `logger.py`
 - ✅ 更新配置文件说明
-- ✅ 部分更新 `tc_counter.py`
-
-### 待完成
-- ⏳ 完整更新 `tc_counter.py`
-- ⏳ 更新 `villager_training_detector.py`
-- ⏳ 更新 `villager_counter.py`
-- ⏳ 更新 `food_reader.py`
-- ⏳ 更新 `main.py`
+- ✅ 完整更新 `tc_counter.py`
+- ✅ 更新 `villager_training_detector.py`
+- ✅ 更新 `villager_counter.py`
+- ✅ 更新 `food_reader.py`
+- ✅ 更新 `main.py`
+- ✅ 所有模块改为 `import config` 动态引用，支持配置热更新
 
 ## 总结
 

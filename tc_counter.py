@@ -27,14 +27,21 @@ TC数量检测模块
 import os
 import time
 import cv2
-from config import *
+from config import (
+    TC_ICON_REGION,
+    TC_DEBUG_SCREENSHOT,
+    SINGLE_TC_REGION,
+    TC_SINGLE_TEMPLATE,
+    TEMPLATES_DIR,
+    DEBUG_OUTPUT_DIR,
+)
+import config
 from screenshot_util import capture_region_np
 from logger import log_tc, perf_stats
 
 # 检测区域和阈值配置
 REGION = TC_ICON_REGION  # 多TC主检测区域
 DEBUG_SCREENSHOT_PATH = TC_DEBUG_SCREENSHOT
-MATCH_THRESHOLD = TC_MATCH_THRESHOLD
 CROP_SIZE = 20  # 阶段2匹配时裁剪的左上角区域尺寸
 EARLY_EXIT_THRESHOLD = 0.95  # 提前退出阈值，置信度超过此值直接返回
 
@@ -66,7 +73,7 @@ def _get_max_tc_number():
     global _max_tc_number
     if _max_tc_number is None:
         _max_tc_number = _detect_max_tc_number()
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[TC] 检测到最大TC编号模板: tc_number_{_max_tc_number}.png")
     return _max_tc_number
 
@@ -130,24 +137,24 @@ class TCCounter:
 
     def do(self):
         """执行TC数量检测，带自动重试"""
-        t_start = time.time() if DEBUG_PERFORMANCE else None
+        t_start = time.time() if config.DEBUG_PERFORMANCE else None
 
         # 重置失败标志
         self.detection_failed = False
 
         # 等待UI刷新（因为外部刚按了H键）
-        time.sleep(TC_RETRY_DELAY)
+        time.sleep(config.TC_RETRY_DELAY)
 
         # 重试循环：每次都检测两个区域
-        for retry in range(TC_MAX_RETRY):
-            log_tc("重试", f"第{retry+1}/{TC_MAX_RETRY}次检测")
+        for retry in range(config.TC_MAX_RETRY):
+            log_tc("重试", f"第{retry+1}/{config.TC_MAX_RETRY}次检测")
 
             # 1. 先检测单TC区域（快速路径）
             # 只在第一次保存调试截图
             if self._check_single_tc_region(save_debug=(retry == 0)):
                 self.count = 1
                 log_tc("结果", f"单TC区域匹配 TC数=1")
-                if DEBUG_PERFORMANCE:
+                if config.DEBUG_PERFORMANCE:
                     t_total = time.time() - t_start
                     perf_stats.record("[6.2] TC检测(单TC)", t_total)
                 return
@@ -155,18 +162,18 @@ class TCCounter:
             # 2. 检测多TC区域
             # 只在第一次保存调试截图
             screenshot = self._capture(retry_count=(retry if retry < 3 else -1))  # 只保存前3次
-            t_capture = time.time() if DEBUG_PERFORMANCE else None
+            t_capture = time.time() if config.DEBUG_PERFORMANCE else None
 
             log_tc("截图", f"多TC区域 尺寸={screenshot.shape[1]}x{screenshot.shape[0]}")
 
             detected_number = self._match_numbered_tc(screenshot)
-            t_match = time.time() if DEBUG_PERFORMANCE else None
+            t_match = time.time() if config.DEBUG_PERFORMANCE else None
 
             if detected_number is not None:
                 self.count = 1 + detected_number
                 log_tc("结果", f"匹配到tc_number_{detected_number}.png TC数={self.count}")
 
-                if DEBUG_PERFORMANCE:
+                if config.DEBUG_PERFORMANCE:
                     t_total = time.time() - t_start
                     perf_stats.record("[6.2] TC截图", (t_capture-t_start))
                     perf_stats.record("[6.2] TC匹配", (t_match-t_capture))
@@ -174,15 +181,15 @@ class TCCounter:
                 return
 
             # 两个区域都未检测到TC，等待后重试
-            if retry < TC_MAX_RETRY - 1:
+            if retry < config.TC_MAX_RETRY - 1:
                 log_tc("重试", f"两个区域都未检测到TC 等待UI刷新后重试")
-                time.sleep(TC_RETRY_DELAY)  # 等待UI刷新
+                time.sleep(config.TC_RETRY_DELAY)  # 等待UI刷新
 
         # 所有重试都失败，标记为检测失败
-        log_tc("失败", f"重试{TC_MAX_RETRY}次后仍未检测到TC 进入冷却状态")
+        log_tc("失败", f"重试{config.TC_MAX_RETRY}次后仍未检测到TC 进入冷却状态")
         self.detection_failed = True
 
-        if DEBUG_PERFORMANCE:
+        if config.DEBUG_PERFORMANCE:
             t_total = time.time() - t_start
             perf_stats.record("[6.2] TC检测(失败)", t_total)
 
@@ -206,7 +213,7 @@ class TCCounter:
         screenshot_gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
 
         # 保存调试截图（只在第一次时保存）
-        if save_debug and DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+        if save_debug and config.DEBUG_MODE and config.DEBUG_SAVE_SCREENSHOTS:
             try:
                 from PIL import Image
                 debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_single_region_debug.png")
@@ -225,7 +232,7 @@ class TCCounter:
             except Exception as e:
                 log_tc("预检测截图", f"保存失败: {e}")
 
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             log_tc("预检测", f"截图尺寸={screenshot_gray.shape[1]}x{screenshot_gray.shape[0]} 模板尺寸={template.shape[1]}x{template.shape[0]}")
             log_tc("预检测", f"区域坐标=({left},{top},{right},{bottom})")
 
@@ -238,9 +245,9 @@ class TCCounter:
         result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
 
-        log_tc("预检测", f"置信度={max_val:.4f} 阈值={MATCH_THRESHOLD:.4f} 匹配={'成功' if max_val >= MATCH_THRESHOLD else '失败'}")
+        log_tc("预检测", f"置信度={max_val:.4f} 阈值={config.TC_MATCH_THRESHOLD:.4f} 匹配={'成功' if max_val >= config.TC_MATCH_THRESHOLD else '失败'}")
 
-        return max_val >= MATCH_THRESHOLD
+        return max_val >= config.TC_MATCH_THRESHOLD
 
     def _capture(self, retry_count=0):
         """截取TC图标区域（多TC主检测区域）"""
@@ -248,7 +255,7 @@ class TCCounter:
         img_bgr = capture_region_np(left, top, right, bottom)
 
         # 只保存前3次重试的截图
-        if retry_count >= 0 and DEBUG_MODE and DEBUG_SAVE_SCREENSHOTS:
+        if retry_count >= 0 and config.DEBUG_MODE and config.DEBUG_SAVE_SCREENSHOTS:
             try:
                 from PIL import Image
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
@@ -280,7 +287,7 @@ class TCCounter:
         """阶段1：用完整图标匹配tc_number_1.png判断是否有TC图标显示"""
         template = _load_template_full(1)
         if template is None:
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 print(f"[TC阶段1] 未找到tc_number_1.png")
             return False
 
@@ -294,26 +301,26 @@ class TCCounter:
         result = cv2.matchTemplate(screenshot_gray, template, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, _ = cv2.minMaxLoc(result)
 
-        if DEBUG_MODE:
-            print(f"[TC阶段1] 置信度={max_val:.4f} 阈值={MATCH_THRESHOLD:.4f}")
+        if config.DEBUG_MODE:
+            print(f"[TC阶段1] 置信度={max_val:.4f} 阈值={config.TC_MATCH_THRESHOLD:.4f}")
 
-        return max_val >= MATCH_THRESHOLD
+        return max_val >= config.TC_MATCH_THRESHOLD
 
     def _match_number_in_top_left(self, screenshot):
         """阶段2：用左上角20*20区域精确匹配所有数字"""
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[TC阶段2] 检测到多TC，用左上角区域精确匹配...")
 
         # 裁剪截图左上角区域
         if screenshot.shape[0] < CROP_SIZE or screenshot.shape[1] < CROP_SIZE:
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 print(f"[TC阶段2] 截图过小，默认返回1")
             return 1
 
         screenshot_crop = screenshot[0:CROP_SIZE, 0:CROP_SIZE]
         screenshot_gray = cv2.cvtColor(screenshot_crop, cv2.COLOR_BGR2GRAY)
 
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_match_region.png")
             cv2.imwrite(debug_path, screenshot_crop)
             print(f"[TC阶段2] 匹配区域={debug_path}")
@@ -325,7 +332,7 @@ class TCCounter:
         for num in range(1, _get_max_tc_number() + 1):
             template_gray = _load_template_crop(num)
             if template_gray is None:
-                if DEBUG_MODE:
+                if config.DEBUG_MODE:
                     print(f"[TC阶段2] 未找到tc_number_{num}.png，停止搜索")
                 break
 
@@ -333,7 +340,7 @@ class TCCounter:
             result = cv2.matchTemplate(screenshot_gray, template_gray, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(result)
 
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 print(f"[TC阶段2] tc_number_{num}.png 置信度={max_val:.4f}")
 
             if max_val > best_confidence:
@@ -342,11 +349,11 @@ class TCCounter:
 
                 # 提前退出优化：置信度非常高时直接返回
                 if max_val >= EARLY_EXIT_THRESHOLD:
-                    if DEBUG_MODE:
+                    if config.DEBUG_MODE:
                         print(f"[TC阶段2] 置信度超过{EARLY_EXIT_THRESHOLD}，提前退出")
                     break
 
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[TC阶段2] 最佳匹配=tc_number_{best_number}.png 置信度={best_confidence:.4f}")
 
         return best_number
@@ -363,7 +370,7 @@ class TCCounter:
         scale = min((s_h * 0.9) / t_h, (s_w * 0.9) / t_w)
         new_size = (int(t_w * scale), int(t_h * scale))
 
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(f"[TC] 模板过大({t_w}x{t_h})，缩放到{new_size}")
 
         return cv2.resize(template, new_size, interpolation=cv2.INTER_AREA)

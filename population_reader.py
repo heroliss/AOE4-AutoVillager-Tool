@@ -10,7 +10,8 @@
 - 此时人口已满，需等待建造TC后人口上限才会变为正常值
 """
 import re
-from config import POPULATION_REGION, DEBUG_MODE
+from config import POPULATION_REGION
+import config
 from logger import log_main
 from ocr_util import get_ocr_reader, clean_ocr_text, capture_and_scale
 
@@ -42,10 +43,10 @@ class PopulationReader(object):
         if m:
             self.current = int(m.group(1))
             self.limit   = int(m.group(2))
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 log_main("人口", f"原文='{text}' 清理='{cleaned}' 人口={self.current}/{self.limit}")
         else:
             self.current = None
             self.limit   = None
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 log_main("人口", f"识别失败 原文='{text}' 清理='{cleaned}'")

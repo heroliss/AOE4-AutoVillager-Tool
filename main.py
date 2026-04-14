@@ -151,6 +151,9 @@ from contextlib import nullcontext
 from logger import perf_stats
 import concurrent.futures
 
+# GUI模式控制标志（由gui_app.py设置）
+_gui_running = True
+
 # 修饰键检测（用户按下Shift/Ctrl/Alt时暂停检测）
 import ctypes
 user32 = ctypes.windll.user32

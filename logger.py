@@ -3,7 +3,7 @@
 提供模块化、分类的日志输出，便于阅读和调试
 """
 from collections import deque
-from config import DEBUG_MODE, DEBUG_BLOCKED_DETECTION, DEBUG_TRAINING_DETECTION, DEBUG_PERFORMANCE
+import config
 
 
 class Logger:
@@ -29,43 +29,43 @@ class Logger:
     @staticmethod
     def tc(level, message):
         """TC检测日志"""
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(Logger._format("TC", level, message))
 
     @staticmethod
     def villager(level, message):
         """村民计数日志"""
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(Logger._format("VILLAGER", level, message))
 
     @staticmethod
     def food(level, message):
         """食物识别日志"""
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(Logger._format("FOOD", level, message))
 
     @staticmethod
     def blocked(level, message):
         """遮挡检测日志（独立开关）"""
-        if DEBUG_BLOCKED_DETECTION:
+        if config.DEBUG_BLOCKED_DETECTION:
             print(Logger._format("BLOCKED", level, message))
 
     @staticmethod
     def training(level, message):
         """村民生产检测日志"""
-        if DEBUG_TRAINING_DETECTION:
+        if config.DEBUG_TRAINING_DETECTION:
             print(Logger._format("TRAINING", level, message))
 
     @staticmethod
     def perf(module, message):
         """性能分析日志（独立开关）"""
-        if DEBUG_PERFORMANCE:
+        if config.DEBUG_PERFORMANCE:
             print(Logger._format(module, "PERF", message))
 
     @staticmethod
     def main(level, message):
         """主程序日志"""
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             print(Logger._format("MAIN", level, message))
 
     @staticmethod
@@ -98,7 +98,7 @@ class PerfStats:
 
     def record(self, stage, elapsed):
         """记录一个阶段的耗时（秒）"""
-        if not DEBUG_PERFORMANCE:
+        if not config.DEBUG_PERFORMANCE:
             return
         if stage not in self._samples:
             self._samples[stage] = deque(maxlen=200)  # 自动淘汰旧值，避免内存无限增长
@@ -106,7 +106,7 @@ class PerfStats:
 
     def maybe_report(self):
         """在循环末尾调用，达到间隔时输出统计摘要"""
-        if not DEBUG_PERFORMANCE:
+        if not config.DEBUG_PERFORMANCE:
             return
         self._loop_count += 1
         if self._loop_count >= self.report_interval:
