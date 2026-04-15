@@ -1081,9 +1081,6 @@ class AOE4App:
                                 new_val = raw
                             setattr(config_module, k, new_val)
                             config_current_vals[k] = new_val
-                            # HDR联动：HDR开关变更时更新颜色描述标记
-                            if k == "HDR_ENABLED":
-                                _update_hdr_desc()
                             _update_changed_mark(k, new_val, cl)
                             _update_save_btn()
                             self._refresh_config_display()
@@ -1276,7 +1273,7 @@ class AOE4App:
     def _show_region_editor(self, config_module, config_vars, cfg_win):
         """显示区域编辑器：全屏覆盖层上显示所有区域，可拖拽调整"""
         try:
-            from PIL import ImageGrab, Image
+            from PIL import ImageGrab
         except ImportError:
             messagebox.showerror("错误", "需要 Pillow 库", parent=cfg_win)
             return
@@ -1485,7 +1482,7 @@ class AOE4App:
     def _show_color_picker(self, config_module, config_vars, cfg_win):
         """显示吸色工具：全屏截图上点击取色，分别填充到SDR/HDR的坐标和颜色"""
         try:
-            from PIL import ImageGrab, Image
+            from PIL import ImageGrab
         except ImportError:
             messagebox.showerror("错误", "需要 Pillow 库", parent=cfg_win)
             return
@@ -1493,7 +1490,7 @@ class AOE4App:
         # 创建选择窗口
         pick_win = tk.Toplevel(cfg_win)
         pick_win.title("吸色工具")
-        pick_win.geometry("380x260")
+        pick_win.geometry("380x290")
         pick_win.resizable(False, False)
         pick_win.grab_set()
 
@@ -1524,9 +1521,8 @@ class AOE4App:
 
         # 开始按钮
         def _start_pick():
-            target = target_var.get()
             # 截取全屏
-            from PIL import Image as PILImage
+            from PIL import Image as PILImage  # PILImage.NEAREST 用于放大镜缩放
             screenshot = ImageGrab.grab()
 
             # 创建全屏覆盖
@@ -1564,11 +1560,11 @@ class AOE4App:
                 anchor=tk.S
             )
             # 放大镜：在光标附近显示放大的像素
-            _zoom_rect = None
             _zoom_img = None
 
             def _on_motion(event):
-                # 获取光标位置的像素颜色
+                """鼠标移动时实时显示坐标、颜色和放大镜"""
+                nonlocal _zoom_img
                 px, py = event.x, event.y
                 if 0 <= px < screen_w and 0 <= py < screen_h:
                     pixel = screenshot.getpixel((px, py))
@@ -1577,13 +1573,11 @@ class AOE4App:
                         _live_text,
                         text=f"坐标: ({px}, {py})  颜色: ({r}, {g}, {b})  #{r:02x}{g:02x}{b:02x}"
                     )
-                    # 更新放大镜
-                    nonlocal _zoom_rect, _zoom_img
-                    if _zoom_rect:
-                        canvas.delete(_zoom_rect)
+                    # 清除旧的放大镜元素
+                    canvas.delete("zoom_lens")
                     if _zoom_img:
                         del _zoom_img
-                    # 截取光标周围 20x20 像素，放大到 80x80
+                    # 截取光标周围 20x20 像素，放大到 100x100
                     zoom_src = 20
                     zoom_dst = 100
                     x1 = max(0, px - zoom_src // 2)
@@ -1597,14 +1591,14 @@ class AOE4App:
                     # 放在光标右下方
                     zx = min(px + 20, screen_w - zoom_dst - 10)
                     zy = min(py + 20, screen_h - zoom_dst - 10)
-                    _zoom_rect = canvas.create_image(zx, zy, anchor=tk.NW, image=_zoom_img)
+                    canvas.create_image(zx, zy, anchor=tk.NW, image=_zoom_img, tags="zoom_lens")
                     # 放大镜边框
                     canvas.create_rectangle(zx, zy, zx + zoom_dst, zy + zoom_dst,
-                                            outline="#cca700", width=2, tags="zoom_border")
+                                            outline="#cca700", width=2, tags="zoom_lens")
                     # 中心十字
                     cx, cy = zx + zoom_dst // 2, zy + zoom_dst // 2
-                    canvas.create_line(cx - 6, cy, cx + 6, cy, fill="red", width=1, tags="zoom_border")
-                    canvas.create_line(cx, cy - 6, cx, cy + 6, fill="red", width=1, tags="zoom_border")
+                    canvas.create_line(cx - 6, cy, cx + 6, cy, fill="red", width=1, tags="zoom_lens")
+                    canvas.create_line(cx, cy - 6, cx, cy + 6, fill="red", width=1, tags="zoom_lens")
 
             def _on_click(event):
                 px, py = event.x, event.y

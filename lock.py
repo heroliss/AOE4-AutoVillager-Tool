@@ -23,6 +23,7 @@ def cleanup_lock():
 
 
 def acquire_lock() -> bool:
+    """尝试获取文件锁（原子操作），成功返回True，锁已存在返回False"""
     try:
         fd = os.open(_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(fd)
@@ -32,6 +33,7 @@ def acquire_lock() -> bool:
 
 
 def release_lock():
+    """释放文件锁（删除锁文件），锁不存在时静默跳过"""
     try:
         os.remove(_LOCK_FILE)
     except FileNotFoundError:
