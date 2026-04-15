@@ -7,7 +7,7 @@
 **默认配置：**
 
 - ⚠️ **需要管理员权限运行**（用于输入屏蔽功能）
-- 基于 2560x1440 分辨率 + HDR开启
+- 基于 2560x1440 分辨率 + HDR默认关闭
 - 模板基于中国阵营，所有阵营通用
 - 支持 GUI 图形界面和命令行两种运行模式
 
@@ -131,7 +131,7 @@ python build.py --clean      # 清理包括虚拟环境（强制重新下载依�
 
 ## 配置说明
 
-所有参数在 [config.py](config.py) 中管理，也可通过GUI配置窗口修改。
+所有参数在 [config.py](config.py) 中管理，也可通过GUI配置窗口修改（包括所有截图区域坐标）。
 
 ### 基础参数
 
@@ -180,6 +180,10 @@ DEBUG_SAVE_SCREENSHOTS = False        # 保存调试截图（关闭可提升5-10
 # 游戏窗口检测点（右下角某个固定颜色的像素）
 GAME_DETECT_PIXEL = (2526, 1405)
 
+# 检测颜色（根据HDR开关自动选择，见下方"HDR 设置适配"）
+GAME_DETECT_COLOR_SDR = (26, 32, 46)   # SDR颜色值
+GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR颜色值
+
 # 村民生产队列区域（左下角队列图标区域）
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
 
@@ -208,21 +212,19 @@ VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
 
 ### HDR 设置适配
 
-HDR 开关只影响游戏窗口检测的颜色值，不影响其他功能。
+HDR 开关影响游戏窗口检测的颜色值。在 GUI 配置窗口的核心参数区切换 HDR 开关即可，截图区域坐标区会标注当前使用的是 SDR 还是 HDR 颜色。
 
 ```python
-# HDR 开启时（默认）
-GAME_DETECT_COLOR = (65, 78, 105)
-
-# HDR 关闭时，需要修改为
-GAME_DETECT_COLOR = (26, 32, 46)
+# 默认配置（HDR关闭）
+HDR_ENABLED = False
+GAME_DETECT_COLOR_SDR = (26, 32, 46)   # SDR颜色值
+GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR颜色值
 ```
 
-**如何获取正确的颜色值：**
-
-1. 进入游戏，截取全屏
-2. 使用截图工具查看 `GAME_DETECT_PIXEL` 坐标处的 RGB 颜色值
-3. 将颜色值填入 `GAME_DETECT_COLOR`
+- 开启 HDR 时，自动使用 `GAME_DETECT_COLOR_HDR`
+- 关闭 HDR 时，自动使用 `GAME_DETECT_COLOR_SDR`
+- 也可在 GUI 配置窗口中直接修改颜色值
+- 不同分辨率下 `GAME_DETECT_PIXEL` 坐标变化后，颜色值可能也需要重新获取
 
 ## 工作流程
 
@@ -416,8 +418,9 @@ actual = min(planned, available_slots, remaining, max_by_food)
 
 ### 一直提示"不在游戏窗口"
 
-1. 游戏中截图查看坐标 (2526, 1405) 的颜色
-2. 修改 `GAME_DETECT_PIXEL` 和 `GAME_DETECT_COLOR`
+1. 游戏中截图查看坐标 `GAME_DETECT_PIXEL` 处的颜色
+2. 修改对应的颜色值：HDR关闭修改 `GAME_DETECT_COLOR_SDR`，HDR开启修改 `GAME_DETECT_COLOR_HDR`
+3. 或在GUI配置窗口中切换HDR开关和修改颜色值
 
 ### TC数量识别错误
 

@@ -119,7 +119,7 @@ import sys
 import time
 
 print("  [>] 加载配置...", flush=True)
-from config import *
+from config import *  # 命令行模式：启动后配置不变，静态绑定即可（GUI模式使用 import config 动态引用）
 
 print("  [>] 加载游戏检测模块...", flush=True)
 from game_detector import GameDetector

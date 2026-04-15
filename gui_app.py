@@ -71,6 +71,7 @@ CONFIG_CATEGORIES = [
         ("MIN_FOOD", "最低食物", "int", "低于此值不生产村民"),
         ("VILLAGERS_PER_TC", "每TC排队", "int", "每个TC同时排队的村民数"),
         ("FOOD_PER_VILLAGER", "每村民食物", "int", "单个村民需要的食物，用于计算食物不足时应生产几个村民"),
+        ("HDR_ENABLED", "游戏HDR", "bool", "游戏是否开启HDR，影响检测颜色值（开关仅控制使用SDR/HDR哪个颜色）"),
     ]),
     ("操作时序", [
         ("CHECK_INTERVAL", "检测间隔(秒)", "float", "主检测循环间隔，越小响应越快但CPU越高"),
@@ -80,6 +81,7 @@ CONFIG_CATEGORIES = [
         ("BLOCK_INPUT_DURATION", "屏蔽等待(秒)", "float", "操作后额外等待时长，0最快"),
     ]),
     ("OCR设置", [
+        ("USE_GPU", "GPU加速", "bool", "使用GPU加速OCR（小图片OCR时CPU更快）"),
         ("OCR_IMAGE_SCALE", "图片缩放", "float", "OCR图片缩放比例，越小越快但可能不准"),
     ]),
     ("按键延迟", [
@@ -95,6 +97,18 @@ CONFIG_CATEGORIES = [
         ("BLOCKED_MATCH_THRESHOLD", "遮挡阈值", "float", "完全遮挡匹配阈值(0-1)"),
         ("BLOCKED_TRANSITION_THRESHOLD", "渐变下限阈值", "float", "低于此值认为未遮挡(0-1)"),
         ("TC_MATCH_THRESHOLD", "TC匹配阈值", "float", "TC图标匹配阈值(0-1)"),
+    ]),
+    ("截图区域坐标", [
+        ("GAME_DETECT_PIXEL", "检测像素点", "tuple", "游戏窗口检测的像素坐标(x,y)"),
+        ("GAME_DETECT_COLOR_SDR", "SDR检测颜色", "tuple", "HDR关闭时使用的RGB颜色(r,g,b)"),
+        ("GAME_DETECT_COLOR_HDR", "HDR检测颜色", "tuple", "HDR开启时使用的RGB颜色(r,g,b)"),
+        ("VILLAGER_QUEUE_REGION", "生产队列区域", "tuple", "村民生产队列检测区域(x1,y1,x2,y2)"),
+        ("BLOCKED_DETECT_REGION", "遮挡检测区域", "tuple", "UI遮挡检测区域(x1,y1,x2,y2)"),
+        ("POPULATION_REGION", "人口显示区域", "tuple", "人口OCR识别区域(x1,y1,x2,y2)"),
+        ("TC_ICON_REGION", "TC图标区域", "tuple", "TC图标检测区域(x1,y1,x2,y2)"),
+        ("SINGLE_TC_REGION", "单TC预检区域", "tuple", "单TC预检测区域(x1,y1,x2,y2)"),
+        ("VILLAGER_COUNT_REGION", "村民计数区域", "tuple", "村民总数OCR区域(x1,y1,x2,y2)"),
+        ("FOOD_REGION", "食物显示区域", "tuple", "食物数量OCR区域(x1,y1,x2,y2)"),
     ]),
     ("调试开关", [
         ("DEBUG_MODE", "全局调试", "bool", "TC/村民/食物模块的详细日志和截图"),
@@ -167,6 +181,9 @@ def _apply_config_override():
         import config
         for key, value in override.items():
             if hasattr(config, key):
+                # list值转为tuple（JSON中tuple存为list）
+                if isinstance(value, list):
+                    value = tuple(value)
                 setattr(config, key, value)
     except ImportError:
         pass
@@ -187,6 +204,24 @@ def _display_shortcut(shortcut_str):
         else:
             display_parts.append(_KEY_DISPLAY.get(p_lower, p.upper()))
     return '+'.join(display_parts)
+
+
+def _parse_tuple(text):
+    """解析元组字符串，如 '(2526, 1405)' 或 '2526, 1405' → (2526, 1405)"""
+    text = text.strip()
+    if not text:
+        return None
+    # 去除首尾括号
+    if text.startswith('(') and text.endswith(')'):
+        text = text[1:-1]
+    elif text.startswith('[') and text.endswith(']'):
+        text = text[1:-1]
+    try:
+        parts = [p.strip() for p in text.split(',')]
+        values = [int(p) if '.' not in p else float(p) for p in parts if p]
+        return tuple(values)
+    except (ValueError, TypeError):
+        return None
 
 
 # ==================== 日志颜色分类规则 ====================
@@ -963,6 +998,9 @@ class AOE4App:
 
         row = 0
 
+        # 存储HDR颜色项的描述标签引用，用于动态更新"当前使用"标记
+        _hdr_desc_labels = {}
+
         for cat_name, items in CONFIG_CATEGORIES:
             # 分类标题
             cat_label = ttk.Label(
@@ -990,6 +1028,9 @@ class AOE4App:
                 desc_lbl = ttk.Label(scroll_frame, text=desc_text, foreground="gray",
                                      font=("Microsoft YaHei UI", 8), wraplength=260)
                 desc_lbl.grid(row=row, column=3, sticky=tk.W, padx=(10, 0), pady=2)
+                # 保存HDR颜色项的描述标签，用于动态更新"当前使用"标记
+                if key in ("GAME_DETECT_COLOR_SDR", "GAME_DETECT_COLOR_HDR"):
+                    _hdr_desc_labels[key] = desc_lbl
 
                 # 修改状态标记
                 changed_label = ttk.Label(scroll_frame, text="", font=("Microsoft YaHei UI", 8), foreground="#6a9955")
@@ -997,8 +1038,7 @@ class AOE4App:
 
                 if vtype == "bool":
                     chk_var = tk.BooleanVar(value=current_val)
-                    chk = ttk.Checkbutton(scroll_frame, variable=chk_var,
-                                          text="开启" if current_val else "关闭")
+                    chk = ttk.Checkbutton(scroll_frame, variable=chk_var, text="开启")
                     chk.grid(row=row, column=1, sticky=tk.W, pady=2)
                     config_vars[key] = ("bool", chk_var, changed_label)
 
@@ -1007,6 +1047,9 @@ class AOE4App:
                             new_val = v.get()
                             setattr(config_module, k, new_val)
                             config_current_vals[k] = new_val
+                            # HDR联动：更新颜色描述标记
+                            if k == "HDR_ENABLED":
+                                _update_hdr_desc()
                             _update_changed_mark(k, new_val, cl)
                             _update_save_btn()
                             self._refresh_config_display()
@@ -1016,7 +1059,8 @@ class AOE4App:
                     chk.configure(command=_on_bool_change)
                 else:
                     var = tk.StringVar(value=str(current_val))
-                    entry = ttk.Entry(scroll_frame, textvariable=var, width=14)
+                    entry_width = 22 if vtype == "tuple" else 14
+                    entry = ttk.Entry(scroll_frame, textvariable=var, width=entry_width)
                     entry.grid(row=row, column=1, sticky=tk.W, pady=2)
                     config_vars[key] = (vtype, var, changed_label)
 
@@ -1027,10 +1071,17 @@ class AOE4App:
                                 new_val = int(raw)
                             elif vt == "float":
                                 new_val = float(raw)
+                            elif vt == "tuple":
+                                new_val = _parse_tuple(raw)
+                                if new_val is None:
+                                    return
                             else:
                                 new_val = raw
                             setattr(config_module, k, new_val)
                             config_current_vals[k] = new_val
+                            # HDR联动：HDR开关变更时更新颜色描述标记
+                            if k == "HDR_ENABLED":
+                                _update_hdr_desc()
                             _update_changed_mark(k, new_val, cl)
                             _update_save_btn()
                             self._refresh_config_display()
@@ -1040,6 +1091,27 @@ class AOE4App:
                     var.trace_add("write", lambda *a, cb=_on_value_change: cb())
 
                 row += 1
+
+        def _update_hdr_desc():
+            """根据HDR开关状态更新颜色项描述中的'当前使用'标记"""
+            hdr_on = config_current_vals.get("HDR_ENABLED", False)
+            sdr_lbl = _hdr_desc_labels.get("GAME_DETECT_COLOR_SDR")
+            hdr_lbl = _hdr_desc_labels.get("GAME_DETECT_COLOR_HDR")
+            if sdr_lbl:
+                sdr_lbl.configure(
+                    text="HDR关闭时使用的RGB颜色(r,g,b) ← 当前使用" if not hdr_on
+                    else "HDR关闭时使用的RGB颜色(r,g,b)",
+                    foreground="#cca700" if not hdr_on else "gray"
+                )
+            if hdr_lbl:
+                hdr_lbl.configure(
+                    text="HDR开启时使用的RGB颜色(r,g,b) ← 当前使用" if hdr_on
+                    else "HDR开启时使用的RGB颜色(r,g,b)",
+                    foreground="#cca700" if hdr_on else "gray"
+                )
+
+        # 初始化HDR颜色描述标记
+        _update_hdr_desc()
 
         def _update_changed_mark(key, current_val, label_widget):
             """更新是否已修改标记"""
@@ -1060,6 +1132,10 @@ class AOE4App:
                         val = int(raw)
                     elif vtype == "float":
                         val = float(raw)
+                    elif vtype == "tuple":
+                        val = _parse_tuple(raw)
+                        if val is None:
+                            continue
                     else:
                         val = raw
                 _update_changed_mark(key, val, cl)
@@ -1083,11 +1159,16 @@ class AOE4App:
                             val = int(raw)
                         elif vtype == "float":
                             val = float(raw)
+                        elif vtype == "tuple":
+                            val = _parse_tuple(raw)
+                            if val is None:
+                                continue
                         else:
                             val = raw
                     # 只保存与默认值不同的项
                     if val != _DEFAULTS.get(key):
-                        override[key] = val
+                        # tuple转为list以便JSON序列化
+                        override[key] = list(val) if isinstance(val, tuple) else val
                 except (ValueError, tk.TclError):
                     pass
             return override
@@ -1121,6 +1202,8 @@ class AOE4App:
                 try:
                     if vtype == "bool":
                         var.set(default)
+                    elif vtype == "tuple":
+                        var.set(str(default))
                     else:
                         var.set(str(default))
                     setattr(config_module, key, default)
@@ -1128,6 +1211,8 @@ class AOE4App:
                     _update_changed_mark(key, default, cl)
                 except Exception:
                     pass
+            # 联动更新HDR颜色描述标记
+            _update_hdr_desc()
             self._refresh_config_display()
             _update_save_btn()
 
@@ -1658,7 +1743,7 @@ class AOE4App:
             if self.running:
                 import traceback
                 traceback.print_exc()
-                self.root.after(0, lambda: self._stop)
+                self.root.after(0, lambda: self._stop())
 
     # ==================== 关闭 ====================
 

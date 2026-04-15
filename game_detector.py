@@ -8,7 +8,7 @@
 """
 import ctypes
 from ctypes import wintypes
-from config import GAME_DETECT_PIXEL, GAME_DETECT_COLOR
+import config
 
 # Windows API 函数
 user32 = ctypes.windll.user32
@@ -18,7 +18,7 @@ GetWindowTextLengthW = user32.GetWindowTextLengthW
 GetDC = user32.GetDC
 ReleaseDC = user32.ReleaseDC
 
-# GetPixel 函数（64位系统使用 GetPixelW）
+# GetPixel 函数（优先Unicode版本GetPixelW，回退到ANSI版本GetPixelA）
 try:
     GetPixel = user32.GetPixelW
 except AttributeError:
@@ -31,9 +31,6 @@ except AttributeError:
 if GetPixel:
     GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
     GetPixel.restype = wintypes.DWORD
-
-PIXEL_X, PIXEL_Y = GAME_DETECT_PIXEL
-EXPECTED_COLOR = GAME_DETECT_COLOR
 
 # 预计算游戏窗口关键词（小写），避免每次检测时重复转换
 _GAME_KEYWORDS_LOWER = [kw.lower() for kw in [
@@ -55,14 +52,18 @@ class GameDetector(object):
 
     def do(self):
         """执行双重检测"""
+        # 动态读取配置（HDR开关/颜色值可能运行时变更）
+        pixel_x, pixel_y = config.GAME_DETECT_PIXEL
+        expected_color = config._get_game_detect_color()
+
         # 1. 检测活跃窗口标题（极快，API调用）
         self.window_title = self._get_active_window_title()
         self.window_active = self._is_game_window(self.window_title)
 
         # 2. 只有窗口标题匹配时才读取像素颜色
         if self.window_active:
-            self.color = self._get_pixel_color(PIXEL_X, PIXEL_Y)
-            self.pixel_match = self._match_pixel(self.color)
+            self.color = self._get_pixel_color(pixel_x, pixel_y)
+            self.pixel_match = self._match_pixel(self.color, expected_color)
         else:
             self.color = None
             self.pixel_match = False
@@ -123,6 +124,6 @@ class GameDetector(object):
         except Exception:
             return (0, 0, 0)
 
-    def _match_pixel(self, color):
+    def _match_pixel(self, color, expected_color):
         """判断颜色是否匹配"""
-        return color == EXPECTED_COLOR
+        return color == expected_color

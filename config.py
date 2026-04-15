@@ -2,9 +2,9 @@
 配置文件 - 所有可调整的参数集中在此
 
 重要说明：
-1. 本配置基于 2560x1440 分辨率 + HDR开启
+1. 本配置基于 2560x1440 分辨率
 2. 如果你的分辨率不同，需要调整所有坐标参数
-3. HDR开关只影响 GAME_DETECT_COLOR 像素值，不影响图片识别
+3. HDR开关影响游戏检测颜色值，通过 _get_game_detect_color() 动态获取
 4. 模板图片基于中国阵营截取，但经测试所有阵营通用
 
 性能优化说明：
@@ -56,9 +56,14 @@ OCR_IMAGE_SCALE = 1  # OCR图片缩放比例，越小越快但可能影响准确
 # 注意：以下坐标基于 2560x1440 分辨率，其他分辨率需要调整
 
 # 游戏窗口检测：检测特定像素点颜色判断是否在游戏中
-# 注意：HDR开关会影响此颜色值，需要根据实际情况调整
-GAME_DETECT_PIXEL = (2526, 1405)
-GAME_DETECT_COLOR = (65, 78, 105)  # 这是HDR开启时的颜色值，SDR时该点的颜色为：(26,32,46)
+GAME_DETECT_PIXEL = (2526, 1405)  # 检测像素点坐标
+HDR_ENABLED = False  # HDR开关，True=使用GAME_DETECT_COLOR_HDR，False=使用GAME_DETECT_COLOR_SDR
+GAME_DETECT_COLOR_SDR = (26, 32, 46)  # SDR（HDR关闭）时的颜色值
+GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR开启时的颜色值
+
+def _get_game_detect_color():
+    """根据HDR开关返回对应的检测颜色（动态获取，支持运行时切换）"""
+    return GAME_DETECT_COLOR_HDR if HDR_ENABLED else GAME_DETECT_COLOR_SDR
 
 # 村民生产队列检测区域
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
