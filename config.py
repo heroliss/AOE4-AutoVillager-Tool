@@ -56,10 +56,16 @@ OCR_IMAGE_SCALE = 1  # OCR图片缩放比例，越小越快但可能影响准确
 # 注意：以下坐标基于 2560x1440 分辨率，其他分辨率需要调整
 
 # 游戏窗口检测：检测特定像素点颜色判断是否在游戏中
-GAME_DETECT_PIXEL = (2526, 1405)  # 检测像素点坐标
-HDR_ENABLED = False  # HDR开关，True=使用GAME_DETECT_COLOR_HDR，False=使用GAME_DETECT_COLOR_SDR
+# SDR和HDR各有独立的坐标和颜色值，通过HDR开关切换使用哪一组
+GAME_DETECT_PIXEL_SDR = (2526, 1405)  # SDR检测像素点坐标
+GAME_DETECT_PIXEL_HDR = (2526, 1405)  # HDR检测像素点坐标（通常与SDR相同，但可单独调整）
+HDR_ENABLED = False  # HDR开关，True=使用HDR组坐标和颜色，False=使用SDR组
 GAME_DETECT_COLOR_SDR = (26, 32, 46)  # SDR（HDR关闭）时的颜色值
 GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR开启时的颜色值
+
+def _get_game_detect_pixel():
+    """根据HDR开关返回对应的检测像素坐标（动态获取，支持运行时切换）"""
+    return GAME_DETECT_PIXEL_HDR if HDR_ENABLED else GAME_DETECT_PIXEL_SDR
 
 def _get_game_detect_color():
     """根据HDR开关返回对应的检测颜色（动态获取，支持运行时切换）"""

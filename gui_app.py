@@ -99,9 +99,10 @@ CONFIG_CATEGORIES = [
         ("TC_MATCH_THRESHOLD", "TC匹配阈值", "float", "TC图标匹配阈值(0-1)"),
     ]),
     ("截图区域坐标", [
-        ("GAME_DETECT_PIXEL", "检测像素点", "tuple", "游戏窗口检测的像素坐标(x,y)"),
-        ("GAME_DETECT_COLOR_SDR", "SDR检测颜色", "tuple", "HDR关闭时使用的RGB颜色(r,g,b)"),
-        ("GAME_DETECT_COLOR_HDR", "HDR检测颜色", "tuple", "HDR开启时使用的RGB颜色(r,g,b)"),
+        ("GAME_DETECT_PIXEL_SDR", "SDR检测坐标", "tuple", "SDR模式下检测像素坐标(x,y)"),
+        ("GAME_DETECT_COLOR_SDR", "SDR检测颜色", "tuple", "SDR模式下检测点RGB颜色(r,g,b)"),
+        ("GAME_DETECT_PIXEL_HDR", "HDR检测坐标", "tuple", "HDR模式下检测像素坐标(x,y)"),
+        ("GAME_DETECT_COLOR_HDR", "HDR检测颜色", "tuple", "HDR模式下检测点RGB颜色(r,g,b)"),
         ("VILLAGER_QUEUE_REGION", "生产队列区域", "tuple", "村民生产队列检测区域(x1,y1,x2,y2)"),
         ("BLOCKED_DETECT_REGION", "遮挡检测区域", "tuple", "UI遮挡检测区域(x1,y1,x2,y2)"),
         ("POPULATION_REGION", "人口显示区域", "tuple", "人口OCR识别区域(x1,y1,x2,y2)"),
@@ -1028,8 +1029,9 @@ class AOE4App:
                 desc_lbl = ttk.Label(scroll_frame, text=desc_text, foreground="gray",
                                      font=("Microsoft YaHei UI", 8), wraplength=260)
                 desc_lbl.grid(row=row, column=3, sticky=tk.W, padx=(10, 0), pady=2)
-                # 保存HDR颜色项的描述标签，用于动态更新"当前使用"标记
-                if key in ("GAME_DETECT_COLOR_SDR", "GAME_DETECT_COLOR_HDR"):
+                # 保存HDR/SDR像素和颜色项的描述标签，用于动态更新"当前使用"标记
+                if key in ("GAME_DETECT_PIXEL_SDR", "GAME_DETECT_COLOR_SDR",
+                           "GAME_DETECT_PIXEL_HDR", "GAME_DETECT_COLOR_HDR"):
                     _hdr_desc_labels[key] = desc_lbl
 
                 # 修改状态标记
@@ -1093,22 +1095,30 @@ class AOE4App:
                 row += 1
 
         def _update_hdr_desc():
-            """根据HDR开关状态更新颜色项描述中的'当前使用'标记"""
+            """根据HDR开关状态更新SDR/HDR坐标和颜色项描述中的'当前使用'标记"""
             hdr_on = config_current_vals.get("HDR_ENABLED", False)
-            sdr_lbl = _hdr_desc_labels.get("GAME_DETECT_COLOR_SDR")
-            hdr_lbl = _hdr_desc_labels.get("GAME_DETECT_COLOR_HDR")
-            if sdr_lbl:
-                sdr_lbl.configure(
-                    text="HDR关闭时使用的RGB颜色(r,g,b) ← 当前使用" if not hdr_on
-                    else "HDR关闭时使用的RGB颜色(r,g,b)",
-                    foreground="#cca700" if not hdr_on else "gray"
-                )
-            if hdr_lbl:
-                hdr_lbl.configure(
-                    text="HDR开启时使用的RGB颜色(r,g,b) ← 当前使用" if hdr_on
-                    else "HDR开启时使用的RGB颜色(r,g,b)",
-                    foreground="#cca700" if hdr_on else "gray"
-                )
+            sdr_items = {
+                "GAME_DETECT_PIXEL_SDR": "SDR模式下检测像素坐标(x,y)",
+                "GAME_DETECT_COLOR_SDR": "SDR模式下检测点RGB颜色(r,g,b)",
+            }
+            hdr_items = {
+                "GAME_DETECT_PIXEL_HDR": "HDR模式下检测像素坐标(x,y)",
+                "GAME_DETECT_COLOR_HDR": "HDR模式下检测点RGB颜色(r,g,b)",
+            }
+            for key, base_desc in sdr_items.items():
+                lbl = _hdr_desc_labels.get(key)
+                if lbl:
+                    lbl.configure(
+                        text=f"{base_desc} ← 当前使用" if not hdr_on else base_desc,
+                        foreground="#cca700" if not hdr_on else "gray"
+                    )
+            for key, base_desc in hdr_items.items():
+                lbl = _hdr_desc_labels.get(key)
+                if lbl:
+                    lbl.configure(
+                        text=f"{base_desc} ← 当前使用" if hdr_on else base_desc,
+                        foreground="#cca700" if hdr_on else "gray"
+                    )
 
         # 初始化HDR颜色描述标记
         _update_hdr_desc()
@@ -1225,12 +1235,419 @@ class AOE4App:
 
         save_btn.configure(command=_save_config)
         ttk.Button(btn_frame, text="恢复默认", command=_reset_to_defaults, width=10).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="区域编辑", command=lambda: self._show_region_editor(config_module, config_vars, cfg_win), width=10).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="吸色工具", command=lambda: self._show_color_picker(config_module, config_vars, cfg_win), width=10).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="关闭", command=_on_close, width=10).pack(side=tk.RIGHT)
         save_btn.pack(side=tk.RIGHT, padx=(0, 8))
 
         cfg_win.protocol("WM_DELETE_WINDOW", _on_close)
 
         _update_save_btn()
+
+    # ==================== 区域编辑器 ====================
+
+    # 区域配置定义：(key, 中文名, 类型)
+    # 类型: "rect"=矩形区域(x1,y1,x2,y2), "pixel"=像素点(x,y)
+    _REGION_DEFS = [
+        ("GAME_DETECT_PIXEL_SDR", "SDR检测点", "pixel"),
+        ("GAME_DETECT_PIXEL_HDR", "HDR检测点", "pixel"),
+        ("VILLAGER_QUEUE_REGION", "生产队列", "rect"),
+        ("BLOCKED_DETECT_REGION", "遮挡检测", "rect"),
+        ("POPULATION_REGION", "人口显示", "rect"),
+        ("TC_ICON_REGION", "TC图标", "rect"),
+        ("SINGLE_TC_REGION", "单TC预检", "rect"),
+        ("VILLAGER_COUNT_REGION", "村民计数", "rect"),
+        ("FOOD_REGION", "食物显示", "rect"),
+    ]
+
+    # 区域颜色映射（每个区域不同颜色）
+    _REGION_COLORS = [
+        "#ff4444",  # 红
+        "#ff8800",  # 橙
+        "#44ff44",  # 绿
+        "#4444ff",  # 蓝
+        "#ff44ff",  # 紫
+        "#44ffff",  # 青
+        "#ffff44",  # 黄
+        "#ff8844",  # 深橙
+        "#88ff44",  # 黄绿
+    ]
+
+    def _show_region_editor(self, config_module, config_vars, cfg_win):
+        """显示区域编辑器：全屏覆盖层上显示所有区域，可拖拽调整"""
+        try:
+            from PIL import ImageGrab, Image
+        except ImportError:
+            messagebox.showerror("错误", "需要 Pillow 库", parent=cfg_win)
+            return
+
+        # 截取全屏作为背景
+        screenshot = ImageGrab.grab()
+        screen_w, screen_h = screenshot.size
+
+        # 创建全屏覆盖窗口
+        overlay = tk.Toplevel(cfg_win)
+        overlay.overrideredirect(True)
+        overlay.attributes("-topmost", True)
+        # 尝试设置半透明（Windows）
+        try:
+            overlay.attributes("-alpha", 0.85)
+        except Exception:
+            pass
+
+        canvas = tk.Canvas(overlay, cursor="crosshair", highlightthickness=0)
+        canvas.pack(fill=tk.BOTH, expand=True)
+
+        # 提示栏
+        hint_frame = tk.Frame(overlay, bg="#1e1e1e")
+        hint_frame.place(x=0, y=0, relwidth=1.0)
+        tk.Label(hint_frame,
+                 text="拖动区域边框调整位置和大小 | Enter=保存 | Esc=取消",
+                 bg="#1e1e1e", fg="#cca700", font=("Microsoft YaHei UI", 11, "bold")
+                 ).pack(pady=6)
+
+        # 绘制背景截图
+        from PIL import ImageTk
+        bg_photo = ImageTk.PhotoImage(screenshot, master=overlay)
+        canvas.create_image(0, 0, anchor=tk.NW, image=bg_photo)
+        # 保持引用防止GC
+        overlay._bg_photo = bg_photo
+
+        # 区域数据
+        regions_data = []  # [{key, name, type, coords, canvas_ids, color}]
+
+        for idx, (key, name, rtype) in enumerate(self._REGION_DEFS):
+            val = getattr(config_module, key, None)
+            if val is None:
+                continue
+            color = self._REGION_COLORS[idx % len(self._REGION_COLORS)]
+            coords = list(val)  # 可变的副本
+            region = {
+                "key": key, "name": name, "type": rtype,
+                "coords": coords, "canvas_ids": [], "color": color
+            }
+            regions_data.append(region)
+
+        # 绘制所有区域
+        def _draw_regions():
+            for r in regions_data:
+                # 清除旧的画布元素
+                for cid in r["canvas_ids"]:
+                    canvas.delete(cid)
+                r["canvas_ids"].clear()
+
+                c = r["coords"]
+                color = r["color"]
+
+                if r["type"] == "rect":
+                    x1, y1, x2, y2 = c
+                    # 填充半透明矩形（用stipple模拟）
+                    rid = canvas.create_rectangle(
+                        x1, y1, x2, y2,
+                        outline=color, width=2, fill=color,
+                        stipple="gray12"
+                    )
+                    r["canvas_ids"].append(rid)
+                    # 标签
+                    tid = canvas.create_text(
+                        x1, y1 - 8, anchor=tk.SW,
+                        text=f'{r["name"]} ({x1},{y1},{x2},{y2})',
+                        fill=color, font=("Microsoft YaHei UI", 9, "bold")
+                    )
+                    r["canvas_ids"].append(tid)
+                    # 4个角的拖拽手柄
+                    handle_size = 6
+                    for hx, hy in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
+                        hid = canvas.create_rectangle(
+                            hx - handle_size, hy - handle_size,
+                            hx + handle_size, hy + handle_size,
+                            fill=color, outline="white", width=1
+                        )
+                        r["canvas_ids"].append(hid)
+                else:  # pixel
+                    px, py = c
+                    # 十字标记
+                    size = 12
+                    cid1 = canvas.create_line(px - size, py, px + size, py, fill=color, width=2)
+                    cid2 = canvas.create_line(px, py - size, px, py + size, fill=color, width=2)
+                    r["canvas_ids"].extend([cid1, cid2])
+                    # 标签
+                    tid = canvas.create_text(
+                        px + 8, py - 8, anchor=tk.SW,
+                        text=f'{r["name"]} ({px},{py})',
+                        fill=color, font=("Microsoft YaHei UI", 9, "bold")
+                    )
+                    r["canvas_ids"].append(tid)
+                    # 中心圆点
+                    dot = canvas.create_oval(
+                        px - 4, py - 4, px + 4, py + 4,
+                        fill=color, outline="white", width=1
+                    )
+                    r["canvas_ids"].append(dot)
+
+        _draw_regions()
+
+        # 拖拽逻辑
+        _drag_state = {
+            "region": None,     # 当前拖拽的区域
+            "handle": None,     # "move" / "tl" / "tr" / "bl" / "br" / "pixel"
+            "start_x": 0, "start_y": 0,
+            "orig_coords": None,
+        }
+
+        def _find_region(x, y, margin=8):
+            """查找点击位置对应的区域和手柄"""
+            for r in regions_data:
+                c = r["coords"]
+                if r["type"] == "rect":
+                    x1, y1, x2, y2 = c
+                    # 检查4个角
+                    for label, hx, hy in [("tl", x1, y1), ("tr", x2, y1),
+                                           ("bl", x1, y2), ("br", x2, y2)]:
+                        if abs(x - hx) <= margin and abs(y - hy) <= margin:
+                            return r, label
+                    # 检查内部（移动）
+                    if x1 <= x <= x2 and y1 <= y <= y2:
+                        return r, "move"
+                else:  # pixel
+                    px, py = c
+                    if abs(x - px) <= margin and abs(y - py) <= margin:
+                        return r, "pixel"
+            return None, None
+
+        def _on_press(event):
+            r, handle = _find_region(event.x, event.y)
+            if r:
+                _drag_state["region"] = r
+                _drag_state["handle"] = handle
+                _drag_state["start_x"] = event.x
+                _drag_state["start_y"] = event.y
+                _drag_state["orig_coords"] = list(r["coords"])
+
+        def _on_drag(event):
+            r = _drag_state.get("region")
+            if not r:
+                return
+            handle = _drag_state["handle"]
+            dx = event.x - _drag_state["start_x"]
+            dy = event.y - _drag_state["start_y"]
+            oc = _drag_state["orig_coords"]
+
+            if r["type"] == "rect":
+                x1, y1, x2, y2 = oc
+                if handle == "move":
+                    r["coords"] = [x1 + dx, y1 + dy, x2 + dx, y2 + dy]
+                elif handle == "tl":
+                    r["coords"] = [x1 + dx, y1 + dy, x2, y2]
+                elif handle == "tr":
+                    r["coords"] = [x1, y1 + dy, x2 + dx, y2]
+                elif handle == "bl":
+                    r["coords"] = [x1 + dx, y1, x2, y2 + dy]
+                elif handle == "br":
+                    r["coords"] = [x1, y1, x2 + dx, y2 + dy]
+            else:  # pixel
+                r["coords"] = [oc[0] + dx, oc[1] + dy]
+
+            _draw_regions()
+
+        def _on_release(event):
+            _drag_state["region"] = None
+            _drag_state["handle"] = None
+
+        canvas.bind("<ButtonPress-1>", _on_press)
+        canvas.bind("<B1-Motion>", _on_drag)
+        canvas.bind("<ButtonRelease-1>", _on_release)
+
+        # 键盘：Enter保存，Esc取消
+        def _on_key(event):
+            if event.keysym == "Return":
+                # 保存到config和GUI变量
+                for r in regions_data:
+                    new_val = tuple(r["coords"])
+                    setattr(config_module, r["key"], new_val)
+                    if r["key"] in config_vars:
+                        vtype, var, cl = config_vars[r["key"]]
+                        var.set(str(new_val))
+                overlay.destroy()
+                self._safe_print("区域编辑：已保存所有区域坐标", "success")
+            elif event.keysym == "Escape":
+                overlay.destroy()
+                self._safe_print("区域编辑：已取消", "warning")
+
+        overlay.bind("<Key>", _on_key)
+        overlay.focus_set()
+
+        # 全屏显示
+        overlay.geometry(f"{screen_w}x{screen_h}+0+0")
+
+    # ==================== 吸色工具 ====================
+
+    def _show_color_picker(self, config_module, config_vars, cfg_win):
+        """显示吸色工具：全屏截图上点击取色，分别填充到SDR/HDR的坐标和颜色"""
+        try:
+            from PIL import ImageGrab, Image
+        except ImportError:
+            messagebox.showerror("错误", "需要 Pillow 库", parent=cfg_win)
+            return
+
+        # 创建选择窗口
+        pick_win = tk.Toplevel(cfg_win)
+        pick_win.title("吸色工具")
+        pick_win.geometry("380x260")
+        pick_win.resizable(False, False)
+        pick_win.grab_set()
+
+        ttk.Label(pick_win, text="吸色工具：截取全屏后点击取色",
+                  font=("Microsoft YaHei UI", 10, "bold")).pack(pady=(12, 4))
+        ttk.Label(pick_win, text="点击屏幕上任意位置获取该点的坐标和颜色",
+                  font=("Microsoft YaHei UI", 9), foreground="gray").pack(pady=(0, 10))
+
+        # 目标选择
+        target_var = tk.StringVar(value="SDR")
+        target_frame = ttk.LabelFrame(pick_win, text="填充目标", padding=8)
+        target_frame.pack(padx=20, pady=4, fill=tk.X)
+        ttk.Radiobutton(target_frame, text="SDR（填充 SDR坐标 + SDR颜色）",
+                        variable=target_var, value="SDR").pack(anchor=tk.W)
+        ttk.Radiobutton(target_frame, text="HDR（填充 HDR坐标 + HDR颜色）",
+                        variable=target_var, value="HDR").pack(anchor=tk.W)
+
+        # 预览区域
+        preview_frame = ttk.Frame(pick_win, padding=8)
+        preview_frame.pack(padx=20, fill=tk.X)
+
+        ttk.Label(preview_frame, text="上次取色：").grid(row=0, column=0, sticky=tk.W)
+        color_preview = tk.Canvas(preview_frame, width=30, height=20, bg="#000000",
+                                   highlightthickness=1, highlightbackground="gray")
+        color_preview.grid(row=0, column=1, padx=6)
+        color_text = ttk.Label(preview_frame, text="未取色", font=("Consolas", 10))
+        color_text.grid(row=0, column=2, sticky=tk.W)
+
+        # 开始按钮
+        def _start_pick():
+            target = target_var.get()
+            # 截取全屏
+            from PIL import Image as PILImage
+            screenshot = ImageGrab.grab()
+
+            # 创建全屏覆盖
+            overlay = tk.Toplevel(pick_win)
+            overlay.overrideredirect(True)
+            overlay.attributes("-topmost", True)
+            try:
+                overlay.attributes("-alpha", 0.85)
+            except Exception:
+                pass
+
+            screen_w, screen_h = screenshot.size
+
+            canvas = tk.Canvas(overlay, cursor="crosshair", highlightthickness=0)
+            canvas.pack(fill=tk.BOTH, expand=True)
+
+            # 提示栏
+            hint_frame = tk.Frame(overlay, bg="#1e1e1e")
+            hint_frame.place(x=0, y=0, relwidth=1.0)
+            tk.Label(hint_frame,
+                     text="点击屏幕取色 | Esc=取消",
+                     bg="#1e1e1e", fg="#cca700", font=("Microsoft YaHei UI", 11, "bold")
+                     ).pack(pady=6)
+
+            # 显示截图
+            from PIL import ImageTk
+            bg_photo = ImageTk.PhotoImage(screenshot, master=overlay)
+            canvas.create_image(0, 0, anchor=tk.NW, image=bg_photo)
+            overlay._bg_photo = bg_photo
+
+            # 实时跟踪光标
+            _live_text = canvas.create_text(
+                screen_w // 2, screen_h - 30,
+                text="", fill="#cca700", font=("Consolas", 10),
+                anchor=tk.S
+            )
+            # 放大镜：在光标附近显示放大的像素
+            _zoom_rect = None
+            _zoom_img = None
+
+            def _on_motion(event):
+                # 获取光标位置的像素颜色
+                px, py = event.x, event.y
+                if 0 <= px < screen_w and 0 <= py < screen_h:
+                    pixel = screenshot.getpixel((px, py))
+                    r, g, b = pixel[:3]
+                    canvas.itemconfigure(
+                        _live_text,
+                        text=f"坐标: ({px}, {py})  颜色: ({r}, {g}, {b})  #{r:02x}{g:02x}{b:02x}"
+                    )
+                    # 更新放大镜
+                    nonlocal _zoom_rect, _zoom_img
+                    if _zoom_rect:
+                        canvas.delete(_zoom_rect)
+                    if _zoom_img:
+                        del _zoom_img
+                    # 截取光标周围 20x20 像素，放大到 80x80
+                    zoom_src = 20
+                    zoom_dst = 100
+                    x1 = max(0, px - zoom_src // 2)
+                    y1 = max(0, py - zoom_src // 2)
+                    x2 = min(screen_w, x1 + zoom_src)
+                    y2 = min(screen_h, y1 + zoom_src)
+                    crop = screenshot.crop((x1, y1, x2, y2)).resize(
+                        (zoom_dst, zoom_dst), PILImage.NEAREST
+                    )
+                    _zoom_img = ImageTk.PhotoImage(crop, master=overlay)
+                    # 放在光标右下方
+                    zx = min(px + 20, screen_w - zoom_dst - 10)
+                    zy = min(py + 20, screen_h - zoom_dst - 10)
+                    _zoom_rect = canvas.create_image(zx, zy, anchor=tk.NW, image=_zoom_img)
+                    # 放大镜边框
+                    canvas.create_rectangle(zx, zy, zx + zoom_dst, zy + zoom_dst,
+                                            outline="#cca700", width=2, tags="zoom_border")
+                    # 中心十字
+                    cx, cy = zx + zoom_dst // 2, zy + zoom_dst // 2
+                    canvas.create_line(cx - 6, cy, cx + 6, cy, fill="red", width=1, tags="zoom_border")
+                    canvas.create_line(cx, cy - 6, cx, cy + 6, fill="red", width=1, tags="zoom_border")
+
+            def _on_click(event):
+                px, py = event.x, event.y
+                if 0 <= px < screen_w and 0 <= py < screen_h:
+                    pixel = screenshot.getpixel((px, py))
+                    r, g, b = pixel[:3]
+                    target = target_var.get()
+
+                    # 填充到配置
+                    pixel_key = f"GAME_DETECT_PIXEL_{target}"
+                    color_key = f"GAME_DETECT_COLOR_{target}"
+                    new_pixel = (px, py)
+                    new_color = (r, g, b)
+
+                    setattr(config_module, pixel_key, new_pixel)
+                    setattr(config_module, color_key, new_color)
+
+                    # 更新GUI变量
+                    for k, val in [(pixel_key, new_pixel), (color_key, new_color)]:
+                        if k in config_vars:
+                            vtype, var, cl = config_vars[k]
+                            var.set(str(val))
+
+                    overlay.destroy()
+                    color_preview.configure(bg=f"#{r:02x}{g:02x}{b:02x}")
+                    color_text.configure(text=f"({px},{py}) RGB=({r},{g},{b})")
+                    self._safe_print(
+                        f"吸色工具：{target} 坐标=({px},{py}) 颜色=({r},{g},{b})",
+                        "success"
+                    )
+
+            def _on_key(event):
+                if event.keysym == "Escape":
+                    overlay.destroy()
+
+            canvas.bind("<Motion>", _on_motion)
+            canvas.bind("<ButtonPress-1>", _on_click)
+            overlay.bind("<Key>", _on_key)
+            overlay.focus_set()
+            overlay.geometry(f"{screen_w}x{screen_h}+0+0")
+
+        ttk.Button(pick_win, text="开始取色", command=_start_pick).pack(pady=10)
+        ttk.Button(pick_win, text="关闭", command=pick_win.destroy).pack()
 
     # ==================== 状态更新 ====================
 

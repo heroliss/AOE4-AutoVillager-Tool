@@ -20,6 +20,8 @@
 - ✅ 优化按键操作（shift+q批量排队）
 - ✅ 输入保护（操作时临时等待避免误操作）
 - ✅ GUI图形界面（实时日志、状态栏、配置管理、快捷键）
+- ✅ 区域编辑器（全屏可视化调整所有截图区域）
+- ✅ 吸色工具（截屏取色，自动填充SDR/HDR坐标和颜色）
 - ✅ 配置热更新（修改参数实时生效，无需重启）
 - ✅ PyInstaller打包支持（一键生成exe）
 
@@ -177,12 +179,11 @@ DEBUG_SAVE_SCREENSHOTS = False        # 保存调试截图（关闭可提升5-10
 默认配置基于 **2560x1440** 分辨率。如果你使用其他分辨率，需要按比例调整以下所有坐标参数：
 
 ```python
-# 游戏窗口检测点（右下角某个固定颜色的像素）
-GAME_DETECT_PIXEL = (2526, 1405)
-
-# 检测颜色（根据HDR开关自动选择，见下方"HDR 设置适配"）
-GAME_DETECT_COLOR_SDR = (26, 32, 46)   # SDR颜色值
-GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR颜色值
+# 游戏窗口检测（SDR和HDR各有独立的坐标和颜色）
+GAME_DETECT_PIXEL_SDR = (2526, 1405)  # SDR检测点坐标
+GAME_DETECT_COLOR_SDR = (26, 32, 46)   # SDR检测点颜色
+GAME_DETECT_PIXEL_HDR = (2526, 1405)  # HDR检测点坐标
+GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR检测点颜色
 
 # 村民生产队列区域（左下角队列图标区域）
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
@@ -205,26 +206,27 @@ VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
 
 **调整方法：**
 
-1. 启用 `DEBUG_MODE = True`
-2. 运行程序，查看 [debug_output/](debug_output/) 目录下的截图
-3. 根据截图调整坐标，确保区域覆盖正确的UI元素
-4. 重复测试直到识别准确
+1. **使用区域编辑器**（推荐）：在配置窗口点击"区域编辑"，全屏显示所有区域框，拖拽调整后按 Enter 保存
+2. **使用吸色工具**：在配置窗口点击"吸色工具"，选择 SDR/HDR 目标后截屏取色，自动填充坐标和颜色值
+3. **手动调整**：启用 `DEBUG_MODE = True`，查看 [debug_output/](debug_output/) 截图，在配置窗口手动修改坐标
 
 ### HDR 设置适配
 
-HDR 开关影响游戏窗口检测的颜色值。在 GUI 配置窗口的核心参数区切换 HDR 开关即可，截图区域坐标区会标注当前使用的是 SDR 还是 HDR 颜色。
+SDR 和 HDR 各有独立的坐标和颜色值，通过 HDR 开关切换使用哪一组。在 GUI 配置窗口的核心参数区切换 HDR 开关，截图区域坐标区会标注当前使用的是哪组配置。
 
 ```python
 # 默认配置（HDR关闭）
 HDR_ENABLED = False
-GAME_DETECT_COLOR_SDR = (26, 32, 46)   # SDR颜色值
-GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR颜色值
+GAME_DETECT_PIXEL_SDR = (2526, 1405)  # SDR检测点坐标
+GAME_DETECT_COLOR_SDR = (26, 32, 46)   # SDR检测点颜色
+GAME_DETECT_PIXEL_HDR = (2526, 1405)  # HDR检测点坐标
+GAME_DETECT_COLOR_HDR = (65, 78, 105)  # HDR检测点颜色
 ```
 
-- 开启 HDR 时，自动使用 `GAME_DETECT_COLOR_HDR`
-- 关闭 HDR 时，自动使用 `GAME_DETECT_COLOR_SDR`
-- 也可在 GUI 配置窗口中直接修改颜色值
-- 不同分辨率下 `GAME_DETECT_PIXEL` 坐标变化后，颜色值可能也需要重新获取
+- HDR 关闭时，使用 `GAME_DETECT_PIXEL_SDR` + `GAME_DETECT_COLOR_SDR`
+- HDR 开启时，使用 `GAME_DETECT_PIXEL_HDR` + `GAME_DETECT_COLOR_HDR`
+- 使用吸色工具可快速获取坐标和颜色值，自动填充到对应组
+- 不同分辨率下坐标和颜色值可能都需要重新获取
 
 ## 工作流程
 
@@ -418,9 +420,9 @@ actual = min(planned, available_slots, remaining, max_by_food)
 
 ### 一直提示"不在游戏窗口"
 
-1. 游戏中截图查看坐标 `GAME_DETECT_PIXEL` 处的颜色
-2. 修改对应的颜色值：HDR关闭修改 `GAME_DETECT_COLOR_SDR`，HDR开启修改 `GAME_DETECT_COLOR_HDR`
-3. 或在GUI配置窗口中切换HDR开关和修改颜色值
+1. 确认 HDR 开关设置正确（核心参数区的"游戏HDR"）
+2. 使用吸色工具重新获取坐标和颜色（最简单）
+3. 或手动修改：HDR关闭修改 `GAME_DETECT_PIXEL_SDR` + `GAME_DETECT_COLOR_SDR`，HDR开启修改对应的 HDR 组
 
 ### TC数量识别错误
 

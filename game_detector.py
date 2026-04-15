@@ -52,8 +52,8 @@ class GameDetector(object):
 
     def do(self):
         """执行双重检测"""
-        # 动态读取配置（HDR开关/颜色值可能运行时变更）
-        pixel_x, pixel_y = config.GAME_DETECT_PIXEL
+        # 动态读取配置（HDR开关/坐标/颜色值可能运行时变更）
+        pixel_x, pixel_y = config._get_game_detect_pixel()
         expected_color = config._get_game_detect_color()
 
         # 1. 检测活跃窗口标题（极快，API调用）
