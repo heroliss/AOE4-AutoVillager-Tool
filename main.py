@@ -13,6 +13,7 @@ AOE4 自动生产村民工具
 
 [1] 修饰键检测（Shift/Ctrl/Alt）
     └── 按下 → 输出提示并继续（下次循环会跳过）
+    └── 连续50次检测 → 可能粘滞，强制释放修饰键
 
 [2] 游戏窗口检测（双重检测）
     ├── 窗口标题检测（极快，<1ms）
@@ -171,6 +172,24 @@ def is_modifier_key_pressed():
         (user32.GetAsyncKeyState(VK_MENU) & 0x8000) != 0
     )
 
+
+def release_stuck_modifiers():
+    """
+    强制释放所有可能粘滞的修饰键（Shift/Ctrl/Alt）
+
+    解决的问题：
+    - BlockInput 不屏蔽 GetAsyncKeyState，用户在操作期间按下的修饰键会被检测到
+    - pydirectinput 的 keyDown/keyUp 与物理按键冲突时，可能导致修饰键"粘滞"
+    - 粘滞的修饰键会导致 is_modifier_key_pressed() 一直返回 True，程序永久暂停
+
+    注意：此函数通过发送虚拟 keyUp 来清理状态，仅在程序操作流程中使用，
+    不影响用户的实际按键意图（因为调用时机都在操作前后）
+    """
+    for key_name in ('shift', 'ctrl', 'alt'):
+        pydirectinput.keyUp(key_name)
+    # 短暂等待确保操作系统处理完按键释放事件
+    time.sleep(0.01)
+
 print("  [✓] 所有模块加载完成!\n", flush=True)
 
 
@@ -268,6 +287,7 @@ def main():
     last_trigger_time = None
     last_villager_check_time = 0  # 上次检查村民数量的时间
     cached_tc_count = 0  # 缓存的TC数量，开局为0
+    modifier_stuck_count = 0  # 修饰键连续检测计数，用于检测粘滞
 
     try:
         while True:
@@ -276,11 +296,26 @@ def main():
 
             # [1] 检查用户是否按下了修饰键（Shift/Ctrl/Alt）
             if is_modifier_key_pressed():
+                modifier_stuck_count += 1
+                # 连续检测到修饰键超过阈值，可能是粘滞（pydirectinput keyDown/keyUp冲突）
+                # 强制释放修饰键以恢复正常状态
+                if modifier_stuck_count >= 50:
+                    print(f"[修复] 修饰键连续检测{modifier_stuck_count}次，可能粘滞，强制释放")
+                    release_stuck_modifiers()
+                    modifier_stuck_count = 0
+                    # 等待一个短暂时间让系统处理释放事件
+                    time.sleep(0.05)
+                    # 如果释放后仍然检测到，说明是用户真的在按着修饰键
+                    if not is_modifier_key_pressed():
+                        print("[修复] 修饰键粘滞已修复")
+                        continue
                 logger.log("检测到修饰键，暂停")
                 # 短暂等待避免CPU空转
                 if CHECK_INTERVAL > 0:
                     time.sleep(CHECK_INTERVAL)
                 continue
+            else:
+                modifier_stuck_count = 0
             t_modifier = time.time()
             perf_stats.record("[1] 修饰键检测", t_modifier - loop_start)
 
@@ -442,25 +477,32 @@ def main():
             # [6] 执行生产村民操作
             t_op_start = time.time()
             try:
-                # 6.1 计算预估操作时长：选中TC + 排队 + 操作后等待
+                # 6.1 操作前清理：强制释放可能粘滞的修饰键
+                # BlockInput 不屏蔽 GetAsyncKeyState，操作期间用户按下的修饰键
+                # 会导致 pydirectinput 的 keyDown/keyUp 与物理按键冲突，造成修饰键粘滞
+                release_stuck_modifiers()
+
+                # 6.2 计算预估操作时长：选中TC + 排队 + 操作后等待
                 # 时长与TC数量相关：多TC时排队按键更多，需要更长的屏蔽时间
                 estimated_duration = TC_SELECT_DELAY + (VILLAGERS_PER_TC * QUEUE_DELAY) + BLOCK_INPUT_DURATION + 1.0  # +1.0s为按键操作缓冲
                 max_block_duration = min(estimated_duration * 2, 3.0 + VILLAGERS_PER_TC * 0.5)  # 基础3秒 + 每TC排队0.5秒缓冲
 
-                # 6.2 屏蔽输入并执行所有操作
+                # 6.3 屏蔽输入并执行所有操作
                 blocker = input_blocked(max_duration=max_block_duration) if ENABLE_INPUT_BLOCK else nullcontext()
 
                 with blocker:
-                    # 6.2.1 保存当前选中的单位（使用Ctrl+0编组）
+                    # 6.3.1 保存当前选中的单位（使用Ctrl+0编组）
                     if DEBUG_MODE:
                         logger.force_print("[操作] 保存当前选中")
                     pydirectinput.keyDown('ctrl')
                     pydirectinput.press('0')
                     pydirectinput.keyUp('ctrl')
+                    # 操作后立即清理修饰键，防止 Ctrl 粘滞影响后续操作
+                    release_stuck_modifiers()
                     t_save = time.time()
                     perf_stats.record("[6.1] 保存当前选中", t_save - t_op_start)
 
-                    # 6.2.2 选中TC并检测数量
+                    # 6.3.2 选中TC并检测数量
                     if DEBUG_MODE:
                         logger.force_print("[操作] 选中TC")
                     tc_selector.do()
@@ -577,6 +619,12 @@ def main():
                     pydirectinput.press('0')
                     pydirectinput.keyUp('alt')
                     pydirectinput.keyUp('ctrl')
+
+                    # 6.2.9 操作后清理：强制释放可能粘滞的修饰键
+                    # 防止 pydirectinput 的 keyDown/keyUp 与物理按键冲突导致修饰键粘滞
+                    # 例如：BlockInput 期间用户物理按下 Ctrl，keyUp('ctrl') 可能无法正确释放
+                    release_stuck_modifiers()
+
                     t_restore = time.time()
                     perf_stats.record("[6.4] 等待+恢复选中+取消编组", t_restore - t_queue)
 

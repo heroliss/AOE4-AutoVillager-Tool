@@ -1766,6 +1766,17 @@ class AOE4App:
                     (user32.GetAsyncKeyState(VK_MENU) & 0x8000) != 0
                 )
 
+            def release_stuck_modifiers():
+                """强制释放所有可能粘滞的修饰键（Shift/Ctrl/Alt）
+
+                解决 BlockInput 不屏蔽 GetAsyncKeyState 导致的修饰键粘滞问题：
+                用户在操作期间按下的修饰键，pydirectinput 的 keyDown/keyUp
+                与物理按键冲突，导致操作系统认为修饰键仍被按住
+                """
+                for key_name in ('shift', 'ctrl', 'alt'):
+                    pydirectinput.keyUp(key_name)
+                time.sleep(0.01)
+
             class LogMerger:
                 def __init__(self):
                     self.last_message = None
@@ -1857,6 +1868,7 @@ class AOE4App:
             last_trigger_time = None
             last_villager_check_time = 0
             cached_tc_count = 0
+            modifier_stuck_count = 0  # 修饰键连续检测计数，用于检测粘滞
 
             while self.running and getattr(main_module, '_gui_running', True):
                 # 检查TC清零请求
@@ -1874,10 +1886,22 @@ class AOE4App:
 
                 # [1] 修饰键检测
                 if is_modifier_key_pressed():
+                    modifier_stuck_count += 1
+                    # 连续检测到修饰键超过阈值，可能是粘滞（pydirectinput keyDown/keyUp冲突）
+                    if modifier_stuck_count >= 50:
+                        print(f"[修复] 修饰键连续检测{modifier_stuck_count}次，可能粘滞，强制释放", flush=True)
+                        release_stuck_modifiers()
+                        modifier_stuck_count = 0
+                        time.sleep(0.05)
+                        if not is_modifier_key_pressed():
+                            print("[修复] 修饰键粘滞已修复", flush=True)
+                            continue
                     logger.log("检测到修饰键，暂停")
                     if config.CHECK_INTERVAL > 0:
                         time.sleep(config.CHECK_INTERVAL)
                     continue
+                else:
+                    modifier_stuck_count = 0
                 t_modifier = time.time()
                 perf_stats.record("[1] 修饰键检测", t_modifier - loop_start)
 
@@ -2020,6 +2044,9 @@ class AOE4App:
                 # [6] 执行操作
                 t_op_start = time.time()
                 try:
+                    # 操作前清理：强制释放可能粘滞的修饰键
+                    release_stuck_modifiers()
+
                     estimated_duration = config.TC_SELECT_DELAY + (config.VILLAGERS_PER_TC * config.QUEUE_DELAY) + config.BLOCK_INPUT_DURATION + 1.0
                     max_block_duration = min(estimated_duration * 2, 3.0 + config.VILLAGERS_PER_TC * 0.5)
 
@@ -2031,6 +2058,8 @@ class AOE4App:
                         pydirectinput.keyDown('ctrl')
                         pydirectinput.press('0')
                         pydirectinput.keyUp('ctrl')
+                        # 操作后立即清理修饰键，防止 Ctrl 粘滞影响后续操作
+                        release_stuck_modifiers()
                         t_save = time.time()
                         perf_stats.record("[6.1] 保存当前选中", t_save - t_op_start)
 
@@ -2131,6 +2160,8 @@ class AOE4App:
                         pydirectinput.press('0')
                         pydirectinput.keyUp('alt')
                         pydirectinput.keyUp('ctrl')
+                        # 操作后清理：强制释放可能粘滞的修饰键
+                        release_stuck_modifiers()
                         t_restore = time.time()
                         perf_stats.record("[6.4] 等待+恢复选中+取消编组", t_restore - t_queue)
 

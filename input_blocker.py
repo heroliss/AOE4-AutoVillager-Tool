@@ -1,6 +1,12 @@
 """
 输入屏蔽模块 - 在关键操作期间屏蔽物理鼠标键盘输入
-注意：需要管理员权限才能生效
+
+注意：
+1. 需要管理员权限才能生效
+2. BlockInput 不屏蔽 GetAsyncKeyState 对修饰键状态的检测
+   - 用户在 BlockInput 期间按下 Shift/Ctrl/Alt，GetAsyncKeyState 仍会返回"已按下"
+   - 这可能导致 pydirectinput 的 keyDown/keyUp 与物理按键冲突，造成修饰键"粘滞"
+   - 解决方案：在操作前后调用 release_stuck_modifiers() 强制释放修饰键
 """
 import ctypes
 import time
