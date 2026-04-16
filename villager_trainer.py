@@ -1,6 +1,6 @@
 """
 村民生产操作模块
-执行排队村民的按键操作，使用shift+q优化
+执行排队村民的按键操作，支持Shift批量排队
 """
 import time
 import pydirectinput
@@ -19,25 +19,32 @@ class VillagerTrainer(object):
         self._queue_villagers(count)
 
     def _queue_villagers(self, count):
-        """优化的排队逻辑：使用shift+q加速"""
+        """排队逻辑：根据配置决定是否使用Shift批量排队"""
         delay = config.QUEUE_DELAY
-        # 计算需要多少次shift+q（每次5个）和剩余的单次q
-        shift_q_count = count // 5
-        remaining_q_count = count % 5
+        queue_key = config.VILLAGER_QUEUE_KEY
 
-        # 先执行shift+q（批量排队）
-        for _ in range(shift_q_count):
-            pydirectinput.keyDown('shift')
-            pydirectinput.press('q')
-            pydirectinput.keyUp('shift')
-            if delay > 0:
-                time.sleep(delay)
+        if config.ENABLE_SHIFT_QUEUE:
+            # Shift批量排队：每次5个
+            shift_q_count = count // 5
+            remaining_q_count = count % 5
 
-        # 再执行剩余的单次q
-        for _ in range(remaining_q_count):
-            pydirectinput.press("q")
-            if delay > 0:
-                time.sleep(delay)
+            for _ in range(shift_q_count):
+                pydirectinput.keyDown('shift')
+                pydirectinput.press(queue_key)
+                pydirectinput.keyUp('shift')
+                if delay > 0:
+                    time.sleep(delay)
+
+            for _ in range(remaining_q_count):
+                pydirectinput.press(queue_key)
+                if delay > 0:
+                    time.sleep(delay)
+        else:
+            # 逐个排队
+            for _ in range(count):
+                pydirectinput.press(queue_key)
+                if delay > 0:
+                    time.sleep(delay)
 
         # 操作完成后按ESC取消TC选中状态（防止TC面板遮挡后续检测）
         pydirectinput.press("escape")

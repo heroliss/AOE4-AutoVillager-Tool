@@ -18,10 +18,16 @@ import os
 # ==================== 基础参数 ====================
 CHECK_INTERVAL = 0.1  # 检测循环间隔（秒），平衡响应速度和CPU占用
 VILLAGERS_PER_TC = 3  # 每个TC排队的村民数量
-MAX_VILLAGERS = 120  # 村民数量上限，超过此数量停止自动生产
+MAX_VILLAGERS = 120  # 村民数量上限，超过此数量停止自动生产（注意：移动/建造/战斗中的村民无法统计，仅供参考）
+ENABLE_MAX_VILLAGERS = False  # 是否启用村民上限检测（因统计不准，默认关闭）
 MIN_FOOD = 50  # 最低食物要求，低于此值不生产村民
 FOOD_PER_VILLAGER = 50  # 单个村民需要的食物数量
 VILLAGER_CHECK_INTERVAL = 3  # 村民数量检查间隔（秒），村民数量变化慢，不需要频繁检查
+
+# ==================== 按键设置 ====================
+TC_SELECT_KEY = 'h'  # 选中所有TC的快捷键（需在游戏中设置"选择所有城镇中心"对应按键）
+VILLAGER_QUEUE_KEY = 'q'  # 生产村民的快捷键
+ENABLE_SHIFT_QUEUE = True  # 是否使用Shift+按键批量排队（每次5个），关闭则逐个排队
 
 # ==================== 操作时序设置 ====================
 BLOCK_INPUT_DURATION = 0  # 操作后等待时长（秒），设为0最快
@@ -30,26 +36,21 @@ POST_OPERATION_DELAY = 3.0  # 操作完成后等待游戏UI更新的时间（秒
 
 # ==================== 调试开关 ====================
 # 调试开关说明：
-# - DEBUG_MODE: 全局调试开关，控制TC/村民/食物等模块的详细日志和截图
-# - DEBUG_BLOCKED_DETECTION: 遮挡检测专项调试，独立开关（不依赖DEBUG_MODE）
-# - DEBUG_TRAINING_DETECTION: 村民生产检测专项调试，显示每次检测的置信度
-# - DEBUG_PERFORMANCE: 性能分析开关，显示各模块耗时（独立于其他开关）
-# - DEBUG_SAVE_SCREENSHOTS: 是否保存调试截图到文件（关闭可提升5-10ms性能）
+# - DEBUG_MODE: 全局调试开关，控制所有模块的详细日志（TC/村民/食物/遮挡/生产检测）
+# - DEBUG_PERFORMANCE: 性能分析开关，显示各模块耗时（独立开关）
+# - DEBUG_SAVE_SCREENSHOTS: 是否保存调试截图到文件（需配合DEBUG_MODE，关闭可提升5-10ms性能）
 #
 # 推荐配置：
 # - 日常使用：全部False
 # - 排查问题：开启DEBUG_MODE，关闭DEBUG_SAVE_SCREENSHOTS
 # - 性能优化：开启DEBUG_PERFORMANCE
-# - 遮挡误判：开启DEBUG_BLOCKED_DETECTION
 
-DEBUG_MODE = False  # 全局调试：TC/村民/食物模块的详细日志和截图
-DEBUG_BLOCKED_DETECTION = False  # 遮挡检测：显示置信度和截图（独立开关）
-DEBUG_TRAINING_DETECTION = False  # 村民生产：显示每次检测的置信度
+DEBUG_MODE = False  # 全局调试：所有模块的详细日志
 DEBUG_PERFORMANCE = False  # 性能分析：显示各模块详细耗时（独立开关）
-DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：关闭可提升5-10ms性能
+DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：需配合DEBUG_MODE，关闭可提升5-10ms性能
 
 # ==================== OCR设置 ====================
-USE_GPU = False  # 是否使用GPU加速OCR（小图片OCR时CPU更快，GPU有数据传输开销）
+USE_GPU = False  # 是否使用GPU加速OCR（⚠不建议开启，小图片OCR时CPU更快；CPU版exe中此选项无效）
 OCR_IMAGE_SCALE = 1  # OCR图片缩放比例，越小越快但可能影响准确率
 
 # ==================== 截图区域坐标 ====================
@@ -105,26 +106,84 @@ TC_MATCH_THRESHOLD = 0.7  # TC图标匹配阈值
 
 # ==================== 按键延迟 ====================
 # pydirectinput默认每次按键有0.1秒延迟，这里设置为0可以加速
-TC_SELECT_DELAY = 0.03  # 按H键选中TC后的等待时间（秒）
-TC_RETRY_DELAY = 0.01  # TC检测失败后重试H键的等待时间（秒），给游戏UI足够的刷新时间
+TC_SELECT_DELAY = 0.03  # 按选中TC键后的等待时间（秒）
+TC_RETRY_DELAY = 0.01  # TC检测失败后重试的等待时间（秒），给游戏UI足够的刷新时间
 TC_MAX_RETRY = 50  # TC检测失败时的最大重试次数
 TC_DETECTION_FAILED_COOLDOWN = 1000.0  # TC检测失败后的冷却时间（秒），避免频繁重试。值很大是因为冷却期间会监控村民图标，检测到后提前结束
 COOLDOWN_CHECK_INTERVAL = 0.5  # 冷却期间的检测间隔（秒）
-QUEUE_DELAY = 0  # 每次按Q键之间的延迟，设为0最快
+QUEUE_DELAY = 0  # 每次按生产键之间的延迟，设为0最快
 
 # ==================== 目录路径 ====================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
-DEBUG_OUTPUT_DIR = os.path.join(BASE_DIR, "debug_output")
+# 内部目录：PyInstaller打包后指向 _MEIPASS 临时解压目录，用于读取打包的资源文件
+# 外部目录：exe所在目录（或开发时项目根目录），用于保存用户数据
+import sys
 
-# 自动创建调试输出目录
-os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
+# 内部基础目录（打包后的资源目录 / 开发时的项目根目录）
+if getattr(sys, 'frozen', False):
+    _INTERNAL_DIR = sys._MEIPASS
+else:
+    _INTERNAL_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 模板图片路径
-VILLAGER_TEMPLATE = os.path.join(TEMPLATES_DIR, "cunmin.png")
-BLOCKED_TEMPLATE = os.path.join(TEMPLATES_DIR, "blocked.png")
-TC_ICON_TEMPLATE = os.path.join(TEMPLATES_DIR, "tc_icon.png")
-TC_SINGLE_TEMPLATE = os.path.join(TEMPLATES_DIR, "tc_single.png")  # 单TC预检测专用模板
+# 外部基础目录（exe所在目录 / 开发时的项目根目录）
+if getattr(sys, 'frozen', False):
+    APP_DIR = os.path.dirname(sys.executable)
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 模板目录（内部，打包在exe中）
+TEMPLATES_DIR = os.path.join(_INTERNAL_DIR, "templates")
+
+# 用户自定义模板目录（外部，与exe同目录下的user_templates文件夹）
+USER_TEMPLATES_DIR = os.path.join(APP_DIR, "user_templates")
+
+# 调试输出目录（外部，保存在exe同目录下，仅在需要保存截图时才创建）
+DEBUG_OUTPUT_DIR = os.path.join(APP_DIR, "debug_output")
+
+
+def _resolve_template(internal_path):
+    """解析模板路径：如果用户模板目录存在同名文件则使用用户版本，否则使用内置版本
+    
+    :param internal_path: 内置模板的完整路径
+    :return: (实际使用的路径, 是否使用了用户替换)
+    """
+    filename = os.path.basename(internal_path)
+    user_path = os.path.join(USER_TEMPLATES_DIR, filename)
+    if os.path.exists(user_path):
+        return user_path, True
+    return internal_path, False
+
+
+def get_template_info():
+    """获取所有模板图片的信息（供GUI显示用）
+    
+    :return: 列表，每项为 (模板名称, 内置路径, 用户路径或None, 是否使用用户替换)
+    """
+    template_names = [
+        ("村民图标 (cunmin.png)", "cunmin.png"),
+        ("遮挡图标 (blocked.png)", "blocked.png"),
+        ("单TC预检测 (tc_single.png)", "tc_single.png"),
+    ]
+    # 动态扫描 tc_number_N.png
+    for i in range(1, 50):
+        fname = f"tc_number_{i}.png"
+        internal = os.path.join(TEMPLATES_DIR, fname)
+        if not os.path.exists(internal):
+            break
+        template_names.append((f"TC数量{i} ({fname})", fname))
+
+    info = []
+    for display_name, filename in template_names:
+        internal_path = os.path.join(TEMPLATES_DIR, filename)
+        user_path = os.path.join(USER_TEMPLATES_DIR, filename)
+        has_user = os.path.exists(user_path)
+        info.append((display_name, internal_path, user_path if has_user else None, has_user))
+    return info
+
+
+# 模板图片路径（使用 _resolve_template 支持用户替换）
+VILLAGER_TEMPLATE, _ = _resolve_template(os.path.join(TEMPLATES_DIR, "cunmin.png"))
+BLOCKED_TEMPLATE, _ = _resolve_template(os.path.join(TEMPLATES_DIR, "blocked.png"))
+TC_SINGLE_TEMPLATE, _ = _resolve_template(os.path.join(TEMPLATES_DIR, "tc_single.png"))
 
 # 调试输出路径
 TC_DEBUG_SCREENSHOT = os.path.join(DEBUG_OUTPUT_DIR, "tc_detection_debug.png")

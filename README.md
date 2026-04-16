@@ -62,7 +62,6 @@ pip install -r requirements.txt
 以下模板文件必须存在于 [templates/](templates/) 目录：
 
 - `cunmin.png` - 村民图标（必需）
-- `tc_icon.png` - TC图标（必需）
 - `blocked.png` - UI遮挡检测（必需）
 
 #### 3. 运行程序
@@ -127,7 +126,7 @@ python build.py --cli        # 打包命令行版本
 python build.py --clean      # 清理包括虚拟环境（强制重新下载依赖）
 ```
 
-**CPU精简版原理：** 自动创建临时虚拟环境，安装CPU-only版本的PyTorch后打包，确保不包含CUDA库，体积大幅缩小。虚拟环境默认保留以便复用。
+**CPU精简版原理：** 自动创建临时虚拟环境，安装CPU-only版本的PyTorch后打包，确保不包含CUDA库，体积大幅缩小。CPU版中GPU加速选项不可用（配置窗口中不显示）。虚拟环境默认保留以便复用。
 
 打包完成后，exe文件在 `build/aoe4_gui_cpu/` 目录中。
 
@@ -139,21 +138,31 @@ python build.py --clean      # 清理包括虚拟环境（强制重新下载依�
 
 ```python
 VILLAGERS_PER_TC = 3    # 每个TC排队数量
-MAX_VILLAGERS = 120     # 村民总数上限
+MAX_VILLAGERS = 120     # 村民总数上限（⚠统计不含移动/建造/战斗中的村民，仅供参考，功能不稳定）
+ENABLE_MAX_VILLAGERS = False  # 是否启用村民上限检测（因统计不准，默认关闭）
 MIN_FOOD = 50           # 最低食物要求
 VILLAGER_CHECK_INTERVAL = 3  # 村民数量检查间隔（秒），村民数量变化慢，不需要频繁检查
+```
+
+### 按键设置
+
+```python
+TC_SELECT_KEY = 'h'         # 选中所有TC的快捷键（需与游戏内"选择所有城镇中心"设置一致）
+VILLAGER_QUEUE_KEY = 'q'    # 生产村民的快捷键（需与游戏内设置一致）
+ENABLE_SHIFT_QUEUE = True   # 是否使用Shift+按键批量排队（每次5个），关闭则逐个排队
 ```
 
 ### OCR性能优化
 
 ```python
-USE_GPU = False          # 是否使用GPU加速OCR（小图片OCR时CPU更快）
+USE_GPU = False          # 是否使用GPU加速OCR（⚠不建议开启，小图片OCR时CPU更快；CPU版exe中此选项无效）
 OCR_IMAGE_SCALE = 1      # OCR图片缩放比例（0.5=缩小到50%），越小越快但可能影响准确率
 ```
 
 **说明：**
 
-- 对于小图片OCR，CPU模式通常比GPU更快（GPU有数据传输开销）
+- ⚠ **不建议开启GPU加速**，对于小图片OCR，CPU模式通常比GPU更快（GPU有数据传输开销）
+- CPU版exe中不包含CUDA库，GPU加速选项不可用（配置窗口中不显示该选项）
 - `OCR_IMAGE_SCALE` 可根据识别准确率调整：
   - `1.0`：默认模式，识别准确
   - `0.5`：快速模式，适合大部分情况
@@ -168,11 +177,16 @@ POST_OPERATION_DELAY = 3.0  # 操作完成后等待游戏UI更新的时间（秒
 ### 调试模式
 
 ```python
-DEBUG_MODE = False                    # 全局调试（生成截图和详细日志）
-DEBUG_BLOCKED_DETECTION = False       # 遮挡检测调试
-DEBUG_TRAINING_DETECTION = False      # 村民生产检测调试
-DEBUG_SAVE_SCREENSHOTS = False        # 保存调试截图（关闭可提升5-10ms）
+DEBUG_MODE = False               # 全局调试（TC/村民/食物/遮挡/生产检测的详细日志）
+DEBUG_PERFORMANCE = False        # 性能分析（显示各模块详细耗时，独立开关）
+DEBUG_SAVE_SCREENSHOTS = False   # 保存调试截图（需配合全局调试，关闭可提升5-10ms）
 ```
+
+**推荐配置：**
+
+- 日常使用：全部关闭
+- 排查问题：开启 `DEBUG_MODE`，关闭 `DEBUG_SAVE_SCREENSHOTS`
+- 性能优化：开启 `DEBUG_PERFORMANCE`
 
 ### 不同分辨率适配
 
@@ -209,6 +223,15 @@ VILLAGER_COUNT_REGION = (185, 1130, 240, 1420)
 1. **使用区域编辑器**（推荐）：在配置窗口点击"区域编辑"，全屏显示所有区域框，拖拽调整后按 Enter 保存
 2. **使用吸色工具**：在配置窗口点击"吸色工具"，选择 SDR/HDR 目标后截屏取色，自动填充坐标和颜色值
 3. **手动调整**：启用 `DEBUG_MODE = True`，查看 [debug_output/](debug_output/) 截图，在配置窗口手动修改坐标
+
+### 自定义模板图片
+
+在 exe 同目录下创建 `user_templates/` 文件夹，放入与内置模板同名的图片文件即可替换：
+
+- 例如放置 `user_templates/cunmin.png` 即可替换村民图标模板
+- 在配置窗口点击"模板图片"可查看所有模板及替换状态
+- 替换优先级：`user_templates/` 中的同名文件 > 内置 `templates/`
+- 修改后需重启程序生效
 
 ### HDR 设置适配
 
@@ -253,7 +276,7 @@ OCR识别（人口、食物、村民数） → 资源检查 →
 
 1. **🔒 开始屏蔽输入** - 阻止物理鼠标键盘输入，确保操作不被打断
 2. **📦 Ctrl+0** - 将当前选中的单位保存到0号编组（临时）
-3. **🏰 按H键** - 选中所有城镇中心（需要在游戏中设置H键快捷键）
+3. **🏰 按H键** - 选中所有城镇中心（需要在游戏中设置H键为"选择所有城镇中心"的快捷键）
 4. **👷 Shift+Q** - 批量排队村民（根据TC数量和资源计算数量）
 5. **🔄 按0键** - 恢复之前选中的单位
 6. **🗑️ Ctrl+Alt+0** - 取消0号临时编组
@@ -369,7 +392,7 @@ planned = VILLAGERS_PER_TC × TC数量
 # 限制1：人口上限
 available_slots = (人口上限 - 当前人口) - 已在队列的村民数
 
-# 限制2：村民总数上限
+# 限制2：村民总数上限（需启用，⚠仅供参考，不含移动/建造/战斗中的村民，功能不稳定）
 remaining = MAX_VILLAGERS - 当前村民总数
 
 # 限制3：食物资源
@@ -405,7 +428,7 @@ actual = min(planned, available_slots, remaining, max_by_food)
 
 **解决：**
 
-1. 启用 `DEBUG_BLOCKED_DETECTION = True`
+1. 启用 `DEBUG_MODE = True`
 2. 查看 [debug_output/blocked_detection_debug.png](debug_output/blocked_detection_debug.png)
 3. 调整以下阈值：
    - `BLOCKED_MATCH_THRESHOLD = 0.7` - 完全遮挡阈值
@@ -426,7 +449,7 @@ actual = min(planned, available_slots, remaining, max_by_food)
 
 ### TC数量识别错误
 
-1. 确认 [templates/tc_icon.png](templates/tc_icon.png) 正确
+1. 确认 templates 目录中的 `tc_single.png` 和 `tc_number_*.png` 正确
 2. 检查 `TC_ICON_REGION` 坐标
 3. 调整 `TC_MATCH_THRESHOLD` 阈值
 4. 增大 `TC_SELECT_DELAY` 以预留更多图像刷新时间
@@ -442,9 +465,11 @@ actual = min(planned, available_slots, remaining, max_by_food)
 - PyInstaller onefile 模式需要先解压到临时目录，首次启动会稍慢
 - 后续启动会利用系统缓存，速度会快一些
 
-## GPU加速配置（可选）
+## GPU加速配置（可选，不推荐）
 
-程序默认使用CPU模式进行OCR识别。**对于本工具的小图片OCR任务，CPU模式通常比GPU更快**（GPU有数据传输开销）。
+程序默认使用CPU模式进行OCR识别。**⚠不建议开启GPU加速**，对于本工具的小图片OCR任务，CPU模式通常比GPU更快（GPU有数据传输开销）。
+
+**注意：** CPU版exe（推荐下载的版本）不包含CUDA库，GPU加速选项在配置窗口中不显示。只有在完整版exe或从源码运行并安装了CUDA版PyTorch时才可使用GPU加速。
 
 如果你想尝试GPU加速，可以：
 
@@ -498,10 +523,10 @@ AOE4-AutoVillager-Tool/
 ├── input_config.py                # 输入配置
 ├── lock.py                        # 文件锁
 ├── requirements.txt               # 依赖包
-├── templates/                     # 模板图片
+├── templates/                     # 内置模板图片
 │   ├── cunmin.png                 # 村民图标
-│   ├── tc_icon.png                # TC图标
 │   ├── blocked.png                # UI遮挡检测
+│   ├── tc_single.png              # 单TC预检测
 │   └── tc_number_*.png            # TC数量数字模板
 └── debug_output/                  # 调试输出（自动生成）
 ```

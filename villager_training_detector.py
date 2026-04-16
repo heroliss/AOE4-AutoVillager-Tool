@@ -35,7 +35,7 @@ from config import (
     BLOCKED_DETECT_REGION,
     VILLAGER_TEMPLATE,
     BLOCKED_TEMPLATE,
-    BLOCKED_DEBUG_SCREENSHOT,
+    DEBUG_OUTPUT_DIR,
 )
 import config
 from screenshot_util import capture_region_np
@@ -70,7 +70,7 @@ def _get_blocked_template():
             # 如果模板尺寸超过目标区域，自动缩放
             if template.shape[0] > target_height or template.shape[1] > target_width:
                 _blocked_template_gray = cv2.resize(template, (target_width, target_height))
-                if config.DEBUG_BLOCKED_DETECTION:
+                if config.DEBUG_MODE:
                     print(f"[遮挡模板] 自动缩放 {template.shape[1]}x{template.shape[0]} -> {target_width}x{target_height}")
             else:
                 _blocked_template_gray = template
@@ -83,13 +83,12 @@ class VillagerTrainingDetector(object):
     @staticmethod
     def _save_debug_screenshot(screenshot_gray, filename):
         """保存灰度图调试截图（仅在调试模式下）"""
-        if not (config.DEBUG_BLOCKED_DETECTION and config.DEBUG_SAVE_SCREENSHOTS):
+        if not (config.DEBUG_MODE and config.DEBUG_SAVE_SCREENSHOTS):
             return
         try:
             from PIL import Image
-            debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_output")
-            os.makedirs(debug_dir, exist_ok=True)
-            debug_path = os.path.join(debug_dir, filename)
+            os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
+            debug_path = os.path.join(DEBUG_OUTPUT_DIR, filename)
             img = cv2.cvtColor(screenshot_gray, cv2.COLOR_GRAY2RGB)
             Image.fromarray(img).save(debug_path)
             log_training("截图", f"已保存截图到 {debug_path}")
@@ -178,12 +177,14 @@ class VillagerTrainingDetector(object):
         # 遮挡检测
         if self._blocked_check_enabled:
             # 保存调试截图（仅在调试模式下）
-            if config.DEBUG_BLOCKED_DETECTION and config.DEBUG_SAVE_SCREENSHOTS:
+            if config.DEBUG_MODE and config.DEBUG_SAVE_SCREENSHOTS:
                 try:
+                    os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
                     from PIL import Image
+                    debug_path = os.path.join(DEBUG_OUTPUT_DIR, "blocked_detection_debug.png")
                     img = cv2.cvtColor(blocked_screenshot, cv2.COLOR_GRAY2RGB)
-                    Image.fromarray(img).save(BLOCKED_DEBUG_SCREENSHOT)
-                    log_blocked("截图", f"{BLOCKED_DEBUG_SCREENSHOT}")
+                    Image.fromarray(img).save(debug_path)
+                    log_blocked("截图", f"{debug_path}")
                     log_blocked("截图", f"尺寸={blocked_screenshot.shape[1]}x{blocked_screenshot.shape[0]}")
                 except Exception as e:
                     log_blocked("截图", f"保存失败: {e}")
@@ -196,7 +197,7 @@ class VillagerTrainingDetector(object):
             t_match = time.time() if config.DEBUG_PERFORMANCE else None
 
             # 如果置信度异常低，保存调试截图
-            if config.DEBUG_BLOCKED_DETECTION and self.confidence < 0.5:
+            if config.DEBUG_MODE and self.confidence < 0.5:
                 self._save_debug_screenshot(screenshot, "villager_low_confidence.png")
                 log_training("截图", f"置信度异常低")
 

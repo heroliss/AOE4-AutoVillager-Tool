@@ -232,7 +232,6 @@ class LogMerger:
 
 def main():
     # 1. 检测GPU状态
-    print("  [>] 检测GPU加速...", flush=True)
     gpu_available = False
     gpu_name = ""
     try:
@@ -244,9 +243,9 @@ def main():
         pass
     ocr_mode = "GPU加速" if (USE_GPU and gpu_available) else "CPU模式"
     if gpu_available:
-        print(f"       GPU: {gpu_name} (可用) | OCR模式: {ocr_mode}", flush=True)
+        print(f"  [>] GPU: {gpu_name} (可用) | OCR模式: {ocr_mode}", flush=True)
     else:
-        print(f"       GPU: 不可用 | OCR模式: {ocr_mode}", flush=True)
+        print(f"  [>] OCR模式: {ocr_mode}", flush=True)
 
     # 2. 清理残留锁文件
     print("  [>] 清理残留文件...", flush=True)
@@ -277,7 +276,9 @@ def main():
     # 加载完成
     print(flush=True)
     print("=" * 50, flush=True)
-    print(f"  村民上限: {MAX_VILLAGERS}  |  最低食物: {MIN_FOOD}  |  每TC排队: {VILLAGERS_PER_TC}", flush=True)
+    max_villagers_str = f"村民上限: {MAX_VILLAGERS}(已启用，仅供参考)" if ENABLE_MAX_VILLAGERS else "村民上限: 未启用"
+    print(f"  {max_villagers_str}  |  最低食物: {MIN_FOOD}  |  每TC排队: {VILLAGERS_PER_TC}", flush=True)
+    print(f"  选所有TC键: {TC_SELECT_KEY.upper()}  |  出农键: {VILLAGER_QUEUE_KEY.upper()}  |  Shift排队: {'开' if ENABLE_SHIFT_QUEUE else '关'}", flush=True)
     print("  程序已就绪，等待进入游戏...", flush=True)
     print("=" * 50, flush=True)
     print()
@@ -343,7 +344,7 @@ def main():
             training_detector.do()
 
             # 调试模式：打印所有检测结果
-            if DEBUG_BLOCKED_DETECTION:
+            if DEBUG_MODE:
                 status_parts = []
                 status_parts.append(f"遮挡={training_detector.blocked_confidence:.3f}")
                 status_parts.append(f"村民={training_detector.confidence:.3f}")
@@ -427,12 +428,12 @@ def main():
                     logger.log("人口识别失败，跳过")
                 continue
 
-            # 5.2 检查村民总数是否超过上限
-            if should_check_villagers and villager_counter.total >= MAX_VILLAGERS:
+            # 5.2 检查村民总数是否超过上限（需启用，且统计值仅供参考）
+            if ENABLE_MAX_VILLAGERS and should_check_villagers and villager_counter.total >= MAX_VILLAGERS:
                 if DEBUG_MODE:
                     logger.log(f"[上限] 村民={villager_counter.total}/{MAX_VILLAGERS}")
                 else:
-                    logger.log(f"村民已达上限（{villager_counter.total}/{MAX_VILLAGERS}），跳过")
+                    logger.log(f"村民已达上限（{villager_counter.total}/{MAX_VILLAGERS}，仅供参考），跳过")
                 continue
 
             # 5.3 检查食物是否充足

@@ -102,15 +102,15 @@ def get_ocr_reader():
             try:
                 import torch
                 gpu_available = torch.cuda.is_available()
-                _reader = _create_easyocr_reader(gpu=gpu_available)
                 if gpu_available:
+                    _reader = _create_easyocr_reader(gpu=True)
                     print(f"[OCR] GPU加速已启用")
+                else:
+                    _reader = _create_easyocr_reader(gpu=False)
             except Exception:
                 print(f"[OCR] GPU初始化失败，使用CPU模式")
                 _reader = _create_easyocr_reader(gpu=False)
         else:
-            if USE_GPU and not torch_available:
-                print(f"[OCR] 配置了GPU模式但torch未安装，强制CPU模式")
             _reader = _create_easyocr_reader(gpu=False)
 
     return _reader
@@ -166,6 +166,7 @@ def capture_and_scale(region, debug_screenshot_path=None, debug_logger=None):
     if debug_screenshot_path and debug_logger:
         if config.DEBUG_MODE and config.DEBUG_SAVE_SCREENSHOTS:
             try:
+                os.makedirs(os.path.dirname(debug_screenshot_path), exist_ok=True)
                 img.save(debug_screenshot_path)
                 debug_logger("截图", f"{debug_screenshot_path}")
             except Exception as e:

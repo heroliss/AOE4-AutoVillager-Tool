@@ -67,11 +67,17 @@ _INPUT_TO_KEYSYM.update({
 
 CONFIG_CATEGORIES = [
     ("核心参数", [
-        ("MAX_VILLAGERS", "村民上限", "int", "超过此数量停止自动生产（目前统计村民总数不准确，因此该功能不稳定）"),
+        ("ENABLE_MAX_VILLAGERS", "村民上限检测", "bool", "是否启用村民上限（⚠统计不含移动/建造中村民，仅供参考，功能不稳定）"),
+        ("MAX_VILLAGERS", "村民上限", "int", "超过此数量停止生产（⚠统计不准，仅供参考）"),
         ("MIN_FOOD", "最低食物", "int", "低于此值不生产村民"),
         ("VILLAGERS_PER_TC", "每TC排队", "int", "每个TC同时排队的村民数"),
         ("FOOD_PER_VILLAGER", "每村民食物", "int", "单个村民需要的食物，用于计算食物不足时应生产几个村民"),
         ("HDR_ENABLED", "游戏HDR", "bool", "游戏是否开启HDR，影响检测颜色值（开关仅控制使用SDR/HDR哪个颜色）"),
+    ]),
+    ("按键设置", [
+        ("TC_SELECT_KEY", "选所有TC按键", "str", "选中所有城镇中心的快捷键（需与游戏内设置一致）"),
+        ("VILLAGER_QUEUE_KEY", "生产村民按键", "str", "生产村民的快捷键（需与游戏内设置一致）"),
+        ("ENABLE_SHIFT_QUEUE", "Shift批量排队", "bool", "启用后Shift+生产键每次排5个，关闭则逐个排队"),
     ]),
     ("操作时序", [
         ("CHECK_INTERVAL", "检测间隔(秒)", "float", "主检测循环间隔，越小响应越快但CPU越高"),
@@ -81,16 +87,16 @@ CONFIG_CATEGORIES = [
         ("BLOCK_INPUT_DURATION", "屏蔽等待(秒)", "float", "操作后额外等待时长，0最快"),
     ]),
     ("OCR设置", [
-        ("USE_GPU", "GPU加速", "bool", "使用GPU加速OCR（小图片OCR时CPU更快）"),
+        ("USE_GPU", "GPU加速", "bool", "使用GPU加速OCR（⚠不建议开启，小图片OCR时CPU更快；CPU版exe无法使用GPU）"),
         ("OCR_IMAGE_SCALE", "图片缩放", "float", "OCR图片缩放比例，越小越快但可能不准"),
     ]),
     ("按键延迟", [
-        ("TC_SELECT_DELAY", "TC选中延迟(秒)", "float", "按H键后等待UI刷新的时间"),
-        ("TC_RETRY_DELAY", "TC重试延迟(秒)", "float", "可能UI仍未刷新导致检测失败后重试H键的等待时间"),
+        ("TC_SELECT_DELAY", "TC选中延迟(秒)", "float", "按选中TC键后等待UI刷新的时间"),
+        ("TC_RETRY_DELAY", "TC重试延迟(秒)", "float", "可能UI仍未刷新导致检测失败后重试的等待时间"),
         ("TC_MAX_RETRY", "TC最大重试", "int", "TC检测失败最大重试次数"),
         ("TC_DETECTION_FAILED_COOLDOWN", "TC失败冷却(秒)", "float", "TC检测失败后冷却时间"),
         ("COOLDOWN_CHECK_INTERVAL", "冷却检测间隔(秒)", "float", "冷却期间的检测间隔"),
-        ("QUEUE_DELAY", "排队延迟(秒)", "float", "每次Q键之间的延迟，0最快"),
+        ("QUEUE_DELAY", "排队延迟(秒)", "float", "每次生产键之间的延迟，0最快"),
     ]),
     ("模板匹配阈值", [
         ("VILLAGER_MATCH_THRESHOLD", "村民匹配阈值", "float", "村民图标匹配阈值(0-1)"),
@@ -112,11 +118,9 @@ CONFIG_CATEGORIES = [
         ("FOOD_REGION", "食物显示区域", "tuple", "食物数量OCR区域(x1,y1,x2,y2)"),
     ]),
     ("调试开关", [
-        ("DEBUG_MODE", "全局调试", "bool", "TC/村民/食物模块的详细日志和截图"),
-        ("DEBUG_BLOCKED_DETECTION", "遮挡调试", "bool", "显示遮挡置信度和截图"),
-        ("DEBUG_TRAINING_DETECTION", "生产调试", "bool", "显示每次检测的置信度"),
-        ("DEBUG_PERFORMANCE", "性能分析", "bool", "显示各模块详细耗时"),
-        ("DEBUG_SAVE_SCREENSHOTS", "保存截图", "bool", "保存调试截图(关可提升5-10ms)"),
+        ("DEBUG_MODE", "全局调试", "bool", "所有模块的详细日志（TC/村民/食物/遮挡/生产检测）"),
+        ("DEBUG_PERFORMANCE", "性能分析", "bool", "显示各模块详细耗时（独立开关）"),
+        ("DEBUG_SAVE_SCREENSHOTS", "保存截图", "bool", "保存调试截图（需配合全局调试，关闭可提升5-10ms）"),
     ]),
 ]
 
@@ -410,7 +414,7 @@ class AOE4App:
         self.last_status_label.pack(fill=tk.BOTH, expand=True)
 
         # 配置信息区域
-        config_frame = ttk.LabelFrame(self.root, text="当前配置", padding=(10, 5))
+        config_frame = ttk.LabelFrame(self.root, text="运行配置", padding=(10, 4))
         config_frame.pack(fill=tk.X, padx=10, pady=(4, 2))
         self._load_config_display(config_frame)
 
@@ -654,12 +658,21 @@ class AOE4App:
 
 【配置设置】
 点击"⚙ 配置"按钮可打开配置窗口，调整所有工具参数：
-  • 核心参数：村民上限、最低食物、每TC排队数等
+  • 核心参数：村民上限（⚠仅供参考，功能不稳定）、最低食物、每TC排队数等
+  • 按键设置：选所有TC按键、生产村民按键、Shift批量排队
   • 操作时序：检测间隔、操作延迟、输入屏蔽等
-  • OCR设置：图片缩放比例
+  • OCR设置：GPU加速（⚠不建议开启，CPU更快）、图片缩放比例
   • 按键延迟：TC选中/重试延迟、最大重试次数等
   • 模板匹配阈值：各识别模块的匹配阈值
-  • 调试开关：全局调试、遮挡调试、性能分析等
+  • 调试开关：全局调试、性能分析等
+
+【关于村民上限】
+村民上限检测默认关闭，因为OCR只能统计空闲村民，正在移动、建造、战斗中的村民无法统计，因此检测值偏低，功能不稳定。如需启用，在配置中打开"村民上限检测"开关，但请注意该数值仅供参考。
+
+【按键设置说明】
+  • 选所有TC按键：默认H键，需与游戏内"选择所有城镇中心"的快捷键一致（注意是选择所有TC，不是选择单个TC）
+  • 生产村民按键：默认Q键，需与游戏内"生产村民"的快捷键一致
+  • Shift批量排队：默认开启，使用Shift+生产键每次排5个村民，关闭则逐个排队
 
 配置修改后实时生效（无需重启）。
 点击"保存"将配置持久化到 config_override.json 文件（下次启动自动加载）。
@@ -672,6 +685,13 @@ class AOE4App:
 • 内存优化：长时间运行后如果内存占用较高，可以点击"停止"再"启动"来释放并重新加载OCR模型
 • 开局建议：游牧开局时（没有TC），程序会自动跳过，等建造完TC并手动生产第一个村民后即可自动恢复正常工作
 • 多TC支持：生产总数 = 每tc生产数量 * tc数量。由于是同时选中所有tc并生成村民，所有有可能分配不均匀需要手动调整。
+
+【自定义模板图片】
+在配置窗口中点击"模板图片"可查看所有模板。如需替换某个模板：
+  1. 在 exe 同目录下创建 user_templates 文件夹
+  2. 放入与内置模板同名的图片文件（如 cunmin.png、tc_single.png）
+  3. 重启程序即可自动使用替换图片
+替换优先级：user_templates 中的同名文件 > 内置模板
 
 【注意事项】
 • 本程序需要管理员权限运行（用于输入屏蔽功能）
@@ -986,6 +1006,19 @@ class AOE4App:
         # 目前所有 GUI 暴露的配置项都可以实时生效
         _RESTART_REQUIRED = set()
 
+        # 检测GPU是否可用（CPU版exe中torch是CPU-only版本，无法使用GPU）
+        _gpu_available = False
+        try:
+            import torch
+            if torch.cuda.is_available():
+                _gpu_available = True
+        except Exception:
+            pass
+        if not _gpu_available and getattr(config_module, 'USE_GPU', False):
+            # GPU不可用但配置中开启了GPU加速，自动关闭
+            setattr(config_module, 'USE_GPU', False)
+            config_current_vals['USE_GPU'] = False
+
         # 默认值（从原始 config 获取，在覆盖之前已保存）
         _DEFAULTS = dict(_CONFIG_ORIGINAL_DEFAULTS)
 
@@ -1015,6 +1048,10 @@ class AOE4App:
             for key, label, vtype, desc in items:
                 current_val = getattr(config_module, key, None)
                 if current_val is None:
+                    continue
+
+                # GPU不可用时跳过USE_GPU选项（CPU版exe无法使用GPU加速）
+                if key == "USE_GPU" and not _gpu_available:
                     continue
 
                 # 标签
@@ -1061,7 +1098,7 @@ class AOE4App:
                     chk.configure(command=_on_bool_change)
                 else:
                     var = tk.StringVar(value=str(current_val))
-                    entry_width = 22 if vtype == "tuple" else 14
+                    entry_width = 22 if vtype == "tuple" else (6 if vtype == "str" else 14)
                     entry = ttk.Entry(scroll_frame, textvariable=var, width=entry_width)
                     entry.grid(row=row, column=1, sticky=tk.W, pady=2)
                     config_vars[key] = (vtype, var, changed_label)
@@ -1234,6 +1271,7 @@ class AOE4App:
         ttk.Button(btn_frame, text="恢复默认", command=_reset_to_defaults, width=10).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="区域编辑", command=lambda: self._show_region_editor(config_module, config_vars, cfg_win), width=10).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="吸色工具", command=lambda: self._show_color_picker(config_module, config_vars, cfg_win), width=10).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_frame, text="模板图片", command=lambda: self._show_template_viewer(cfg_win), width=10).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="关闭", command=_on_close, width=10).pack(side=tk.RIGHT)
         save_btn.pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -1643,7 +1681,130 @@ class AOE4App:
         ttk.Button(pick_win, text="开始取色", command=_start_pick).pack(pady=10)
         ttk.Button(pick_win, text="关闭", command=pick_win.destroy).pack()
 
-    # ==================== 状态更新 ====================
+    # ==================== 模板图片查看器 ====================
+
+    def _show_template_viewer(self, parent):
+        """显示模板图片查看器：列出所有模板，显示内置/用户替换图片"""
+        try:
+            import config
+            from PIL import Image, ImageTk
+        except ImportError:
+            messagebox.showerror("错误", "需要 Pillow 库", parent=parent)
+            return
+
+        tmpl_win = tk.Toplevel(parent)
+        tmpl_win.title("模板图片")
+        tmpl_win.geometry("720x520")
+        tmpl_win.resizable(True, True)
+        tmpl_win.grab_set()
+
+        # 顶部说明
+        info_frame = ttk.Frame(tmpl_win, padding=(10, 8))
+        info_frame.pack(fill=tk.X)
+
+        ttk.Label(
+            info_frame,
+            text="模板图片管理：可在 exe 同目录的 user_templates/ 文件夹中放置同名图片替换内置模板",
+            font=("Microsoft YaHei UI", 9),
+            wraplength=680
+        ).pack(anchor=tk.W)
+
+        user_dir = getattr(config, 'USER_TEMPLATES_DIR', '')
+        if user_dir:
+            dir_text = f"用户模板目录: {user_dir}"
+            dir_label = ttk.Label(info_frame, text=dir_text, font=("Consolas", 8), foreground="gray")
+            dir_label.pack(anchor=tk.W, pady=(2, 0))
+
+            def _open_user_dir():
+                os.makedirs(user_dir, exist_ok=True)
+                os.startfile(user_dir)
+
+            ttk.Button(info_frame, text="打开目录", command=_open_user_dir, width=10).pack(anchor=tk.W, pady=(4, 0))
+
+        # 可滚动的模板列表
+        canvas = tk.Canvas(tmpl_win, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(tmpl_win, orient=tk.VERTICAL, command=canvas.yview)
+        scroll_frame = ttk.Frame(canvas)
+        scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scroll_frame, anchor=tk.NW)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=5)
+
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+
+        # 获取模板信息
+        template_info = config.get_template_info()
+
+        # 表头
+        header_frame = ttk.Frame(scroll_frame, padding=(5, 2))
+        header_frame.pack(fill=tk.X)
+        ttk.Label(header_frame, text="模板名称", font=("Microsoft YaHei UI", 9, "bold"), width=28).grid(row=0, column=0, padx=2)
+        ttk.Label(header_frame, text="内置", font=("Microsoft YaHei UI", 9, "bold"), width=8).grid(row=0, column=1, padx=2)
+        ttk.Label(header_frame, text="替换", font=("Microsoft YaHei UI", 9, "bold"), width=8).grid(row=0, column=2, padx=2)
+        ttk.Label(header_frame, text="状态", font=("Microsoft YaHei UI", 9, "bold"), width=12).grid(row=0, column=3, padx=2)
+        ttk.Label(header_frame, text="预览", font=("Microsoft YaHei UI", 9, "bold"), width=16).grid(row=0, column=4, padx=2)
+
+        ttk.Separator(scroll_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=2)
+
+        # 图片引用缓存（防止GC）
+        _photo_refs = []
+
+        for i, (display_name, internal_path, user_path, has_user) in enumerate(template_info):
+            row_frame = ttk.Frame(scroll_frame, padding=(5, 3))
+            row_frame.pack(fill=tk.X)
+
+            # 模板名称
+            ttk.Label(row_frame, text=display_name, font=("Microsoft YaHei UI", 9), width=28).grid(row=0, column=0, sticky=tk.W, padx=2)
+
+            # 内置图存在标记
+            internal_exists = os.path.exists(internal_path)
+            ttk.Label(row_frame, text="✓" if internal_exists else "✗",
+                      foreground="#6a9955" if internal_exists else "#f44747",
+                      font=("Microsoft YaHei UI", 10), width=8).grid(row=0, column=1, padx=2)
+
+            # 替换图存在标记
+            ttk.Label(row_frame, text="✓" if has_user else "-",
+                      foreground="#569cd6" if has_user else "gray",
+                      font=("Microsoft YaHei UI", 10), width=8).grid(row=0, column=2, padx=2)
+
+            # 使用状态
+            if has_user:
+                status_text = "▶ 使用替换"
+                status_color = "#569cd6"
+            else:
+                status_text = "使用内置"
+                status_color = "#6a9955"
+            ttk.Label(row_frame, text=status_text, foreground=status_color,
+                      font=("Microsoft YaHei UI", 9), width=12).grid(row=0, column=3, padx=2)
+
+            # 预览缩略图
+            preview_frame = ttk.Frame(row_frame, width=60, height=30)
+            preview_frame.grid(row=0, column=4, padx=2)
+            preview_frame.grid_propagate(False)
+
+            # 优先显示用户替换图
+            preview_path = user_path if has_user else internal_path
+            if preview_path and os.path.exists(preview_path):
+                try:
+                    img = Image.open(preview_path)
+                    # 缩放到适合预览的大小
+                    img.thumbnail((56, 26), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(img, master=tmpl_win)
+                    _photo_refs.append(photo)
+                    lbl = ttk.Label(preview_frame, image=photo)
+                    lbl.image = photo  # 防止GC
+                    lbl.pack(padx=2, pady=2)
+                except Exception:
+                    ttk.Label(preview_frame, text="加载失败", font=("Microsoft YaHei UI", 7), foreground="gray").pack()
+
+        # 底部按钮
+        btn_frame = ttk.Frame(tmpl_win, padding=(10, 8))
+        btn_frame.pack(fill=tk.X)
+        ttk.Button(btn_frame, text="关闭", command=tmpl_win.destroy, width=10).pack(side=tk.RIGHT)
 
     def _update_last_status(self, text, tag='info'):
         try:
@@ -1661,7 +1822,10 @@ class AOE4App:
         self._refresh_config_display()
 
     def _refresh_config_display(self):
-        """刷新配置显示区域"""
+        """刷新配置显示区域
+
+        核心参数始终显示；HDR/村民上限/GPU加速/调试开关等仅在启用时显示
+        """
         # 清除旧内容
         for w in self._config_frame.winfo_children():
             w.destroy()
@@ -1670,25 +1834,41 @@ class AOE4App:
         try:
             import config
             _apply_config_override()
+
+            # 核心参数（始终显示）
             summary = [
-                ("村民上限", getattr(config, 'MAX_VILLAGERS', '?')),
-                ("最低食物", getattr(config, 'MIN_FOOD', '?')),
                 ("每TC排队", getattr(config, 'VILLAGERS_PER_TC', '?')),
-                ("检测间隔", f"{getattr(config, 'CHECK_INTERVAL', '?')}s"),
-                ("操作延迟", f"{getattr(config, 'POST_OPERATION_DELAY', '?')}s"),
-                ("输入屏蔽", "开" if getattr(config, 'ENABLE_INPUT_BLOCK', False) else "关"),
+                ("最低食物", getattr(config, 'MIN_FOOD', '?')),
+                ("选所有TC键", getattr(config, 'TC_SELECT_KEY', '?').upper()),
+                ("出农键", getattr(config, 'VILLAGER_QUEUE_KEY', '?').upper()),
+                ("Shift排队", "开" if getattr(config, 'ENABLE_SHIFT_QUEUE', True) else "关"),
             ]
+
+            # 仅启用时显示的参数
+            if getattr(config, 'ENABLE_MAX_VILLAGERS', False):
+                summary.append(("村民上限⚠", f"{getattr(config, 'MAX_VILLAGERS', '?')}（仅供参考）"))
+            if getattr(config, 'HDR_ENABLED', False):
+                summary.append(("游戏HDR", "已开启"))
+            if getattr(config, 'USE_GPU', False):
+                summary.append(("GPU加速", "已开启"))
+            if getattr(config, 'DEBUG_MODE', False):
+                summary.append(("调试模式", "已开启"))
+            if getattr(config, 'DEBUG_PERFORMANCE', False):
+                summary.append(("性能分析", "已开启"))
+            if getattr(config, 'DEBUG_SAVE_SCREENSHOTS', False):
+                summary.append(("保存截图", "已开启"))
+
         except Exception:
             summary = [("配置加载", "失败")]
 
         for i, (key, value) in enumerate(summary):
-            col = i % 4
-            row = i // 4
+            col = i % 3
+            row = i // 3
             ttk.Label(self._config_frame, text=f"{key}:", font=("Microsoft YaHei UI", 9)).grid(
                 row=row, column=col * 2, sticky=tk.E, padx=(0, 2), pady=1
             )
             lbl = ttk.Label(self._config_frame, text=str(value), font=("Microsoft YaHei UI", 9, "bold"))
-            lbl.grid(row=row, column=col * 2 + 1, sticky=tk.W, padx=(0, 16), pady=1)
+            lbl.grid(row=row, column=col * 2 + 1, sticky=tk.W, padx=(0, 20), pady=1)
             self._config_labels[key] = lbl
 
     def _update_status(self, text, color):
@@ -1830,7 +2010,7 @@ class AOE4App:
             if gpu_available:
                 print(f"       GPU: {gpu_name} (可用) | OCR模式: {ocr_mode}", flush=True)
             else:
-                print(f"       OCR模式: {ocr_mode}", flush=True)
+                print(f"       OCR模式: CPU模式", flush=True)
 
             # 2. 清理残留锁文件
             print("  [>] 清理残留文件...", flush=True)
@@ -1858,7 +2038,9 @@ class AOE4App:
             print(f"       耗时 {warmup_time:.2f}秒", flush=True)
 
             # 就绪
-            print(f"\n  村民上限: {config.MAX_VILLAGERS}  |  最低食物: {config.MIN_FOOD}  |  每TC排队: {config.VILLAGERS_PER_TC}", flush=True)
+            max_villagers_str = f"村民上限: {config.MAX_VILLAGERS}(已启用，仅供参考)" if config.ENABLE_MAX_VILLAGERS else "村民上限: 未启用"
+            print(f"\n  {max_villagers_str}  |  最低食物: {config.MIN_FOOD}  |  每TC排队: {config.VILLAGERS_PER_TC}", flush=True)
+            print(f"  选所有TC键: {config.TC_SELECT_KEY.upper()}  |  出农键: {config.VILLAGER_QUEUE_KEY.upper()}  |  Shift排队: {'开' if config.ENABLE_SHIFT_QUEUE else '关'}", flush=True)
             print("  程序已就绪，等待进入游戏...", flush=True)
             print("=" * 50 + "\n", flush=True)
 
@@ -1923,7 +2105,7 @@ class AOE4App:
                 # [3] 村民生产状态检测
                 training_detector.do()
 
-                if config.DEBUG_BLOCKED_DETECTION:
+                if config.DEBUG_MODE:
                     status_parts = []
                     status_parts.append(f"遮挡={training_detector.blocked_confidence:.3f}")
                     status_parts.append(f"村民={training_detector.confidence:.3f}")
@@ -1999,11 +2181,11 @@ class AOE4App:
                         logger.log("人口识别失败，跳过")
                     continue
 
-                if should_check_villagers and villager_counter.total >= config.MAX_VILLAGERS:
+                if config.ENABLE_MAX_VILLAGERS and should_check_villagers and villager_counter.total >= config.MAX_VILLAGERS:
                     if config.DEBUG_MODE:
                         logger.log(f"[上限] 村民={villager_counter.total}/{config.MAX_VILLAGERS}")
                     else:
-                        logger.log(f"村民已达上限（{villager_counter.total}/{config.MAX_VILLAGERS}），跳过")
+                        logger.log(f"村民已达上限（{villager_counter.total}/{config.MAX_VILLAGERS}，仅供参考），跳过")
                     continue
 
                 if food_reader.amount is None:

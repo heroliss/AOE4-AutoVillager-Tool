@@ -34,6 +34,7 @@ from config import (
     TC_SINGLE_TEMPLATE,
     TEMPLATES_DIR,
     DEBUG_OUTPUT_DIR,
+    USER_TEMPLATES_DIR,
 )
 import config
 from screenshot_util import capture_region_np
@@ -55,13 +56,14 @@ _max_tc_number = None  # 动态检测到的最大TC编号模板（避免硬编�
 def _detect_max_tc_number():
     """
     动态检测可用的最大TC编号模板
-    扫描 templates/tc_number_N.png，找到最大的N
-    避免硬编码 range(1, 21) 在模板不足时做无用匹配
+    扫描内置和用户模板目录中的 tc_number_N.png，找到最大的N
     """
     max_num = 0
     for num in range(1, 50):  # 理论上限50，实际找到不存在的就停止
-        template_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
-        if os.path.exists(template_path):
+        # 优先检查用户模板，其次内置模板
+        user_path = os.path.join(USER_TEMPLATES_DIR, f"tc_number_{num}.png")
+        internal_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+        if os.path.exists(user_path) or os.path.exists(internal_path):
             max_num = num
         else:
             break  # 编号连续，遇到不存在的即可停止
@@ -88,12 +90,15 @@ def _load_single_tc_template():
 
 
 def _load_template_full(num):
-    """加载完整模板（阶段1使用），带缓存"""
+    """加载完整模板（阶段1使用），优先使用用户替换模板，带缓存"""
     cache_key = f"full_{num}"
     if cache_key in _template_cache:
         return _template_cache[cache_key]
 
-    template_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+    # 优先使用用户替换模板
+    user_path = os.path.join(USER_TEMPLATES_DIR, f"tc_number_{num}.png")
+    internal_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+    template_path = user_path if os.path.exists(user_path) else internal_path
     if not os.path.exists(template_path):
         return None
 
@@ -104,12 +109,15 @@ def _load_template_full(num):
 
 
 def _load_template_crop(num):
-    """加载裁剪后的模板（阶段2使用），带缓存"""
+    """加载裁剪后的模板（阶段2使用），优先使用用户替换模板，带缓存"""
     cache_key = f"crop_{num}"
     if cache_key in _template_crop_cache:
         return _template_crop_cache[cache_key]
 
-    template_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+    # 优先使用用户替换模板
+    user_path = os.path.join(USER_TEMPLATES_DIR, f"tc_number_{num}.png")
+    internal_path = os.path.join(TEMPLATES_DIR, f"tc_number_{num}.png")
+    template_path = user_path if os.path.exists(user_path) else internal_path
     if not os.path.exists(template_path):
         return None
 
@@ -215,6 +223,7 @@ class TCCounter:
         # 保存调试截图（只在第一次时保存）
         if save_debug and config.DEBUG_MODE and config.DEBUG_SAVE_SCREENSHOTS:
             try:
+                os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
                 from PIL import Image
                 debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_single_region_debug.png")
                 img_rgb = cv2.cvtColor(screenshot, cv2.COLOR_BGR2RGB)
@@ -257,6 +266,7 @@ class TCCounter:
         # 只保存前3次重试的截图
         if retry_count >= 0 and config.DEBUG_MODE and config.DEBUG_SAVE_SCREENSHOTS:
             try:
+                os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
                 from PIL import Image
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
                 # 保存时带上重试次数，避免覆盖
@@ -321,6 +331,7 @@ class TCCounter:
         screenshot_gray = cv2.cvtColor(screenshot_crop, cv2.COLOR_BGR2GRAY)
 
         if config.DEBUG_MODE:
+            os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
             debug_path = os.path.join(DEBUG_OUTPUT_DIR, "tc_match_region.png")
             cv2.imwrite(debug_path, screenshot_crop)
             print(f"[TC阶段2] 匹配区域={debug_path}")

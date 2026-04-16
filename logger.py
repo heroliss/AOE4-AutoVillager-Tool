@@ -46,14 +46,14 @@ class Logger:
 
     @staticmethod
     def blocked(level, message):
-        """遮挡检测日志（独立开关）"""
-        if config.DEBUG_BLOCKED_DETECTION:
+        """遮挡检测日志（跟随DEBUG_MODE）"""
+        if config.DEBUG_MODE:
             print(Logger._format("BLOCKED", level, message))
 
     @staticmethod
     def training(level, message):
-        """村民生产检测日志"""
-        if config.DEBUG_TRAINING_DETECTION:
+        """村民生产检测日志（跟随DEBUG_MODE）"""
+        if config.DEBUG_MODE:
             print(Logger._format("TRAINING", level, message))
 
     @staticmethod
