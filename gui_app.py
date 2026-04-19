@@ -1121,6 +1121,62 @@ class AOE4App:
                     entry.grid(row=row, column=1, sticky=tk.W, pady=2)
                     config_vars[key] = (vtype, var, changed_label)
 
+                    # 按键类配置项添加捕获按钮
+                    if key in ("TC_SELECT_KEY", "VILLAGER_QUEUE_KEY"):
+                        cap_btn = ttk.Button(scroll_frame, text="捕获", width=4)
+                        _cap_bind = [None]  # 用列表存储bind id，便于闭包内修改
+                        _orig_val = [str(current_val)]  # 保存原始值，用于取消时恢复
+
+                        def _on_capture_click(e=entry, v=var, b=cap_btn, k=key, cb=_cap_bind, ov=_orig_val):
+                            ov[0] = v.get()  # 保存当前值
+                            v.set("请按键...")
+                            b.configure(text="...", state=tk.DISABLED)
+                            e.configure(state='readonly')
+
+                            def _cancel_capture(ev=e, vv=v, bb=b, cbb=cb):
+                                """取消捕获，恢复原始值"""
+                                vv.set(ov[0])
+                                bb.configure(text="捕获", state=tk.NORMAL)
+                                ev.configure(state='normal')
+                                if cbb[0] is not None:
+                                    cfg_win.unbind("<KeyPress>", cbb[0])
+                                    cbb[0] = None
+
+                            def _on_key_press(event, ev=e, vv=v, bb=b, kk=k, cbb=cb):
+                                keysym = event.keysym
+                                # Escape 取消捕获
+                                if keysym == 'Escape':
+                                    _cancel_capture()
+                                    return "break"
+                                # 忽略单独的修饰键
+                                if keysym.lower() in ('control_l', 'control_r', 'alt_l', 'alt_r',
+                                                       'shift_l', 'shift_r'):
+                                    return "break"
+                                # 映射为单个按键字符
+                                if len(keysym) == 1:
+                                    key_char = keysym.lower()
+                                else:
+                                    # 功能键等使用小写keysym
+                                    key_char = _KEY_DISPLAY.get(keysym.lower(), keysym).lower()
+                                vv.set(key_char)
+                                bb.configure(text="捕获", state=tk.NORMAL)
+                                ev.configure(state='normal')
+                                if cbb[0] is not None:
+                                    cfg_win.unbind("<KeyPress>", cbb[0])
+                                    cbb[0] = None
+                                # 触发值变更
+                                setattr(config_module, kk, key_char)
+                                config_current_vals[kk] = key_char
+                                _update_changed_mark(kk, key_char, changed_label)
+                                _update_save_btn()
+                                self._refresh_config_display()
+                                return "break"
+
+                            cb[0] = cfg_win.bind("<KeyPress>", _on_key_press)
+
+                        cap_btn.configure(command=_on_capture_click)
+                        cap_btn.grid(row=row, column=2, padx=(4, 0), pady=2)
+
                     def _on_value_change(k=key, v=var, cl=changed_label, vt=vtype):
                         try:
                             raw = v.get().strip()
