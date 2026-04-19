@@ -27,6 +27,220 @@ SHORTCUT_FILE = os.path.join(_APP_DIR, "shortcuts.json")
 CONFIG_OVERRIDE_FILE = os.path.join(_APP_DIR, "config_override.json")
 
 
+# ==================== LOD 时间序列 ====================
+
+class _LODSeries:
+    """带LOD（Level of Detail）层级的时间序列
+
+    Level 0: 原始数据（self.raw list），索引访问O(1)
+    Level K (K≥1): 每 GROUP^K 个原始点的 (min, max) 对
+
+    绘图时根据可见范围选择合适的LOD层级，避免遍历大量原始数据。
+    内存开销约为原始数据的 5/3 倍（1 + 1/2 + 1/8 + ... ≈ 5/3）。
+    """
+
+    GROUP = 4  # 每组4个原始点聚合为1个(min,max)
+
+    def __init__(self):
+        self.raw = []             # 原始数据 list（替代deque，O(1)索引）
+        self.levels = []          # levels[k] = [(min, max), ...]
+        self._pending = []        # 未满 GROUP 的原始点（尾部余数）
+        # _lod_pending[k] 存储第k层未满GROUP的尾部项（来自levels[k]的引用切片）
+        # 仅在 append 时维护，rebuild 时重建
+        self._lod_pending = []    # 每层未满 GROUP 的 (min, max) 列表
+
+    def __len__(self):
+        return len(self.raw)
+
+    def __bool__(self):
+        return bool(self.raw)
+
+    def append(self, val):
+        """追加一个值，增量维护LOD层级"""
+        self.raw.append(val)
+        self._pending.append(val)
+        if len(self._pending) >= self.GROUP:
+            lo = min(self._pending)
+            hi = max(self._pending)
+            self._pending = []
+            self._push_lod(0, (lo, hi))
+
+    def _push_lod(self, level, val_tuple):
+        """向指定LOD层级推送一个(min,max)对"""
+        while level >= len(self.levels):
+            self.levels.append([])
+            self._lod_pending.append([])
+        self.levels[level].append(val_tuple)
+        self._lod_pending[level].append(val_tuple)
+        if len(self._lod_pending[level]) >= self.GROUP:
+            lo = min(v[0] for v in self._lod_pending[level])
+            hi = max(v[1] for v in self._lod_pending[level])
+            self._lod_pending[level] = []
+            self._push_lod(level + 1, (lo, hi))
+
+    def trim(self, maxlen):
+        """淘汰超出maxlen的旧数据并重建LOD"""
+        if maxlen <= 0 or len(self.raw) <= maxlen:
+            return
+        self.raw = self.raw[len(self.raw) - maxlen:]
+        self.rebuild()
+
+    def rebuild(self):
+        """从raw重建所有LOD层级（trim后或设置变更后调用）"""
+        self.levels = []
+        self._lod_pending = []
+        self._pending = []
+
+        src = self.raw
+        level = 0
+        while len(src) >= self.GROUP:
+            dst = []
+            full_count = len(src) - len(src) % self.GROUP
+            for i in range(0, full_count, self.GROUP):
+                group = src[i:i + self.GROUP]
+                if level == 0:
+                    dst.append((min(group), max(group)))
+                else:
+                    dst.append((min(v[0] for v in group), max(v[1] for v in group)))
+            self.levels.append(dst)
+            self._lod_pending.append([])  # 余数由下方回填逻辑处理
+            src = dst
+            level += 1
+
+        # 回填 _lod_pending：每层的余数就是该层最后几个未被上层聚合的项
+        for k in range(len(self.levels)):
+            r = len(self.levels[k]) % self.GROUP
+            if r > 0:
+                self._lod_pending[k] = list(self.levels[k][-r:])
+
+        # raw 的余数放入 _pending
+        r = len(self.raw) % self.GROUP
+        self._pending = list(self.raw[-r:]) if r else []
+
+    def get_draw_data(self, offset, count, chart_width):
+        """获取绘图数据，自动选择合适的LOD层级
+
+        :param offset: 可见范围在raw中的起始索引
+        :param count: 可见范围的原始数据点数
+        :param chart_width: 图表像素宽度
+        :return: (values, raw_indices) 两个list，等长
+                 values[i] 是值，raw_indices[i] 是对应的raw索引（用于X轴定位）
+        """
+        if count <= 0 or not self.raw:
+            return [], []
+
+        max_points = chart_width * 2  # 每像素最多2个采样点，保证视觉精度
+
+        # 如果原始数据量本身就不大，直接用原始数据，无需LOD
+        if count <= max_points:
+            end = min(offset + count, len(self.raw))
+            values = self.raw[offset:end]
+            indices = list(range(offset, end))
+            return values, indices
+
+        # 选择LOD层级：可见范围对应的LOD点数×2 ≤ max_points
+        chosen_level = -1  # -1 表示用原始数据
+        for k in range(len(self.levels)):
+            group_size = self.GROUP ** (k + 1)
+            # 该层级覆盖offset..offset+count范围的LOD点数
+            lod_start = offset // group_size
+            lod_end = (offset + count + group_size - 1) // group_size
+            lod_count = lod_end - lod_start
+            if lod_count * 2 <= max_points:
+                chosen_level = k
+                break
+
+        if chosen_level == -1:
+            # 所有LOD层级仍不够稀疏，退回原始数据
+            end = min(offset + count, len(self.raw))
+            values = self.raw[offset:end]
+            indices = list(range(offset, end))
+            return values, indices
+
+        # 用LOD层级：每个(min,max)对展开为2个值
+        group_size = self.GROUP ** (chosen_level + 1)
+        lod = self.levels[chosen_level]
+        lod_start = offset // group_size
+        lod_end = (offset + count + group_size - 1) // group_size
+        lod_start = max(0, lod_start)
+        lod_end = min(lod_end, len(lod))
+
+        values = []
+        indices = []
+        for i in range(lod_start, lod_end):
+            lo, hi = lod[i]
+            raw_idx_start = i * group_size
+            raw_idx_end = raw_idx_start + group_size - 1
+            # 先小后大，保持视觉连续性
+            if lo <= hi:
+                values.extend([lo, hi])
+            else:
+                values.extend([hi, lo])
+            indices.extend([raw_idx_start, raw_idx_end])
+
+        # 补充LOD层级未覆盖的尾部数据（_lod_pending + _pending）
+        # 计算LOD层级实际覆盖的raw索引范围
+        covered_end = len(lod) * group_size  # LOD层级覆盖到此处
+        raw_end = min(offset + count, len(self.raw))
+        if covered_end < raw_end:
+            # 从中间LOD层级补充：逐层展开 lod_pending[k] (k < chosen_level)
+            # 从raw读取LOD未覆盖的尾部（长度≤GROUP^(chosen_level+1)，性能影响有限）
+            tail_start = max(covered_end, offset)
+            for ri in range(tail_start, raw_end):
+                values.append(self.raw[ri])
+                indices.append(ri)
+
+        return values, indices
+
+    def peak(self, offset=0, count=None):
+        """获取指定范围的数据范围（min, max），使用LOD加速"""
+        if not self.raw:
+            return 0.0, 0.0
+        if count is None:
+            count = len(self.raw) - offset
+        end = min(offset + count, len(self.raw))
+        if offset >= end:
+            return 0.0, 0.0
+
+        lo = self.raw[offset]
+        hi = self.raw[offset]
+
+        # 使用LOD Level 0加速：对齐到GROUP边界的部分用LOD，余数遍历raw
+        gs = self.GROUP
+        # 头部：offset到下一个GROUP边界
+        first_boundary = ((offset // gs) + 1) * gs
+        head_end = min(first_boundary, end)
+        for i in range(offset, head_end):
+            v = self.raw[i]
+            if v < lo:
+                lo = v
+            elif v > hi:
+                hi = v
+
+        # 中间：用Level 0的(min, max)对
+        if self.levels and head_end < end:
+            lod0 = self.levels[0]
+            lod_idx_start = head_end // gs
+            lod_idx_end = min(end // gs, len(lod0))
+            for li in range(lod_idx_start, lod_idx_end):
+                mn, mx = lod0[li]
+                if mn < lo:
+                    lo = mn
+                if mx > hi:
+                    hi = mx
+
+            # 尾部：Level 0未覆盖的余数
+            tail_start = lod_idx_end * gs
+            for i in range(tail_start, end):
+                v = self.raw[i]
+                if v < lo:
+                    lo = v
+                elif v > hi:
+                    hi = v
+
+        return lo, hi
+
+
 # ==================== 快捷键管理 ====================
 
 # 功能名 → 默认无快捷键
@@ -341,6 +555,31 @@ class AOE4App:
         # TC 缓存清零标志（工作线程检查）
         self._tc_reset_requested = False
 
+        # 内存/CPU监控数据（使用_LODSeries，O(1)追加和索引访问，LOD加速缩小视图绘制）
+        self._mem_monitor_win = None
+        self._mem_data = {"tool": _LODSeries(), "game": _LODSeries(), "system_avail": _LODSeries()}
+        self._mem_after_id = None
+        self._mem_draw_after_id = None  # 绘制定时器（动态按需绘制）
+        self._mem_dirty = False  # 数据脏标记：有新数据或画布尺寸变化时置True
+        self._mem_sample_interval = 1000  # 采样间隔（毫秒）
+        self._mem_max_minutes = 100  # 最大记录时长（分钟）
+        self._mem_zoom = 1.0  # 横向缩放倍率
+        self._mem_maxlen = 6000  # 数据容量，打开窗口时按设置计算
+        self._mem_peak = {"left": 0.0, "right": 0.0}  # 缓存Y轴峰值，避免每次遍历全量数据
+
+        self._cpu_monitor_win = None
+        self._cpu_data = {"tool": _LODSeries(), "game": _LODSeries(), "system_avail": _LODSeries()}
+        self._cpu_after_id = None
+        self._cpu_draw_after_id = None
+        self._cpu_dirty = False  # 数据脏标记：有新数据或画布尺寸变化时置True
+        self._cpu_sample_interval = 1000
+        self._cpu_max_minutes = 100
+        self._cpu_zoom = 1.0
+        self._cpu_maxlen = 6000
+        self._cpu_tool_proc = None  # 缓存工具进程的psutil.Process实例
+        self._cpu_game_procs = []  # 缓存游戏进程的psutil.Process实例
+        self._cpu_game_warmup = set()  # 正在预热的游戏进程PID（首次采样间隔内跳过）
+
         # 快捷键配置
         self._shortcuts = _load_shortcuts()
 
@@ -481,6 +720,16 @@ class AOE4App:
             btn_frame2, text="⚙ 配置", width=10, command=self._show_config_dialog
         )
         self.config_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.mem_btn = ttk.Button(
+            btn_frame2, text="内存监控", width=9, command=self._show_memory_monitor
+        )
+        self.mem_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.cpu_btn = ttk.Button(
+            btn_frame2, text="CPU监控", width=9, command=self._show_cpu_monitor
+        )
+        self.cpu_btn.pack(side=tk.LEFT, padx=(0, 4))
 
         self.help_btn = ttk.Button(
             btn_frame2, text="? 帮助", width=10, command=self._show_help
@@ -634,7 +883,960 @@ class AOE4App:
         self.log_text.configure(state='disabled')
         self._update_last_status("日志已清除", 'dim')
 
-    # ==================== 帮助窗口 ====================
+    # ==================== 监控窗口通用绘制 ====================
+
+    @staticmethod
+    def _nice_step(v_max, target_ticks=5):
+        """计算好看的Y轴刻度步长"""
+        for nice in [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]:
+            if nice >= v_max / target_ticks:
+                return nice
+        return int(v_max / target_ticks)
+
+    def _perf_draw_chart(self, canvas, data_dict, left_keys, right_keys, y_axes,
+                         colors, unit_left="", unit_right="", interval_ms=1000,
+                         left_peak=None, right_peak=None, visible_offset=0):
+        """通用性能曲线图绘制（LOD加速 + PIL渲染，高性能）
+
+        :param canvas: tk.Canvas
+        :param data_dict: {"key": _LODSeries/list, ...}
+        :param left_keys: 左Y轴对应的数据键列表
+        :param right_keys: 右Y轴对应的数据键列表
+        :param y_axes: {"key": y_max, ...} 各曲线的Y轴最大值
+        :param colors: {"key": "#color", ...}
+        :param unit_left: 左Y轴单位文字
+        :param unit_right: 右Y轴单位文字
+        :param interval_ms: 采样间隔（毫秒），用于X轴时间标签
+        :param left_peak: 左Y轴数据的已知峰值（避免遍历全量数据）
+        :param right_peak: 右Y轴数据的已知峰值
+        :param visible_offset: 只绘制 data[visible_offset:] 的部分
+        """
+        if canvas is None:
+            return
+
+        w = canvas.winfo_width()
+        h = canvas.winfo_height()
+        if w < 50 or h < 50:
+            return
+
+        margin_l, margin_r, margin_t, margin_b = 55, 55, 10, 22  # 左/右/上/下边距
+        chart_w = w - margin_l - margin_r
+        chart_h = h - margin_t - margin_b
+        if chart_w < 10 or chart_h < 10:
+            return
+
+        # 取任意一个key确定数据长度（只计算可见部分）
+        any_series = next((v for v in data_dict.values() if v), None)
+        if not any_series:
+            return
+        total_len = len(any_series)
+        if visible_offset > 0:
+            n = total_len - visible_offset
+        else:
+            n = total_len
+        if n < 2:
+            return
+
+        # 左Y轴范围（优先使用缓存的peak值，避免遍历全量数据）
+        if left_peak is not None and left_peak > 0:
+            left_max = left_peak * 1.2
+        else:
+            left_vals = []
+            for k in left_keys:
+                s = data_dict.get(k)
+                if s and isinstance(s, _LODSeries):
+                    lo, hi = s.peak(visible_offset, n)
+                    left_vals.extend([lo, hi])
+                elif s:
+                    left_vals.extend(s[visible_offset:visible_offset + n] if hasattr(s, '__getitem__') else [])
+            left_max = max(left_vals) * 1.2 if left_vals else 100
+        if left_max < 10:
+            left_max = 10
+        left_step = self._nice_step(left_max)
+        left_max = ((int(left_max / left_step) + 1) * left_step)
+
+        # 右Y轴范围
+        if right_keys:
+            if right_peak is not None and right_peak > 0:
+                right_max = right_peak * 1.15
+            else:
+                right_vals = []
+                for k in right_keys:
+                    s = data_dict.get(k)
+                    if s and isinstance(s, _LODSeries):
+                        lo, hi = s.peak(visible_offset, n)
+                        right_vals.extend([lo, hi])
+                    elif s:
+                        right_vals.extend(s[visible_offset:visible_offset + n] if hasattr(s, '__getitem__') else [])
+                right_max = max(right_vals) * 1.15 if right_vals else 100
+            if right_max < 10:
+                right_max = 10
+            right_step = self._nice_step(right_max)
+            right_max = ((int(right_max / right_step) + 1) * right_step)
+        else:
+            right_max = 100
+
+        # 更新 y_axes
+        for k in left_keys:
+            y_axes[k] = left_max
+        for k in right_keys:
+            y_axes[k] = right_max
+
+        # ---- 使用 PIL 渲染 ----
+        from PIL import Image, ImageDraw, ImageTk
+
+        img = Image.new('RGB', (w, h), (30, 30, 30))  # 深灰背景 #1e1e1e，与Canvas默认bg一致
+        draw = ImageDraw.Draw(img)
+
+        # 字体
+        font = self._get_pil_font(10)
+
+        # 绘制水平网格线 + 左Y轴刻度
+        left_ticks = int(left_max / left_step)
+        grid_color = (51, 51, 51)
+        left_color = self._hex_to_rgb(colors.get(left_keys[0], "#888888"))  # 灰色fallback
+        for i in range(left_ticks + 1):
+            y_val = i * left_step
+            y_pos = margin_t + chart_h - (y_val / left_max) * chart_h
+            iy = int(y_pos)
+            draw.line([(margin_l, iy), (margin_l + chart_w, iy)], fill=grid_color, width=1)
+            draw.text((margin_l - 5, iy - 5), f"{y_val:.0f}",
+                      fill=left_color, font=font)
+
+        # 右Y轴刻度
+        if right_keys:
+            right_color = self._hex_to_rgb(colors.get(right_keys[0], "#888888"))
+            right_ticks = int(right_max / right_step)
+            for i in range(right_ticks + 1):
+                y_val = i * right_step
+                y_pos = margin_t + chart_h - (y_val / right_max) * chart_h
+                iy = int(y_pos)
+                draw.text((margin_l + chart_w + 4, iy - 5), f"{y_val:.0f}",
+                          fill=right_color, font=font)
+
+        # Y轴单位
+        if unit_left:
+            draw.text((margin_l - 5, margin_t - 12), unit_left,
+                      fill=left_color, font=font)
+        if unit_right and right_keys:
+            right_color = self._hex_to_rgb(colors.get(right_keys[0], "#888888"))
+            draw.text((margin_l + chart_w + 4, margin_t - 12), unit_right,
+                      fill=right_color, font=font)
+
+        # 绘制数据曲线（两层降采样：LOD层级聚合 + 像素级min/max保留）
+        off = visible_offset
+        x_scale = chart_w / (n - 1) if n > 1 else 1.0
+        chart_bottom = margin_t + chart_h
+        for key in list(data_dict.keys()):
+            series = data_dict[key]
+            data_len = len(series) - off
+            if data_len < 2:
+                continue
+            color_rgb = self._hex_to_rgb(colors.get(key, "#888888"))
+            y_max = y_axes.get(key, left_max)
+            y_scale = chart_h / y_max
+
+            # 使用LOD获取绘图数据
+            if isinstance(series, _LODSeries):
+                values, raw_indices = series.get_draw_data(off, data_len, chart_w)
+            else:
+                values = list(series[off:off + data_len])
+                raw_indices = list(range(off, off + data_len))
+
+            nv = len(values)
+            if nv < 2:
+                continue
+
+            # 像素级降采样：每step个点保留min/max，确保视觉上不丢失峰值
+            # 先记录min后max（X坐标递增），使draw.line能正确绘制连续折线
+            max_points = chart_w * 2
+            if nv > max_points:
+                step = nv / max_points
+                coords = []
+                for si in range(max_points):
+                    i_start = int(si * step)
+                    i_end = min(int((si + 1) * step), nv)
+                    if i_end <= i_start:
+                        continue
+                    min_v = values[i_start]
+                    max_v = min_v
+                    min_ri = raw_indices[i_start]
+                    max_ri = min_ri
+                    for j in range(i_start + 1, i_end):
+                        v = values[j]
+                        if v < min_v:
+                            min_v = v
+                            min_ri = raw_indices[j]
+                        elif v > max_v:
+                            max_v = v
+                            max_ri = raw_indices[j]
+                    if min_ri <= max_ri:
+                        first_ri, first_v = min_ri, min_v
+                        second_ri, second_v = max_ri, max_v
+                    else:
+                        first_ri, first_v = max_ri, max_v
+                        second_ri, second_v = min_ri, min_v
+                    coords.append((margin_l + (first_ri - off) * x_scale,
+                                   chart_bottom - first_v * y_scale))
+                    if min_v != max_v:
+                        coords.append((margin_l + (second_ri - off) * x_scale,
+                                       chart_bottom - second_v * y_scale))
+            else:
+                coords = []
+                # 缓存频繁访问的变量到局部，减少属性查找开销
+                _ml = margin_l
+                _off = off
+                _xs = x_scale
+                _cb = chart_bottom
+                _ys = y_scale
+                for i in range(nv):
+                    coords.append((_ml + (raw_indices[i] - _off) * _xs,
+                                   _cb - values[i] * _ys))
+
+            if len(coords) >= 2:
+                # draw.line绘制连续折线，比逐段draw.line性能更高
+                draw.line(coords, fill=color_rgb, width=2)
+
+        # X轴时间标签
+        def _fmt_time(num_points):
+            total_sec = int(num_points * interval_ms / 1000)
+            m, s = divmod(total_sec, 60)
+            h, m = divmod(m, 60)
+            if h > 0:
+                return f"-{h}:{m:02d}:{s:02d}"
+            return f"-{m}:{s:02d}" if m > 0 else f"-{s}s"
+
+        label_color = (136, 136, 136)
+        # X轴三个时间标签：起点(最旧)、50%处、终点(现在)
+        for frac, label in [(0, _fmt_time(n - 1)), (0.5, _fmt_time(int((n - 1) * 0.5))), (1.0, "现在")]:
+            x = margin_l + frac * chart_w
+            draw.text((int(x) - 5, margin_t + chart_h + 4), label,
+                      fill=label_color, font=font)
+
+        # 渲染到canvas：PIL渲染到图片后通过PhotoImage显示到Canvas
+        # 复用PhotoImage和canvas项：paste+itemconfig替代delete+create，
+        # 避免重复创建PhotoImage的开销，且保证多Toplevel窗口下Tk正常刷新
+        try:
+            canvas_id = id(canvas)
+            # 懒初始化：监控窗口未打开时无需这些字典
+            # 三个字典以canvas_id为键，必须同步维护
+            if not hasattr(self, '_chart_photos'):
+                self._chart_photos = {}          # {canvas_id: ImageTk.PhotoImage}
+            if not hasattr(self, '_chart_canvas_items'):
+                self._chart_canvas_items = {}    # {canvas_id: canvas item id}
+            if not hasattr(self, '_chart_photo_sizes'):
+                self._chart_photo_sizes = {}     # {canvas_id: (w, h)}
+
+            photo = self._chart_photos.get(canvas_id)
+            canvas_item = self._chart_canvas_items.get(canvas_id)
+            prev_size = self._chart_photo_sizes.get(canvas_id)
+
+            # 尺寸不变时复用PhotoImage（paste不改变尺寸，尺寸变化必须重建）
+            if photo is not None and prev_size == (w, h):
+                try:
+                    photo.paste(img)
+                    # paste后需要通知canvas重绘该项，否则Tk可能不刷新显示
+                    if canvas_item is not None:
+                        canvas.itemconfig(canvas_item, image=photo)
+                except Exception:
+                    photo = None
+            else:
+                photo = None
+
+            if photo is None:
+                # 首次创建或尺寸变化后重建
+                photo = ImageTk.PhotoImage(img)
+                canvas.delete("all")
+                canvas_item = canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+                self._chart_photos[canvas_id] = photo
+                self._chart_canvas_items[canvas_id] = canvas_item
+                self._chart_photo_sizes[canvas_id] = (w, h)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Chart render error: {e}")
+
+    @staticmethod
+    def _hex_to_rgb(hex_color):
+        """将 #RRGGBB 转为 (R, G, B) 元组（仅支持6位十六进制格式）"""
+        h = hex_color.lstrip('#')
+        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+    @staticmethod
+    def _get_pil_font(size=10):
+        """获取PIL字体，优先使用等宽字体（仅Windows）"""
+        from PIL import ImageFont
+        # Consolas(两种大小写) > Courier New > Lucida Console > Arial
+        font_names = ["consola.ttf", "Consolas.ttf", "cour.ttf", "lucon.ttf", "arial.ttf"]
+        for name in font_names:
+            try:
+                return ImageFont.truetype(name, size)
+            except Exception:
+                continue
+        # 尝试 Windows 字体目录（完整路径，大小写变体不再需要）
+        import os
+        windir = os.environ.get('WINDIR', r'C:\Windows')
+        for name in ["consola.ttf", "cour.ttf", "lucon.ttf", "arial.ttf"]:
+            path = os.path.join(windir, 'Fonts', name)
+            if os.path.exists(path):
+                try:
+                    return ImageFont.truetype(path, size)
+                except Exception:
+                    continue
+        return ImageFont.load_default()
+
+    # ==================== 内存监控窗口 ====================
+
+    def _show_memory_monitor(self):
+        """显示内存监控窗口（含实时曲线图、控件）"""
+        if self._mem_monitor_win is not None:
+            try:
+                self._mem_monitor_win.lift()
+                return
+            except tk.TclError:
+                self._mem_monitor_win = None
+
+        win = tk.Toplevel(self.root)
+        win.title("内存监控")
+        win.geometry("700x480")
+        win.resizable(True, True)
+        win.minsize(520, 360)
+        self._mem_monitor_win = win
+
+        def _on_win_close():
+            """关闭内存监控窗口：置空引用、取消定时器、清理PIL缓存、销毁窗口"""
+            self._mem_monitor_win = None
+            self._mem_dirty = False
+            # 取消采样定时器（after_cancel在回调已执行/已取消时可能抛TclError）
+            if self._mem_after_id is not None:
+                try:
+                    self.root.after_cancel(self._mem_after_id)
+                except Exception:
+                    pass
+                self._mem_after_id = None
+            if self._mem_draw_after_id is not None:
+                try:
+                    self.root.after_cancel(self._mem_draw_after_id)
+                except Exception:
+                    pass
+                self._mem_draw_after_id = None
+            # 清理PIL图片缓存（避免PhotoImage引用泄漏导致字典持续增长）
+            cid = id(self._mem_canvas) if self._mem_canvas else None
+            self._mem_canvas = None
+            if cid and hasattr(self, '_chart_photos'):
+                self._chart_photos.pop(cid, None)
+                self._chart_canvas_items.pop(cid, None)
+                self._chart_photo_sizes.pop(cid, None)
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_win_close)
+
+        # ---- 数值显示区 ----
+        info_frame = ttk.Frame(win, padding=(10, 6))
+        info_frame.pack(fill=tk.X)
+
+        self._mem_tool_var = tk.StringVar(value="工具: -- MB")
+        self._mem_game_var = tk.StringVar(value="游戏: -- MB")
+        self._mem_sys_var = tk.StringVar(value="系统可用: -- MB")
+
+        ttk.Label(info_frame, textvariable=self._mem_tool_var, font=("Consolas", 10),
+                  foreground="#569cd6").pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Label(info_frame, textvariable=self._mem_game_var, font=("Consolas", 10),
+                  foreground="#6a9955").pack(side=tk.LEFT, padx=(0, 16))
+        # 系统可用放最右侧，对应右Y轴
+        ttk.Label(info_frame, textvariable=self._mem_sys_var, font=("Consolas", 10),
+                  foreground="#cca700").pack(side=tk.RIGHT)
+
+        # ---- 控件区 ----
+        ctrl_frame = ttk.Frame(win, padding=(10, 0, 10, 4))
+        ctrl_frame.pack(fill=tk.X)
+
+        ttk.Label(ctrl_frame, text="刷新率:", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT)
+        self._mem_interval_var = tk.IntVar(value=self._mem_sample_interval)
+        self._mem_interval_spin = ttk.Spinbox(ctrl_frame, from_=10, to=10000, increment=100,
+                                               textvariable=self._mem_interval_var, width=5,
+                                               command=self._mem_apply_interval)
+        self._mem_interval_spin.pack(side=tk.LEFT, padx=(2, 2))
+        self._mem_interval_spin.bind("<Return>", lambda e: self._mem_apply_interval())
+        self._mem_interval_spin.bind("<FocusOut>", lambda e: self._mem_apply_interval())
+        ttk.Label(ctrl_frame, text="ms", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(ctrl_frame, text="记录时长:", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT)
+        self._mem_max_min_var = tk.IntVar(value=self._mem_max_minutes)
+        self._mem_max_min_spin = ttk.Spinbox(ctrl_frame, from_=1, to=60000, increment=1,
+                                              textvariable=self._mem_max_min_var, width=4,
+                                              command=self._mem_apply_max_minutes)
+        self._mem_max_min_spin.pack(side=tk.LEFT, padx=(2, 2))
+        self._mem_max_min_spin.bind("<Return>", lambda e: self._mem_apply_max_minutes())
+        self._mem_max_min_spin.bind("<FocusOut>", lambda e: self._mem_apply_max_minutes())
+        ttk.Label(ctrl_frame, text="分钟", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(ctrl_frame, text="滚轮缩放横向", font=("Microsoft YaHei UI", 8),
+                  foreground="gray").pack(side=tk.RIGHT)
+
+        # ---- 图表画布 ----
+        chart_frame = ttk.Frame(win, padding=(10, 0, 10, 2))
+        chart_frame.pack(fill=tk.BOTH, expand=True)
+
+        self._mem_canvas = tk.Canvas(chart_frame, bg="#1e1e1e", highlightthickness=0)
+        self._mem_canvas.pack(fill=tk.BOTH, expand=True)
+
+        # 滚轮缩放
+        def _mem_wheel(event):
+            if event.delta > 0 or event.num == 4:
+                self._mem_zoom = min(self._mem_zoom * 1.2, 30.0)
+            elif event.delta < 0 or event.num == 5:
+                self._mem_zoom = max(self._mem_zoom / 1.2, 0.05)
+            self._mem_invalidate()
+
+        self._mem_canvas.bind("<MouseWheel>", _mem_wheel)
+        self._mem_canvas.bind("<Button-4>", _mem_wheel)
+        self._mem_canvas.bind("<Button-5>", _mem_wheel)
+        # 画布尺寸变化时标记脏并请求绘制（窗口resize/移动）
+        self._mem_canvas.bind("<Configure>", lambda e: self._mem_invalidate())
+
+        # ---- 图例 ----
+        legend_frame = ttk.Frame(win, padding=(10, 0, 10, 8))
+        legend_frame.pack(fill=tk.X)
+        for color, label in [("#569cd6", "工具内存 (左轴)"), ("#6a9955", "游戏内存 (左轴)"),
+                              ("#cca700", "系统可用内存 (右轴)")]:
+            c = tk.Canvas(legend_frame, width=16, height=10, bg="#2d2d2d", highlightthickness=0)
+            c.create_line(2, 5, 14, 5, fill=color, width=2)
+            c.pack(side=tk.LEFT, padx=(0, 2))
+            ttk.Label(legend_frame, text=label, font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT, padx=(0, 12))
+
+        # 清空历史数据并启动采样
+        maxlen = int(self._mem_max_minutes * 60 * 1000 / self._mem_sample_interval)
+        self._mem_data = {"tool": _LODSeries(), "game": _LODSeries(), "system_avail": _LODSeries()}
+        self._mem_maxlen = maxlen
+        self._mem_zoom = 1.0
+        self._mem_peak = {"left": 0.0, "right": 0.0}
+        # 启动采样（绘制由脏标记按需触发）
+        self._mem_sample()
+
+    def _mem_apply_interval(self):
+        """应用内存监控刷新率设置（自动校验修正：10ms~10000ms）"""
+        try:
+            val = int(self._mem_interval_spin.get())
+        except (ValueError, tk.TclError):
+            return
+        # 校验修正
+        val = max(10, min(10000, val))
+        self._mem_interval_spin.delete(0, tk.END)
+        self._mem_interval_spin.insert(0, str(val))
+        self._mem_sample_interval = val
+        # 重新计算容量
+        maxlen = int(self._mem_max_minutes * 60 * 1000 / val)
+        self._mem_maxlen = maxlen
+        for key in self._mem_data:
+            self._mem_data[key].trim(maxlen)
+        # 取消当前定时器并按新间隔重新安排
+        if self._mem_after_id is not None:
+            try:
+                self.root.after_cancel(self._mem_after_id)
+            except Exception:
+                pass
+            self._mem_after_id = None
+        if self._mem_draw_after_id is not None:
+            try:
+                self.root.after_cancel(self._mem_draw_after_id)
+            except Exception:
+                pass
+            self._mem_draw_after_id = None
+        self._mem_after_id = self.root.after(val, self._mem_sample)
+
+    def _mem_apply_max_minutes(self):
+        """应用内存监控最大记录时长设置（自动校验修正：1分钟~60000分钟/1000小时）"""
+        try:
+            val = int(self._mem_max_min_spin.get())
+        except (ValueError, tk.TclError):
+            return
+        # 校验修正
+        val = max(1, min(60000, val))
+        self._mem_max_min_spin.delete(0, tk.END)
+        self._mem_max_min_spin.insert(0, str(val))
+        self._mem_max_minutes = val
+        # 重新计算容量
+        maxlen = int(val * 60 * 1000 / self._mem_sample_interval)
+        self._mem_maxlen = maxlen
+        for key in self._mem_data:
+            self._mem_data[key].trim(maxlen)
+        # 重建后峰值可能失效，重置并触发重绘
+        self._mem_peak = {"left": 0.0, "right": 0.0}
+        self._mem_invalidate()
+
+    def _mem_sample(self):
+        """定时采样内存数据"""
+        if self._mem_monitor_win is None:
+            return
+
+        try:
+            import psutil
+            tool_mem = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+
+            # 查找游戏进程内存
+            game_mem = 0.0
+            for proc in psutil.process_iter(['name', 'memory_info']):
+                try:
+                    name = (proc.info['name'] or '').lower()
+                    if name in ('ageofempires4.exe', 'age4_x64.exe', 'reliccardinal.exe'):
+                        game_mem += proc.info['memory_info'].rss / 1024 / 1024
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+
+            sys_avail = psutil.virtual_memory().available / 1024 / 1024
+        except Exception:
+            tool_mem = 0.0
+            game_mem = 0.0
+            sys_avail = 0.0
+
+        # 追加数据（_LODSeries自动维护LOD层级，O(1)追加）
+        self._mem_data["tool"].append(tool_mem)
+        self._mem_data["game"].append(game_mem)
+        self._mem_data["system_avail"].append(sys_avail)
+
+        # 定期淘汰旧数据（每1000次采样检查一次，避免频繁trim）
+        if len(self._mem_data["tool"]) > self._mem_maxlen + 500:
+            for key in self._mem_data:
+                self._mem_data[key].trim(self._mem_maxlen)
+
+        # 更新峰值缓存
+        left_peak = max(tool_mem, game_mem, self._mem_peak["left"])
+        right_peak = max(sys_avail, self._mem_peak["right"])
+        self._mem_peak["left"] = left_peak
+        self._mem_peak["right"] = right_peak
+
+        # 更新数值
+        self._mem_tool_var.set(f"工具: {tool_mem:.1f} MB")
+        self._mem_game_var.set(f"游戏: {game_mem:.1f} MB" if game_mem > 0 else "游戏: 未运行")
+        self._mem_sys_var.set(f"系统可用: {sys_avail:.0f} MB")
+
+        # 标记数据脏，触发按需绘制
+        self._mem_dirty = True
+        self._mem_request_draw()
+
+        # 安排下一次采样
+        try:
+            self._mem_after_id = self.root.after(self._mem_sample_interval, self._mem_sample)
+        except tk.TclError:
+            pass
+
+    def _mem_invalidate(self):
+        """标记脏并请求绘制（窗口resize/缩放等外部事件触发）"""
+        self._mem_dirty = True
+        self._mem_request_draw()
+
+    def _mem_request_draw(self):
+        """请求绘制：如尚未安排则调度一次，避免重复调度"""
+        if self._mem_draw_after_id is not None:
+            return  # 已有待执行的绘制，不重复调度（resize等事件可能高频触发）
+        # 绘制间隔 = max(20ms, 采样间隔)
+        # 20ms保证最高50帧且双窗口同时打开时不压垮事件循环；
+        # 采样间隔保证不超采样频率，且resize后不会等太久才更新
+        draw_interval = max(20, self._mem_sample_interval)
+        try:
+            self._mem_draw_after_id = self.root.after(draw_interval, self._mem_do_draw)
+        except tk.TclError:
+            pass
+
+    def _mem_do_draw(self):
+        """执行绘制：数据脏时绘制，绘制后若又有新数据则再排一帧"""
+        self._mem_draw_after_id = None
+        if self._mem_monitor_win is None:
+            return
+        if self._mem_dirty:
+            self._mem_dirty = False
+            try:
+                self._mem_draw_chart()
+            except Exception:
+                # 绘制出错时恢复dirty标记，确保下次采样到来能重试
+                self._mem_dirty = True
+            # 调度间隔期间_sample可能已将dirty重新标记为True，若有则再排一帧
+            if self._mem_dirty:
+                self._mem_request_draw()
+
+    def _mem_draw_chart(self):
+        """绘制内存曲线图（双Y轴 + 横向缩放）"""
+        if self._mem_canvas is None:
+            return
+
+        # 应用缩放：zoom越大显示越少的数据点（放大）
+        all_data = self._mem_data
+        n = max(len(v) for v in all_data.values()) if all_data else 0
+        if n < 2:
+            return
+
+        # 缩放后显示的采样点数
+        visible = max(int(n / self._mem_zoom), 10)
+        visible = min(visible, n)
+
+        # 计算偏移量，传给绘图函数（LOD自动选择合适的层级）
+        offset = n - visible
+
+        colors = {"tool": "#569cd6", "game": "#6a9955", "system_avail": "#cca700"}
+        y_axes = {}
+        self._perf_draw_chart(
+            self._mem_canvas, all_data,
+            left_keys=["tool", "game"], right_keys=["system_avail"],
+            y_axes=y_axes, colors=colors,
+            unit_left="MB", unit_right="MB",
+            interval_ms=self._mem_sample_interval,
+            left_peak=self._mem_peak["left"],
+            right_peak=self._mem_peak["right"],
+            visible_offset=offset
+        )
+
+    # ==================== CPU监控窗口 ====================
+
+    def _show_cpu_monitor(self):
+        """显示CPU监控窗口（含实时曲线图、控件）"""
+        if self._cpu_monitor_win is not None:
+            try:
+                self._cpu_monitor_win.lift()
+                return
+            except tk.TclError:
+                self._cpu_monitor_win = None
+
+        win = tk.Toplevel(self.root)
+        win.title("CPU监控")
+        win.geometry("700x480")
+        win.resizable(True, True)
+        win.minsize(520, 360)
+        self._cpu_monitor_win = win
+
+        def _on_win_close():
+            """关闭CPU监控窗口：置空引用、取消定时器、清理PIL缓存、销毁窗口"""
+            self._cpu_monitor_win = None
+            self._cpu_dirty = False
+            # 取消采样定时器（after_cancel在回调已执行/已取消时可能抛TclError）
+            if self._cpu_after_id is not None:
+                try:
+                    self.root.after_cancel(self._cpu_after_id)
+                except Exception:
+                    pass
+                self._cpu_after_id = None
+            if self._cpu_draw_after_id is not None:
+                try:
+                    self.root.after_cancel(self._cpu_draw_after_id)
+                except Exception:
+                    pass
+                self._cpu_draw_after_id = None
+            # 清理PIL图片缓存（避免PhotoImage引用泄漏导致字典持续增长）
+            cid = id(self._cpu_canvas) if self._cpu_canvas else None
+            self._cpu_canvas = None
+            if cid and hasattr(self, '_chart_photos'):
+                self._chart_photos.pop(cid, None)
+                self._chart_canvas_items.pop(cid, None)
+                self._chart_photo_sizes.pop(cid, None)
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_win_close)
+
+        # ---- 数值显示区 ----
+        info_frame = ttk.Frame(win, padding=(10, 6))
+        info_frame.pack(fill=tk.X)
+
+        self._cpu_tool_var = tk.StringVar(value="工具: --%")
+        self._cpu_game_var = tk.StringVar(value="游戏: --%")
+        self._cpu_sys_var = tk.StringVar(value="系统空闲: --%")
+
+        ttk.Label(info_frame, textvariable=self._cpu_tool_var, font=("Consolas", 10),
+                  foreground="#569cd6").pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Label(info_frame, textvariable=self._cpu_game_var, font=("Consolas", 10),
+                  foreground="#6a9955").pack(side=tk.LEFT, padx=(0, 16))
+        ttk.Label(info_frame, textvariable=self._cpu_sys_var, font=("Consolas", 10),
+                  foreground="#cca700").pack(side=tk.RIGHT)
+
+        # ---- 控件区 ----
+        ctrl_frame = ttk.Frame(win, padding=(10, 0, 10, 4))
+        ctrl_frame.pack(fill=tk.X)
+
+        ttk.Label(ctrl_frame, text="刷新率:", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT)
+        self._cpu_interval_var = tk.IntVar(value=self._cpu_sample_interval)
+        self._cpu_interval_spin = ttk.Spinbox(ctrl_frame, from_=10, to=10000, increment=100,
+                                               textvariable=self._cpu_interval_var, width=5,
+                                               command=self._cpu_apply_interval)
+        self._cpu_interval_spin.pack(side=tk.LEFT, padx=(2, 2))
+        self._cpu_interval_spin.bind("<Return>", lambda e: self._cpu_apply_interval())
+        self._cpu_interval_spin.bind("<FocusOut>", lambda e: self._cpu_apply_interval())
+        ttk.Label(ctrl_frame, text="ms", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(ctrl_frame, text="记录时长:", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT)
+        self._cpu_max_min_var = tk.IntVar(value=self._cpu_max_minutes)
+        self._cpu_max_min_spin = ttk.Spinbox(ctrl_frame, from_=1, to=60000, increment=1,
+                                              textvariable=self._cpu_max_min_var, width=4,
+                                              command=self._cpu_apply_max_minutes)
+        self._cpu_max_min_spin.pack(side=tk.LEFT, padx=(2, 2))
+        self._cpu_max_min_spin.bind("<Return>", lambda e: self._cpu_apply_max_minutes())
+        self._cpu_max_min_spin.bind("<FocusOut>", lambda e: self._cpu_apply_max_minutes())
+        ttk.Label(ctrl_frame, text="分钟", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(ctrl_frame, text="滚轮缩放横向", font=("Microsoft YaHei UI", 8),
+                  foreground="gray").pack(side=tk.RIGHT)
+
+        # ---- 图表画布 ----
+        chart_frame = ttk.Frame(win, padding=(10, 0, 10, 2))
+        chart_frame.pack(fill=tk.BOTH, expand=True)
+
+        self._cpu_canvas = tk.Canvas(chart_frame, bg="#1e1e1e", highlightthickness=0)
+        self._cpu_canvas.pack(fill=tk.BOTH, expand=True)
+
+        # 滚轮缩放
+        def _cpu_wheel(event):
+            if event.delta > 0 or event.num == 4:
+                self._cpu_zoom = min(self._cpu_zoom * 1.2, 30.0)
+            elif event.delta < 0 or event.num == 5:
+                self._cpu_zoom = max(self._cpu_zoom / 1.2, 0.05)
+            self._cpu_invalidate()
+
+        self._cpu_canvas.bind("<MouseWheel>", _cpu_wheel)
+        self._cpu_canvas.bind("<Button-4>", _cpu_wheel)
+        self._cpu_canvas.bind("<Button-5>", _cpu_wheel)
+        # 画布尺寸变化时标记脏并请求绘制（窗口resize/移动）
+        self._cpu_canvas.bind("<Configure>", lambda e: self._cpu_invalidate())
+
+        # ---- 图例 ----
+        legend_frame = ttk.Frame(win, padding=(10, 0, 10, 8))
+        legend_frame.pack(fill=tk.X)
+        for color, label in [("#569cd6", "工具CPU (左轴)"), ("#6a9955", "游戏CPU (左轴)"),
+                              ("#cca700", "系统空闲CPU (左轴)")]:
+            c = tk.Canvas(legend_frame, width=16, height=10, bg="#2d2d2d", highlightthickness=0)
+            c.create_line(2, 5, 14, 5, fill=color, width=2)
+            c.pack(side=tk.LEFT, padx=(0, 2))
+            ttk.Label(legend_frame, text=label, font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT, padx=(0, 12))
+
+        # 清空历史数据并启动采样
+        maxlen = int(self._cpu_max_minutes * 60 * 1000 / self._cpu_sample_interval)
+        self._cpu_data = {"tool": _LODSeries(), "game": _LODSeries(), "system_avail": _LODSeries()}
+        self._cpu_maxlen = maxlen
+        self._cpu_zoom = 1.0
+        self._cpu_tool_proc = None
+        self._cpu_game_procs = []
+        self._cpu_game_warmup = set()
+        # 预热 psutil 的 cpu_percent（首次调用返回0，需先初始化内部缓存）
+        try:
+            import psutil
+            psutil.cpu_percent(interval=None)
+            self._cpu_tool_proc = psutil.Process(os.getpid())
+            self._cpu_tool_proc.cpu_percent(interval=None)
+        except Exception:
+            pass
+        # 启动采样（绘制由脏标记按需触发）
+        self._cpu_sample()
+
+    def _cpu_apply_interval(self):
+        """应用CPU监控刷新率设置（自动校验修正：10ms~10000ms）"""
+        try:
+            val = int(self._cpu_interval_spin.get())
+        except (ValueError, tk.TclError):
+            return
+        # 校验修正
+        val = max(10, min(10000, val))
+        self._cpu_interval_spin.delete(0, tk.END)
+        self._cpu_interval_spin.insert(0, str(val))
+        self._cpu_sample_interval = val
+        # 重新计算容量
+        maxlen = int(self._cpu_max_minutes * 60 * 1000 / val)
+        self._cpu_maxlen = maxlen
+        for key in self._cpu_data:
+            self._cpu_data[key].trim(maxlen)
+        self._cpu_invalidate()
+
+        # 取消当前定时器并按新间隔重新安排
+        if self._cpu_after_id is not None:
+            try:
+                self.root.after_cancel(self._cpu_after_id)
+            except Exception:
+                pass
+            self._cpu_after_id = None
+        if self._cpu_draw_after_id is not None:
+            try:
+                self.root.after_cancel(self._cpu_draw_after_id)
+            except Exception:
+                pass
+            self._cpu_draw_after_id = None
+        self._cpu_after_id = self.root.after(val, self._cpu_sample)
+
+    def _cpu_apply_max_minutes(self):
+        """应用CPU监控最大记录时长设置（自动校验修正：1分钟~60000分钟/1000小时）"""
+        try:
+            val = int(self._cpu_max_min_spin.get())
+        except (ValueError, tk.TclError):
+            return
+        # 校验修正
+        val = max(1, min(60000, val))
+        self._cpu_max_min_spin.delete(0, tk.END)
+        self._cpu_max_min_spin.insert(0, str(val))
+        self._cpu_max_minutes = val
+        # 重新计算容量
+        maxlen = int(val * 60 * 1000 / self._cpu_sample_interval)
+        self._cpu_maxlen = maxlen
+        for key in self._cpu_data:
+            self._cpu_data[key].trim(maxlen)
+        self._cpu_invalidate()
+
+
+
+    def _cpu_sample(self):
+        """定时采样CPU数据并更新图表"""
+        if self._cpu_monitor_win is None:
+            return
+
+        try:
+            import psutil
+
+            # psutil.Process.cpu_percent() 返回值是相对所有CPU核心的总百分比，
+            # 多核机器上单进程可超过100%。除以核心数得到占总CPU容量的百分比，
+            # 与Windows任务管理器显示一致。
+            cpu_count = psutil.cpu_count() or 1
+
+            # 工具进程CPU：复用缓存的Process实例
+            if self._cpu_tool_proc is None:
+                self._cpu_tool_proc = psutil.Process(os.getpid())
+                self._cpu_tool_proc.cpu_percent(interval=None)  # 首次初始化
+                tool_cpu = 0.0
+            else:
+                tool_cpu = self._cpu_tool_proc.cpu_percent(interval=None) / cpu_count
+
+            # 刷新游戏进程缓存：移除已死的，添加新发现的
+            alive_procs = []
+            new_pids = set()
+            game_names = ('ageofempires4.exe', 'age4_x64.exe', 'reliccardinal.exe')
+            known_pids = set()
+            for proc in self._cpu_game_procs:
+                try:
+                    if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                        alive_procs.append(proc)
+                        known_pids.add(proc.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            # 清理预热表中已不存在的PID
+            self._cpu_game_warmup &= known_pids
+            # 扫描新出现的游戏进程
+            for proc in psutil.process_iter(['name']):
+                try:
+                    name = (proc.info['name'] or '').lower()
+                    if name in game_names and proc.pid not in known_pids:
+                        proc.cpu_percent(interval=None)  # 首次初始化
+                        alive_procs.append(proc)
+                        known_pids.add(proc.pid)
+                        new_pids.add(proc.pid)
+                        self._cpu_game_warmup.add(proc.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            self._cpu_game_procs = alive_procs
+
+            # 获取游戏CPU（预热中的进程跳过，因为间隔不足会返回异常值）
+            game_cpu = 0.0
+            warmed_up = set()
+            for proc in self._cpu_game_procs:
+                try:
+                    if proc.pid in self._cpu_game_warmup:
+                        # 预热中：调用一次使内部计时器推进，但不计入结果
+                        proc.cpu_percent(interval=None)
+                        warmed_up.add(proc.pid)
+                    else:
+                        game_cpu += proc.cpu_percent(interval=None) / cpu_count
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            # 经过一次采样间隔后，预热完成的进程下次可正常采样
+            self._cpu_game_warmup -= warmed_up
+
+            # psutil.cpu_percent() 返回系统总占用率，可用率 = 100 - 占用率
+            sys_cpu = 100.0 - psutil.cpu_percent(interval=None)
+        except Exception:
+            tool_cpu = 0.0
+            game_cpu = 0.0
+            sys_cpu = 0.0
+
+
+        # 追加数据（_LODSeries自动维护LOD层级，O(1)追加）
+        self._cpu_data["tool"].append(tool_cpu)
+        self._cpu_data["game"].append(game_cpu)
+        self._cpu_data["system_avail"].append(sys_cpu)
+
+        # 定期淘汰旧数据
+        if len(self._cpu_data["tool"]) > self._cpu_maxlen + 500:
+            for key in self._cpu_data:
+                self._cpu_data[key].trim(self._cpu_maxlen)
+
+        # 更新数值
+        self._cpu_tool_var.set(f"工具: {tool_cpu:.1f}%")
+        self._cpu_game_var.set(f"游戏: {game_cpu:.1f}%" if game_cpu > 0 else "游戏: 未运行")
+        self._cpu_sys_var.set(f"系统空闲: {sys_cpu:.1f}%")
+
+        # 标记数据脏，触发按需绘制
+        self._cpu_dirty = True
+        self._cpu_request_draw()
+
+        # 安排下一次采样
+        try:
+            self._cpu_after_id = self.root.after(self._cpu_sample_interval, self._cpu_sample)
+        except tk.TclError:
+            pass
+
+    def _cpu_invalidate(self):
+        """标记脏并请求绘制（窗口resize/缩放等外部事件触发）"""
+        self._cpu_dirty = True
+        self._cpu_request_draw()
+
+    def _cpu_request_draw(self):
+        """请求绘制：如尚未安排则调度一次，避免重复调度"""
+        if self._cpu_draw_after_id is not None:
+            return  # 已有待执行的绘制，不重复调度（resize等事件可能高频触发）
+        # 绘制间隔 = max(20ms, 采样间隔)
+        # 20ms保证最高50帧且双窗口同时打开时不压垮事件循环；
+        # 采样间隔保证不超采样频率，且resize后不会等太久才更新
+        draw_interval = max(20, self._cpu_sample_interval)
+        try:
+            self._cpu_draw_after_id = self.root.after(draw_interval, self._cpu_do_draw)
+        except tk.TclError:
+            pass
+
+    def _cpu_do_draw(self):
+        """执行绘制：数据脏时绘制，绘制后若又有新数据则再排一帧"""
+        self._cpu_draw_after_id = None
+        if self._cpu_monitor_win is None:
+            return
+        if self._cpu_dirty:
+            self._cpu_dirty = False
+            try:
+                self._cpu_draw_chart()
+            except Exception:
+                # 绘制出错时恢复dirty标记，确保下次采样到来能重试
+                self._cpu_dirty = True
+            if self._cpu_dirty:
+                self._cpu_request_draw()
+
+    def _cpu_draw_chart(self):
+        """绘制CPU曲线图（单Y轴，0-100% + 横向缩放）"""
+        if self._cpu_canvas is None:
+            return
+
+        all_data = self._cpu_data
+        n = max(len(v) for v in all_data.values()) if all_data else 0
+        if n < 2:
+            return
+
+        # 缩放
+        visible = max(int(n / self._cpu_zoom), 10)
+        visible = min(visible, n)
+        offset = n - visible
+
+        colors = {"tool": "#569cd6", "game": "#6a9955", "system_avail": "#cca700"}
+        y_axes = {}
+
+        # CPU所有曲线共用左Y轴，固定0-100%
+        for key in all_data:
+            y_axes[key] = 100
+
+        self._perf_draw_chart(
+            self._cpu_canvas, all_data,
+            left_keys=["tool", "game", "system_avail"], right_keys=[],
+            y_axes=y_axes, colors=colors,
+            unit_left="%", unit_right="",
+            interval_ms=self._cpu_sample_interval,
+            visible_offset=offset
+        )
 
     def _show_help(self):
         help_win = tk.Toplevel(self.root)
@@ -2465,8 +3667,37 @@ class AOE4App:
     # ==================== 关闭 ====================
 
     def _on_close(self):
+        """主窗口关闭：停止运行、取消定时器、恢复stdout/stderr、销毁窗口"""
         self.running = False
         self.paused = False
+
+        # 取消内存监控定时器
+        if self._mem_after_id is not None:
+            try:
+                self.root.after_cancel(self._mem_after_id)
+            except Exception:
+                pass
+            self._mem_after_id = None
+        if self._mem_draw_after_id is not None:
+            try:
+                self.root.after_cancel(self._mem_draw_after_id)
+            except Exception:
+                pass
+            self._mem_draw_after_id = None
+
+        # 取消CPU监控定时器
+        if self._cpu_after_id is not None:
+            try:
+                self.root.after_cancel(self._cpu_after_id)
+            except Exception:
+                pass
+            self._cpu_after_id = None
+        if self._cpu_draw_after_id is not None:
+            try:
+                self.root.after_cancel(self._cpu_draw_after_id)
+            except Exception:
+                pass
+            self._cpu_draw_after_id = None
 
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
