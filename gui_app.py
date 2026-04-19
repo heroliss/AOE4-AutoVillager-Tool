@@ -373,15 +373,34 @@ class AOE4App:
         except Exception:
             pass
 
+    @staticmethod
+    def _get_version():
+        """获取版本号：优先从git tag读取，否则使用内置版本号"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["git", "describe", "--tags", "--abbrev=0"],
+                capture_output=True, text=True, cwd=BASE_DIR,
+                timeout=3
+            )
+            if result.returncode == 0:
+                return result.stdout.strip().lstrip("v")
+        except Exception:
+            pass
+        return "1.3.2"
+
     def _build_ui(self):
         """构建界面"""
+        # 获取版本号
+        self._version = self._get_version()
+
         # 顶部标题区
         header = ttk.Frame(self.root, padding=(10, 8))
         header.pack(fill=tk.X)
 
         title_label = ttk.Label(
             header,
-            text="AOE4 自动生产村民工具",
+            text=f"AOE4 自动生产村民工具  v{self._version}",
             font=("Microsoft YaHei UI", 16, "bold")
         )
         title_label.pack(side=tk.LEFT)
@@ -2064,7 +2083,7 @@ class AOE4App:
 
             # === 初始化 ===
             print("\n" + "=" * 50, flush=True)
-            print("  AOE4 自动生产村民工具 (GUI模式)", flush=True)
+            print(f"  AOE4 自动生产村民工具 v{self._version} (GUI模式)", flush=True)
             print("=" * 50, flush=True)
 
             # 1. 检测运行环境

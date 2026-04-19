@@ -106,10 +106,13 @@ AOE4 自动生产村民工具
 按 Ctrl+C 退出。
 """
 
+# 版本号
+_VERSION = "1.3.2"
+
 # 立即打印启动信息（避免模块导入期间的卡顿）
 print()
 print("=" * 50, flush=True)
-print("  AOE4 自动生产村民工具", flush=True)
+print(f"  AOE4 自动生产村民工具  v{_VERSION}", flush=True)
 print("  正在加载模块，请稍候...", flush=True)
 print("=" * 50, flush=True)
 print(flush=True)
