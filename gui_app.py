@@ -104,11 +104,13 @@ CONFIG_CATEGORIES = [
         ("BLOCKED_TRANSITION_THRESHOLD", "渐变下限阈值", "float", "低于此值认为未遮挡(0-1)"),
         ("TC_MATCH_THRESHOLD", "TC匹配阈值", "float", "TC图标匹配阈值(0-1)"),
     ]),
-    ("截图区域坐标", [
+    ("游戏状态检测点", [
         ("GAME_DETECT_PIXEL_SDR", "SDR检测坐标", "tuple", "SDR模式下检测像素坐标(x,y)"),
         ("GAME_DETECT_COLOR_SDR", "SDR检测颜色", "tuple", "SDR模式下检测点RGB颜色(r,g,b)"),
         ("GAME_DETECT_PIXEL_HDR", "HDR检测坐标", "tuple", "HDR模式下检测像素坐标(x,y)"),
         ("GAME_DETECT_COLOR_HDR", "HDR检测颜色", "tuple", "HDR模式下检测点RGB颜色(r,g,b)"),
+    ]),
+    ("截图区域坐标", [
         ("VILLAGER_QUEUE_REGION", "生产队列区域", "tuple", "村民生产队列检测区域(x1,y1,x2,y2)"),
         ("BLOCKED_DETECT_REGION", "遮挡检测区域", "tuple", "UI遮挡检测区域(x1,y1,x2,y2)"),
         ("POPULATION_REGION", "人口显示区域", "tuple", "人口OCR识别区域(x1,y1,x2,y2)"),
@@ -451,11 +453,6 @@ class AOE4App:
         )
         self.clear_btn.pack(side=tk.LEFT, padx=(0, 6))
 
-        self.help_btn = ttk.Button(
-            btn_frame2, text="? 帮助", width=10, command=self._show_help
-        )
-        self.help_btn.pack(side=tk.LEFT, padx=(0, 6))
-
         self.shortcut_btn = ttk.Button(
             btn_frame2, text="快捷键", width=10, command=self._show_shortcut_dialog
         )
@@ -464,7 +461,12 @@ class AOE4App:
         self.config_btn = ttk.Button(
             btn_frame2, text="⚙ 配置", width=10, command=self._show_config_dialog
         )
-        self.config_btn.pack(side=tk.LEFT)
+        self.config_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.help_btn = ttk.Button(
+            btn_frame2, text="? 帮助", width=10, command=self._show_help
+        )
+        self.help_btn.pack(side=tk.LEFT)
 
         # 日志区域
         log_frame = ttk.LabelFrame(self.root, text="运行日志", padding=(5, 5))
@@ -1035,6 +1037,12 @@ class AOE4App:
         # 存储HDR颜色项的描述标签引用，用于动态更新"当前使用"标记
         _hdr_desc_labels = {}
 
+        # 分类提示信息
+        _CAT_HINTS = {
+            "游戏状态检测点": "💡 可使用下方「吸色工具」更方便地设置颜色和坐标",
+            "截图区域坐标": "💡 可使用下方「区域编辑」更方便地设置截图区域",
+        }
+
         for cat_name, items in CONFIG_CATEGORIES:
             # 分类标题
             cat_label = ttk.Label(
@@ -1044,6 +1052,16 @@ class AOE4App:
             )
             cat_label.grid(row=row, column=0, columnspan=5, sticky=tk.W, padx=(5, 0), pady=(10, 3))
             row += 1
+
+            # 分类提示
+            hint_text = _CAT_HINTS.get(cat_name)
+            if hint_text:
+                hint_lbl = ttk.Label(
+                    scroll_frame, text=hint_text,
+                    font=("Microsoft YaHei UI", 8), foreground="#cca700"
+                )
+                hint_lbl.grid(row=row, column=0, columnspan=5, sticky=tk.W, padx=(20, 0), pady=(0, 2))
+                row += 1
 
             for key, label, vtype, desc in items:
                 current_val = getattr(config_module, key, None)
@@ -1064,7 +1082,7 @@ class AOE4App:
                 if key in _RESTART_REQUIRED:
                     desc_text += " [需重启]"
                 desc_lbl = ttk.Label(scroll_frame, text=desc_text, foreground="gray",
-                                     font=("Microsoft YaHei UI", 8), wraplength=260)
+                                     font=("Microsoft YaHei UI", 8), wraplength=480)
                 desc_lbl.grid(row=row, column=3, sticky=tk.W, padx=(10, 0), pady=2)
                 # 保存HDR/SDR像素和颜色项的描述标签，用于动态更新"当前使用"标记
                 if key in ("GAME_DETECT_PIXEL_SDR", "GAME_DETECT_COLOR_SDR",

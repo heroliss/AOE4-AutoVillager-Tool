@@ -53,7 +53,7 @@ DEBUG_SAVE_SCREENSHOTS = False  # 保存调试截图：需配合DEBUG_MODE，关
 USE_GPU = False  # 是否使用GPU加速OCR（⚠不建议开启，小图片OCR时CPU更快；CPU版exe中此选项无效）
 OCR_IMAGE_SCALE = 1  # OCR图片缩放比例，越小越快但可能影响准确率
 
-# ==================== 截图区域坐标 ====================
+# ==================== 游戏状态检测点 ====================
 # 注意：以下坐标基于 2560x1440 分辨率，其他分辨率需要调整
 
 # 游戏窗口检测：检测特定像素点颜色判断是否在游戏中
@@ -71,6 +71,8 @@ def _get_game_detect_pixel():
 def _get_game_detect_color():
     """根据HDR开关返回对应的检测颜色（动态获取，支持运行时切换）"""
     return GAME_DETECT_COLOR_HDR if HDR_ENABLED else GAME_DETECT_COLOR_SDR
+
+# ==================== 截图区域坐标 ====================
 
 # 村民生产队列检测区域
 VILLAGER_QUEUE_REGION = (10, 970, 500, 1025)
