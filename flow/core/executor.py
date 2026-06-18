@@ -54,6 +54,13 @@ class Executor:
     # ==================== 执行流：单帧 ====================
     def run_tick(self, ctx: ExecutionContext, dt: float = 0.0) -> None:
         ctx.begin_tick(dt)
+        try:
+            self._walk(ctx)
+        finally:
+            # 无论本帧如何结束，都释放可能持有的输入屏蔽与文件锁，避免跨帧泄漏
+            ctx.cleanup_tick()
+
+    def _walk(self, ctx: ExecutionContext) -> None:
         node_id: Optional[str] = self.graph.entry_id()
         guard = 0
         max_steps = len(self.graph.nodes) * 4 + 16  # 防御无限循环

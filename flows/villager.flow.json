@@ -1,0 +1,873 @@
+{
+  "version": 1,
+  "name": "普通出农",
+  "nodes": [
+    {
+      "id": "tick",
+      "type": "event.on_tick",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "interval": 0.1
+      }
+    },
+    {
+      "id": "pause",
+      "type": "control.pause_if_modifier",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "keys": "shift,ctrl,alt"
+      }
+    },
+    {
+      "id": "win",
+      "type": "sense.window_check",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
+        "pixel": [
+          2526,
+          1405
+        ],
+        "color": [
+          26,
+          32,
+          46
+        ],
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "if_win",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_win",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "occ",
+      "type": "game.occlusion",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "region": [
+          265,
+          950,
+          280,
+          970
+        ],
+        "template": "templates/blocked.png",
+        "match_threshold": 0.7,
+        "transition_threshold": 0.1,
+        "stable_threshold": 2,
+        "transition_repeat": 3,
+        "change_threshold": 0.05
+      }
+    },
+    {
+      "id": "vill",
+      "type": "sense.template_match",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "region": [
+          10,
+          970,
+          500,
+          1025
+        ],
+        "templates": [
+          "templates/cunmin.png"
+        ],
+        "threshold": 0.6
+      }
+    },
+    {
+      "id": "if_blocked",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_blocked",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "if_trans",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_trans",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "if_vill",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_vill",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "prefetch",
+      "type": "control.prefetch_full",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "pop",
+      "type": "sense.ocr_number",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "region": [
+          50,
+          1140,
+          150,
+          1170
+        ],
+        "scale": 1.0,
+        "allowlist": "0123456789/\\|OolIsS ",
+        "regex": "(\\d+)[/\\\\|](\\d+)",
+        "aggregate": "first"
+      }
+    },
+    {
+      "id": "food",
+      "type": "sense.ocr_number",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "region": [
+          50,
+          1222,
+          140,
+          1248
+        ],
+        "scale": 1.0,
+        "allowlist": "0123456789OolIsS ",
+        "regex": "(\\d+)",
+        "aggregate": "first"
+      }
+    },
+    {
+      "id": "if_popok",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_popfail",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "c_minfood",
+      "type": "data.const_number",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "value": 50
+      }
+    },
+    {
+      "id": "cmp_food",
+      "type": "logic.compare",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "op": ">="
+      }
+    },
+    {
+      "id": "if_foodok",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_foodlow",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "slots",
+      "type": "math.arith",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "op": "-"
+      }
+    },
+    {
+      "id": "c_zero",
+      "type": "data.const_number",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "value": 0
+      }
+    },
+    {
+      "id": "cmp_slots",
+      "type": "logic.compare",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "op": ">"
+      }
+    },
+    {
+      "id": "if_slots",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_full",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "lock",
+      "type": "control.lock_acquire",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_busy",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "block_begin",
+      "type": "control.input_block_begin",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "max_duration": 3.0
+      }
+    },
+    {
+      "id": "save_sel",
+      "type": "action.press_key",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "key": "0",
+        "modifiers": "ctrl",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "relmod1",
+      "type": "action.release_modifiers",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "select_tc",
+      "type": "action.press_key",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "key": "h",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "tc",
+      "type": "game.tc_count",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "icon_region": [
+          444,
+          1212,
+          492,
+          1259
+        ],
+        "single_region": [
+          300,
+          1140,
+          354,
+          1194
+        ],
+        "single_template": "templates/tc_single.png",
+        "numbered_templates": [
+          "templates/tc_number_1.png",
+          "templates/tc_number_2.png",
+          "templates/tc_number_3.png",
+          "templates/tc_number_4.png",
+          "templates/tc_number_5.png",
+          "templates/tc_number_6.png"
+        ],
+        "threshold": 0.7,
+        "crop_size": 20,
+        "early_exit": 0.95
+      }
+    },
+    {
+      "id": "if_tcok",
+      "type": "control.if",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_tcfail",
+      "type": "control.end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "c_pertc",
+      "type": "data.const_number",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "value": 3
+      }
+    },
+    {
+      "id": "planned",
+      "type": "math.arith",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "op": "*"
+      }
+    },
+    {
+      "id": "produce",
+      "type": "game.produce_count",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "cost_per_unit": 50,
+        "cap": -1
+      }
+    },
+    {
+      "id": "queue",
+      "type": "action.press_key",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "key": "q",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": true,
+        "batch_size": 5,
+        "post_escape": true
+      }
+    },
+    {
+      "id": "restore",
+      "type": "action.press_key",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "key": "0",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "disband",
+      "type": "action.press_key",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "key": "0",
+        "modifiers": "ctrl,alt",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "relmod2",
+      "type": "action.release_modifiers",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "block_end",
+      "type": "control.input_block_end",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    },
+    {
+      "id": "delay",
+      "type": "control.delay",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "id": "unlock",
+      "type": "control.lock_release",
+      "pos": [
+        0,
+        0
+      ],
+      "params": {}
+    }
+  ],
+  "exec_edges": [
+    [
+      "tick",
+      "out",
+      "pause",
+      "in"
+    ],
+    [
+      "pause",
+      "out",
+      "if_win",
+      "in"
+    ],
+    [
+      "if_win",
+      "true",
+      "if_blocked",
+      "in"
+    ],
+    [
+      "if_win",
+      "false",
+      "end_win",
+      "in"
+    ],
+    [
+      "if_blocked",
+      "true",
+      "end_blocked",
+      "in"
+    ],
+    [
+      "if_blocked",
+      "false",
+      "if_trans",
+      "in"
+    ],
+    [
+      "if_trans",
+      "true",
+      "end_trans",
+      "in"
+    ],
+    [
+      "if_trans",
+      "false",
+      "if_vill",
+      "in"
+    ],
+    [
+      "if_vill",
+      "true",
+      "end_vill",
+      "in"
+    ],
+    [
+      "if_vill",
+      "false",
+      "prefetch",
+      "in"
+    ],
+    [
+      "prefetch",
+      "out",
+      "if_popok",
+      "in"
+    ],
+    [
+      "if_popok",
+      "true",
+      "if_foodok",
+      "in"
+    ],
+    [
+      "if_popok",
+      "false",
+      "end_popfail",
+      "in"
+    ],
+    [
+      "if_foodok",
+      "true",
+      "if_slots",
+      "in"
+    ],
+    [
+      "if_foodok",
+      "false",
+      "end_foodlow",
+      "in"
+    ],
+    [
+      "if_slots",
+      "true",
+      "lock",
+      "in"
+    ],
+    [
+      "if_slots",
+      "false",
+      "end_full",
+      "in"
+    ],
+    [
+      "lock",
+      "ok",
+      "block_begin",
+      "in"
+    ],
+    [
+      "lock",
+      "busy",
+      "end_busy",
+      "in"
+    ],
+    [
+      "block_begin",
+      "out",
+      "save_sel",
+      "in"
+    ],
+    [
+      "save_sel",
+      "out",
+      "relmod1",
+      "in"
+    ],
+    [
+      "relmod1",
+      "out",
+      "select_tc",
+      "in"
+    ],
+    [
+      "select_tc",
+      "out",
+      "if_tcok",
+      "in"
+    ],
+    [
+      "if_tcok",
+      "true",
+      "queue",
+      "in"
+    ],
+    [
+      "if_tcok",
+      "false",
+      "end_tcfail",
+      "in"
+    ],
+    [
+      "queue",
+      "out",
+      "restore",
+      "in"
+    ],
+    [
+      "restore",
+      "out",
+      "disband",
+      "in"
+    ],
+    [
+      "disband",
+      "out",
+      "relmod2",
+      "in"
+    ],
+    [
+      "relmod2",
+      "out",
+      "block_end",
+      "in"
+    ],
+    [
+      "block_end",
+      "out",
+      "delay",
+      "in"
+    ],
+    [
+      "delay",
+      "out",
+      "unlock",
+      "in"
+    ]
+  ],
+  "data_edges": [
+    [
+      "win",
+      "in_game",
+      "if_win",
+      "cond"
+    ],
+    [
+      "occ",
+      "blocked",
+      "if_blocked",
+      "cond"
+    ],
+    [
+      "occ",
+      "in_transition",
+      "if_trans",
+      "cond"
+    ],
+    [
+      "vill",
+      "found",
+      "if_vill",
+      "cond"
+    ],
+    [
+      "pop",
+      "ok",
+      "if_popok",
+      "cond"
+    ],
+    [
+      "food",
+      "value",
+      "cmp_food",
+      "a"
+    ],
+    [
+      "c_minfood",
+      "value",
+      "cmp_food",
+      "b"
+    ],
+    [
+      "cmp_food",
+      "result",
+      "if_foodok",
+      "cond"
+    ],
+    [
+      "pop",
+      "value2",
+      "slots",
+      "a"
+    ],
+    [
+      "pop",
+      "value",
+      "slots",
+      "b"
+    ],
+    [
+      "slots",
+      "value",
+      "cmp_slots",
+      "a"
+    ],
+    [
+      "c_zero",
+      "value",
+      "cmp_slots",
+      "b"
+    ],
+    [
+      "cmp_slots",
+      "result",
+      "if_slots",
+      "cond"
+    ],
+    [
+      "tc",
+      "ok",
+      "if_tcok",
+      "cond"
+    ],
+    [
+      "c_pertc",
+      "value",
+      "planned",
+      "a"
+    ],
+    [
+      "tc",
+      "count",
+      "planned",
+      "b"
+    ],
+    [
+      "planned",
+      "value",
+      "produce",
+      "planned"
+    ],
+    [
+      "slots",
+      "value",
+      "produce",
+      "available_slots"
+    ],
+    [
+      "food",
+      "value",
+      "produce",
+      "resource"
+    ],
+    [
+      "produce",
+      "count",
+      "queue",
+      "count"
+    ]
+  ]
+}
