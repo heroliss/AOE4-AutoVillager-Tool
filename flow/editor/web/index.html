@@ -16,6 +16,9 @@
   #toolbar .spacer { flex: 1; }
   #status { color: #8b909a; font-size: 12px; }
   #dirty { color: #e6a23c; font-size: 12px; font-weight: bold; margin-left: 8px; }
+  #flowmeta { color: #8b909a; font-size: 12px; margin-left: 4px; }
+  #flowmeta .ro { color: #e6a23c; }
+  #toolbar optgroup { color: #8b909a; font-style: normal; }
   #wrap { position: absolute; top: 38px; left: 0; right: 0; bottom: 0; }
   canvas { display: block; }
 </style>
@@ -25,11 +28,13 @@
     <button onclick="ED.save()">保存</button>
     <button onclick="ED.saveAs()">另存为</button>
     <button onclick="ED.open()">打开</button>
-    <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="">打开内置流程…</option></select>
+    <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="">打开流程…</option></select>
+    <button onclick="ED.editFlowInfo()">流程信息…</button>
     <button onclick="ED.autolayout()">自动排版</button>
     <button onclick="ED.fit()">适应窗口</button>
     <button onclick="ED.help()">帮助</button>
     <span id="dirty"></span>
+    <span id="flowmeta"></span>
     <span class="spacer"></span>
     <span id="status">提示：右键空白处添加节点 · 滚轮缩放 · 拖动平移 · 详见“帮助”</span>
   </div>

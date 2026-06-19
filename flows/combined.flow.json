@@ -18,7 +18,7 @@
       "type": "sense.modifier_down",
       "pos": [
         49.0,
-        180.0
+        156.0
       ],
       "params": {
         "keys": "shift,ctrl,alt"
@@ -38,7 +38,7 @@
       "type": "sense.window_check",
       "pos": [
         403.0,
-        222.0
+        144.0
       ],
       "params": {
         "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
@@ -78,7 +78,7 @@
       "type": "game.occlusion",
       "pos": [
         810.0,
-        222.0
+        144.0
       ],
       "params": {
         "region": [
@@ -127,7 +127,7 @@
       "type": "sense.ocr_number",
       "pos": [
         3114.5,
-        1198.0
+        1340.0
       ],
       "params": {
         "region": [
@@ -147,7 +147,7 @@
       "type": "math.arith",
       "pos": [
         3494.0,
-        402.0
+        272.0
       ],
       "params": {
         "op": "-"
@@ -158,7 +158,7 @@
       "type": "sense.ocr_number",
       "pos": [
         3477.0,
-        582.0
+        400.0
       ],
       "params": {
         "region": [
@@ -178,7 +178,7 @@
       "type": "sense.ocr_number",
       "pos": [
         4902.0,
-        402.0
+        272.0
       ],
       "params": {
         "region": [
@@ -198,7 +198,7 @@
       "type": "game.tc_count",
       "pos": [
         3097.0,
-        742.0
+        624.0
       ],
       "params": {
         "icon_region": [
@@ -232,7 +232,7 @@
       "type": "data.const_number",
       "pos": [
         5998.5,
-        742.0
+        624.0
       ],
       "params": {
         "value": 1
@@ -288,7 +288,7 @@
       "type": "data.switch",
       "pos": [
         2803.0,
-        174.0
+        124.0
       ],
       "params": {
         "on": true
@@ -308,7 +308,7 @@
       "type": "sense.template_match",
       "pos": [
         3105.5,
-        222.0
+        144.0
       ],
       "params": {
         "region": [
@@ -354,7 +354,7 @@
       "type": "data.const_number",
       "pos": [
         3140.0,
-        610.0
+        516.0
       ],
       "params": {
         "value": 3
@@ -365,7 +365,7 @@
       "type": "math.arith",
       "pos": [
         3494.0,
-        222.0
+        144.0
       ],
       "params": {
         "op": "*"
@@ -376,7 +376,7 @@
       "type": "game.produce_count",
       "pos": [
         3822.0,
-        378.0
+        344.0
       ],
       "params": {
         "cost_per_unit": 50,
@@ -404,7 +404,7 @@
       "type": "data.switch",
       "pos": [
         4214.5,
-        378.0
+        344.0
       ],
       "params": {
         "on": false
@@ -424,7 +424,7 @@
       "type": "sense.template_match",
       "pos": [
         4539.0,
-        222.0
+        144.0
       ],
       "params": {
         "region": [
@@ -470,7 +470,7 @@
       "type": "data.const_number",
       "pos": [
         4573.5,
-        610.0
+        516.0
       ],
       "params": {
         "value": 2
@@ -481,7 +481,7 @@
       "type": "math.arith",
       "pos": [
         4919.0,
-        222.0
+        144.0
       ],
       "params": {
         "op": "*"
@@ -492,7 +492,7 @@
       "type": "game.produce_count",
       "pos": [
         5247.0,
-        378.0
+        344.0
       ],
       "params": {
         "cost_per_unit": 80,
@@ -520,7 +520,7 @@
       "type": "data.switch",
       "pos": [
         5639.5,
-        378.0
+        344.0
       ],
       "params": {
         "on": false
@@ -540,7 +540,7 @@
       "type": "sense.template_match",
       "pos": [
         5964.0,
-        222.0
+        144.0
       ],
       "params": {
         "region": [
@@ -586,7 +586,7 @@
       "type": "data.const_number",
       "pos": [
         5998.5,
-        610.0
+        516.0
       ],
       "params": {
         "value": 5
@@ -597,7 +597,7 @@
       "type": "math.arith",
       "pos": [
         6327.0,
-        222.0
+        144.0
       ],
       "params": {
         "op": "*"
@@ -608,7 +608,7 @@
       "type": "game.produce_count",
       "pos": [
         6638.0,
-        378.0
+        344.0
       ],
       "params": {
         "cost_per_unit": 100,

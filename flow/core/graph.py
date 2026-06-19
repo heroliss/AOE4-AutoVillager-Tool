@@ -40,8 +40,9 @@ class Edge:
 
 
 class Graph:
-    def __init__(self, name: str = "") -> None:
+    def __init__(self, name: str = "", description: str = "") -> None:
         self.name = name
+        self.description = description    # 流程整体说明（仅展示，不参与执行）
         self.nodes: dict[str, Node] = {}
         self.positions: dict[str, tuple[float, float]] = {}
         self.exec_edges: list[Edge] = []
@@ -93,6 +94,8 @@ class Graph:
         return {
             "version": SCHEMA_VERSION,
             "name": self.name,
+            # 仅在有说明时写出，避免改动既有流程文件/破坏往返一致性
+            **({"description": self.description} if self.description else {}),
             "nodes": [
                 {
                     "id": node_id,
@@ -110,7 +113,7 @@ class Graph:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Graph":
-        g = cls(name=data.get("name", ""))
+        g = cls(name=data.get("name", ""), description=data.get("description", ""))
         for nd in data.get("nodes", []):
             node = create_node(nd["type"])
             # 仅写入已声明的参数，忽略多余键，缺失键保留默认

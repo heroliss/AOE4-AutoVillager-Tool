@@ -127,11 +127,11 @@ def graph_to_payload(graph: Graph) -> dict:
               "kind": "exec"} for e in graph.exec_edges]
     edges += [{"src": e.src_id, "src_port": e.src_port, "dst": e.dst_id, "dst_port": e.dst_port,
                "kind": "data"} for e in graph.data_edges]
-    return {"name": graph.name, "nodes": nodes, "edges": edges}
+    return {"name": graph.name, "description": graph.description, "nodes": nodes, "edges": edges}
 
 
 def payload_to_graph(payload: dict) -> Graph:
-    g = Graph(name=payload.get("name", "未命名流程"))
+    g = Graph(name=payload.get("name", "未命名流程"), description=payload.get("description", ""))
     reg = registry()
     for nd in payload.get("nodes", []):
         type_id = nd["type"]
@@ -172,8 +172,15 @@ class Api:
     def get_defs(self):
         return node_defs()
 
+    def _payload(self, graph):
+        """流程载荷 + 元信息（当前文件路径、是否内置只读），供前端显示文件来源与只读提示。"""
+        p = graph_to_payload(graph) if graph else {"name": "未命名流程", "description": "", "nodes": [], "edges": []}
+        p["path"] = self._path
+        p["readonly"] = self._is_builtin(self._path)
+        return p
+
     def get_flow(self):
-        return graph_to_payload(self._graph) if self._graph else {"name": "未命名流程", "nodes": [], "edges": []}
+        return self._payload(self._graph)
 
     def list_builtin(self):
         # 同时列出内置流程(flows/)与用户另存的流程(user_flows/)，路径前缀即可区分。
@@ -194,7 +201,7 @@ class Api:
         if path and os.path.exists(path):
             self._graph = Graph.load(path)
             self._path = path
-            return graph_to_payload(self._graph)
+            return self._payload(self._graph)
         return None
 
     def open_dialog(self):
@@ -291,7 +298,7 @@ class Api:
         g = payload_to_graph(payload)
         mainline_layout(g)
         self._graph = g
-        return graph_to_payload(g)
+        return self._payload(g)
 
     def save(self, payload):
         self._graph = payload_to_graph(payload)

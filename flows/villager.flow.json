@@ -18,7 +18,7 @@
       "type": "sense.modifier_down",
       "pos": [
         49.0,
-        180.0
+        156.0
       ],
       "params": {
         "keys": "shift,ctrl,alt"
@@ -38,7 +38,7 @@
       "type": "sense.window_check",
       "pos": [
         403.0,
-        222.0
+        144.0
       ],
       "params": {
         "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
@@ -78,7 +78,7 @@
       "type": "game.occlusion",
       "pos": [
         810.0,
-        222.0
+        144.0
       ],
       "params": {
         "region": [
@@ -100,7 +100,7 @@
       "type": "sense.template_match",
       "pos": [
         818.0,
-        724.0
+        608.0
       ],
       "params": {
         "region": [
@@ -121,7 +121,7 @@
       "type": "logic.or",
       "pos": [
         1189.0,
-        222.0
+        144.0
       ],
       "params": {}
     },
@@ -166,7 +166,7 @@
       "type": "sense.ocr_number",
       "pos": [
         1861.0,
-        630.0
+        500.0
       ],
       "params": {
         "region": [
@@ -186,7 +186,7 @@
       "type": "sense.ocr_number",
       "pos": [
         1861.0,
-        174.0
+        124.0
       ],
       "params": {
         "region": [
@@ -215,7 +215,7 @@
       "type": "data.const_number",
       "pos": [
         1886.5,
-        498.0
+        392.0
       ],
       "params": {
         "value": 50
@@ -226,7 +226,7 @@
       "type": "logic.compare",
       "pos": [
         2206.0,
-        222.0
+        144.0
       ],
       "params": {
         "op": ">="
@@ -246,7 +246,7 @@
       "type": "math.arith",
       "pos": [
         2206.0,
-        402.0
+        272.0
       ],
       "params": {
         "op": "-"
@@ -257,7 +257,7 @@
       "type": "data.const_number",
       "pos": [
         2214.5,
-        582.0
+        400.0
       ],
       "params": {
         "value": 0
@@ -268,7 +268,7 @@
       "type": "logic.compare",
       "pos": [
         2517.0,
-        222.0
+        144.0
       ],
       "params": {
         "op": ">"
@@ -349,7 +349,7 @@
       "type": "game.tc_count",
       "pos": [
         3994.0,
-        174.0
+        124.0
       ],
       "params": {
         "icon_region": [
@@ -392,7 +392,7 @@
       "type": "data.const_number",
       "pos": [
         4037.0,
-        630.0
+        840.0
       ],
       "params": {
         "value": 3
@@ -403,7 +403,7 @@
       "type": "math.arith",
       "pos": [
         4396.0,
-        378.0
+        344.0
       ],
       "params": {
         "op": "*"
@@ -414,7 +414,7 @@
       "type": "game.produce_count",
       "pos": [
         4729.0,
-        222.0
+        144.0
       ],
       "params": {
         "cost_per_unit": 50,

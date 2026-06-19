@@ -11,6 +11,8 @@ const ED = (function () {
   let selectedNode = null;   // 当前选中的节点（用于参数变动时刷新“已修改”列表）
   let seq = 1;
   let booted = false;
+  // 当前流程的元信息：名称/说明/文件路径/是否内置只读（保存时内置会被改为另存）
+  let flowMeta = { name: "", desc: "", path: null, readonly: false };
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
@@ -311,7 +313,8 @@ const ED = (function () {
   }
 
   // 与 layout.py 的卡片尺寸常量保持一致（排版预留高度 = 这里画出的高度）。
-  const CARD = { TH: 44, GAP: 6, PAD: 8, CGAP: 4, NOTE_LH: 16, DIV: 6, CAP: 12 };
+  // 模板按"列表"画：每个图片一行（缩略图 + 文件名）。
+  const CARD = { LTH: 36, ROW: 40, PAD: 8, CGAP: 4, NOTE_LH: 16, DIV: 6, CAP: 12 };
 
   // 修饰键多选弹窗：覆盖 Shift/Ctrl/Alt/Win，可多选，返回逗号分隔串。
   function pickModifiers(currentCsv, onPick) {
@@ -388,7 +391,8 @@ const ED = (function () {
     }
     return out;
   }
-  // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板缩略图）。
+  function baseName(p) { return String(p).split(/[\\/]/).pop(); }
+  // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板列表[缩略图+文件名]）。
   function nodeDrawForeground(ctx) {
     if (this.flags && this.flags.collapsed) return;
     // ① 已修改参数标记：在该参数控件行右侧画橙点（last_y 是 LiteGraph 画该控件时记下的 y）
@@ -410,11 +414,9 @@ const ED = (function () {
     ctx.font = "12px 'Microsoft YaHei',sans-serif";
     const noteLines = note ? wrapText(ctx, "📝 " + note, inner) : [];
     const shown = Math.min(paths.length, CARD.CAP);
-    const perRow = Math.max(1, Math.floor(inner / (CARD.TH + CARD.GAP)));
-    const rows = paths.length ? Math.ceil(shown / perRow) : 0;
     const extraLine = paths.length > shown ? CARD.NOTE_LH : 0;
-    let bodyH = noteLines.length * CARD.NOTE_LH + rows * (CARD.TH + CARD.GAP) + extraLine;
-    if (noteLines.length && rows) bodyH += CARD.DIV;
+    let bodyH = noteLines.length * CARD.NOTE_LH + shown * CARD.ROW + extraLine;
+    if (noteLines.length && shown) bodyH += CARD.DIV;
     const cardY = this.size[1] + CARD.CGAP, cardH = CARD.PAD * 2 + bodyH;
     // 卡片背景（圆角 + 细边，和节点连成一体的观感）
     ctx.save();
@@ -425,35 +427,41 @@ const ED = (function () {
     if (noteLines.length) {
       ctx.fillStyle = "#c9b87a"; ctx.font = "12px 'Microsoft YaHei',sans-serif";
       for (const ln of noteLines) { ctx.fillText(ln, CARD.PAD, y + 11); y += CARD.NOTE_LH; }
-      if (rows) {
+      if (shown) {
         y += CARD.DIV / 2;
         ctx.strokeStyle = "#2c323c"; ctx.beginPath();
         ctx.moveTo(CARD.PAD, y); ctx.lineTo(W - CARD.PAD, y); ctx.stroke();
         y += CARD.DIV / 2;
       }
     }
-    let x = CARD.PAD, c = 0;
+    // 模板列表：每行 [缩略图][文件名]
+    const tx = CARD.PAD, th = CARD.LTH;
+    const nameX = tx + th + 8, nameW = Math.max(10, W - nameX - CARD.PAD);
     for (let i = 0; i < shown; i++) {
       const pth = paths[i], im = getThumb(pth);
-      roundRect(ctx, x, y, CARD.TH, CARD.TH, 4);
+      const off = (CARD.ROW - th) / 2;
+      roundRect(ctx, tx, y + off, th, th, 4);
       ctx.fillStyle = "#11141a"; ctx.fill();
       if (im) {
         ctx.save(); ctx.clip();
-        const r = Math.min(CARD.TH / im.width, CARD.TH / im.height);
+        const r = Math.min(th / im.width, th / im.height);
         const dw = im.width * r, dh = im.height * r;
-        ctx.drawImage(im, x + (CARD.TH - dw) / 2, y + (CARD.TH - dh) / 2, dw, dh);
+        ctx.drawImage(im, tx + (th - dw) / 2, y + off + (th - dh) / 2, dw, dh);
         ctx.restore();
-        roundRect(ctx, x, y, CARD.TH, CARD.TH, 4);
+        roundRect(ctx, tx, y + off, th, th, 4);
       } else {
         ctx.fillStyle = "#666"; ctx.font = "11px sans-serif";
-        ctx.fillText(imgCache[pth] === "fail" ? "?" : "…", x + CARD.TH / 2 - 3, y + CARD.TH / 2 + 4);
+        ctx.fillText(imgCache[pth] === "fail" ? "?" : "…", tx + th / 2 - 3, y + off + th / 2 + 4);
       }
       ctx.strokeStyle = "#3a404a"; ctx.lineWidth = 1; ctx.stroke();
-      x += CARD.TH + CARD.GAP;
-      if (++c >= perRow) { c = 0; x = CARD.PAD; y += CARD.TH + CARD.GAP; }
+      // 文件名（取末段，过长截断），垂直居中
+      ctx.fillStyle = "#aeb6c2"; ctx.font = "12px 'Microsoft YaHei',sans-serif";
+      let nm = baseName(pth);
+      while (nm.length > 4 && ctx.measureText(nm).width > nameW) nm = nm.slice(0, -2) + "…";
+      ctx.fillText(nm, nameX, y + CARD.ROW / 2 + 4);
+      y += CARD.ROW;
     }
     if (extraLine) {
-      if (c !== 0) y += CARD.TH + CARD.GAP;
       ctx.fillStyle = "#7f8895"; ctx.font = "11px sans-serif";
       ctx.fillText("+" + (paths.length - shown) + " 张", CARD.PAD, y + 11);
     }
@@ -536,10 +544,12 @@ const ED = (function () {
     if (node.properties) node.properties[key] = w.value;
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap();
+    refreshDirty();                 // 立刻更新顶部“未保存”（不等 250ms 防抖快照）
     showNodeHelp(node);             // 刷新说明面板里的“已修改”列表
   }
   function revertNode(node) {
     for (const w of (node.widgets || [])) if (paramChanged(w)) revertParam(node, w._key);
+    refreshDirty();
   }
 
   function registerTypes(list) {
@@ -645,7 +655,7 @@ const ED = (function () {
         dst: b._id, dst_port: b.inputs[l.target_slot].name,
       });
     }
-    return { name: graph._aoe4_name || "未命名流程", nodes, edges };
+    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", nodes, edges };
   }
 
   function setStatus(t) { document.getElementById("status").textContent = t; }
@@ -677,15 +687,61 @@ const ED = (function () {
 
   function load(flow, opts) {
     const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
-    graph._aoe4_name = flow.name;
+    flowMeta = {
+      name: flow.name || "未命名流程",
+      desc: flow.description || "",
+      // 自动排版回传仍带 path/readonly；缺失时沿用当前值
+      path: ("path" in flow) ? flow.path : flowMeta.path,
+      readonly: ("readonly" in flow) ? !!flow.readonly : flowMeta.readonly,
+    };
     undoStack = []; redoStack = [];   // 新流程：清空撤销历史
     const added = buildGraph(flow);
     const total = (flow.nodes || []).length;
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
-    setStatus(`流程：${flow.name} ｜ 节点 ${added}/${total}`);
+    setStatus(`流程：${flowMeta.name} ｜ 节点 ${added}/${total}`);
+    updateFlowMeta();
     snapshotNow();   // 记录初始快照，作为撤销的基线
     if (clean) markSaved();                         // 刚载入＝与磁盘一致，清除“未保存”标记
     else { attachBaselineRefs(); refreshDirty(); }  // 排版后保留原基线，重新挂上控件引用
+  }
+
+  // 顶部工具栏右侧：显示当前流程名 + 来源（内置只读 / 我的流程）。
+  function updateFlowMeta() {
+    const el = document.getElementById("flowmeta");
+    if (!el) return;
+    let tag = "";
+    if (flowMeta.readonly) tag = " · <span class='ro'>内置·只读（保存将另存为）</span>";
+    else if (flowMeta.path) tag = " · 我的流程";
+    el.innerHTML = "📄 " + esc(flowMeta.name) + tag;
+    // 没有选中节点时，右下角说明面板展示流程说明
+    if (!selectedNode) showFlowHelp();
+  }
+
+  // 顶部下拉：把 "flows/x.flow.json" / "user_flows/x.flow.json" 分组成「内置流程」「我的流程」，
+  // 选项文字只显示去掉目录与 .flow.json 后缀的名字（值仍是完整相对路径，供 openBuiltin 打开）。
+  function fillFlowList(list) {
+    const sel = document.getElementById("builtin");
+    if (!sel) return;
+    sel.innerHTML = "<option value=''>打开流程…</option>";
+    const groups = { "flows": [], "user_flows": [] };
+    for (const p of list) {
+      const dir = p.split("/")[0];
+      (groups[dir] || (groups[dir] = [])).push(p);
+    }
+    const mk = (label, items) => {
+      if (!items.length) return;
+      const og = document.createElement("optgroup");
+      og.label = label;
+      for (const p of items) {
+        const o = document.createElement("option");
+        o.value = p;
+        o.textContent = p.split("/").pop().replace(/\.flow\.json$/, "");
+        og.appendChild(o);
+      }
+      sel.appendChild(og);
+    };
+    mk("内置流程（只读）", groups["flows"]);
+    mk("我的流程", groups["user_flows"]);
   }
 
   // ---- 启动：优先用 Python push 进来的数据 ----
@@ -694,10 +750,7 @@ const ED = (function () {
     booted = true;
     try {
       const okN = registerTypes(data.defs);
-      const sel = document.getElementById("builtin");
-      for (const p of (data.builtin || [])) {
-        const o = document.createElement("option"); o.value = p; o.textContent = p; sel.appendChild(o);
-      }
+      fillFlowList(data.builtin || []);
       if (data.flow) load(data.flow);
       else setStatus(`已就绪 ｜ 已注册 ${okN} 种节点（右键空白处添加）`);
     } catch (err) {
@@ -706,21 +759,32 @@ const ED = (function () {
   }
   window.__bootstrap__ = function (data) { boot(data); return true; };
 
+  // 保存/另存成功后：清除“未保存”、刷新元信息（保存后一定写到可写的用户文件，故不再只读），
+  // 并刷新下拉列表（新另存的“我的流程”会出现在列表里）。
+  async function afterSaved(p) {
+    flowMeta.path = p;
+    flowMeta.readonly = false;
+    markSaved();
+    updateFlowMeta();
+    try { fillFlowList(await api().list_builtin()); } catch (e) {}
+  }
+
   const self = {
     async save() {
       try {
         const p = await api().save(collect());
-        if (p) markSaved();
+        if (p) await afterSaved(p);
         setStatus(p ? `已保存 ${p}` : "已取消保存");
       } catch (err) { showError("保存失败：" + (err.stack || err)); }
     },
     async saveAs() {
       try {
         const p = await api().save_as(collect());
-        if (p) markSaved();
+        if (p) await afterSaved(p);
         setStatus(p ? `已保存 ${p}` : "已取消");
       } catch (err) { showError("另存为失败：" + (err.stack || err)); }
     },
+    editFlowInfo,
     async open() {
       try {
         const flow = await api().open_dialog();
@@ -765,7 +829,7 @@ const ED = (function () {
       "padding:8px 10px;font:12px/1.6 'Microsoft YaHei',sans-serif;display:none;z-index:50;";
     document.body.appendChild(helpEl);
     canvas.onNodeSelected = (n) => { selectedNode = n; showNodeHelp(n); };
-    canvas.onNodeDeselected = () => { selectedNode = null; helpEl.style.display = "none"; };
+    canvas.onNodeDeselected = () => { selectedNode = null; showFlowHelp(); };   // 取消选中 -> 显示流程说明
   }
 
   // 选中节点的说明面板：只放“该节点专属”的内容（用途 + 需要解释的端口/参数），
@@ -819,6 +883,57 @@ const ED = (function () {
       });
     }
     helpEl.style.display = "block";
+  }
+
+  // 未选中节点时，右下角面板展示「流程说明」（可点[编辑]修改名称/说明）。
+  function showFlowHelp() {
+    if (!helpEl) return;
+    const sub = "color:#7f8895;border-top:1px solid #3a404a;margin-top:6px;padding-top:4px";
+    let html = `<div style="font-weight:bold;color:#e6e9ee;margin-bottom:2px">📄 ${esc(flowMeta.name || "未命名流程")} ` +
+               `<a href="#" id="flowedit" style="color:#7fb0ee;text-decoration:none;font-weight:normal">[编辑]</a></div>`;
+    if (flowMeta.readonly)
+      html += `<div style="color:#e6a23c">内置流程（只读）——保存会另存到「我的流程」，不会覆盖内置。</div>`;
+    html += flowMeta.desc
+      ? `<div style="color:#9aa3af;white-space:pre-line;margin-top:2px">${esc(flowMeta.desc)}</div>`
+      : `<div style="color:#6b727d;margin-top:2px">（暂无流程说明，点 [编辑] 添加）</div>`;
+    html += `<div style="${sub}">点击任一节点查看该节点说明；右键节点可加“描述”。</div>`;
+    helpEl.innerHTML = html;
+    const a = helpEl.querySelector("#flowedit");
+    if (a) a.onclick = (e) => { e.preventDefault(); editFlowInfo(); };
+    helpEl.style.display = "block";
+  }
+
+  // 编辑流程名称 + 说明（内置流程也可改，保存时会另存）。
+  function editFlowInfo() {
+    document.getElementById("flowdlg")?.remove();
+    const box = document.createElement("div");
+    box.id = "flowdlg";
+    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(460px,92vw);" +
+      "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:130;" +
+      "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+    const inputCss = "width:100%;margin:4px 0 10px;background:#15171c;color:#cfd3da;border:1px solid #444;" +
+      "border-radius:4px;padding:6px;font:13px/1.5 \"Microsoft YaHei\",sans-serif;box-sizing:border-box";
+    box.innerHTML = "<b style='color:#e6c07b'>流程信息</b>（名称与整体说明，仅展示、不影响运行）<br>" +
+      "<div style='margin-top:8px;color:#9aa3af'>名称</div>" +
+      `<input id='flowname_in' style='${inputCss}'/>` +
+      "<div style='color:#9aa3af'>说明</div>" +
+      `<textarea id='flowdesc_in' style='${inputCss};height:96px'></textarea>` +
+      "<div style='text-align:right'>" +
+      "<button id='flowok' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>确定</button> " +
+      "<button id='flowcancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>取消</button></div>";
+    document.body.appendChild(box);
+    const nameIn = box.querySelector("#flowname_in"), descIn = box.querySelector("#flowdesc_in");
+    nameIn.value = flowMeta.name || ""; descIn.value = flowMeta.desc || "";
+    nameIn.focus();
+    box.querySelector("#flowok").onclick = () => {
+      flowMeta.name = nameIn.value.trim() || "未命名流程";
+      flowMeta.desc = descIn.value.trim();
+      box.remove();
+      updateFlowMeta();
+      setStatus(`流程：${flowMeta.name}`);
+      scheduleSnap(); refreshDirty();   // 名称/说明计入“未保存”
+    };
+    box.querySelector("#flowcancel").onclick = () => box.remove();
   }
 
   // 顶部“帮助”：集中放连线模型图例 + 常用操作（避免在每个节点面板里重复）
@@ -972,8 +1087,8 @@ const ED = (function () {
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
       graph.onConnectionChange = scheduleSnap;
       graph.onNodeAdded = scheduleSnap;
-      // 删除节点：除快照外，隐藏右下角说明面板（否则被删节点的说明会残留）
-      graph.onNodeRemoved = () => { scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none"; };
+      // 删除节点：除快照外，把右下角面板切回“流程说明”（否则被删节点的说明会残留）
+      graph.onNodeRemoved = () => { scheduleSnap(); selectedNode = null; showFlowHelp(); };
       canvas.onNodeMoved = scheduleSnap;
       // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
       canvas.canvas.addEventListener("pointerdown", onRightDown, true);

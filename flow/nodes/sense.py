@@ -175,9 +175,15 @@ class TemplateMatch(DataNode):
 # ==================== OCR 数字 ====================
 @register
 class OcrNumber(DataNode):
+    """识别数字：读取屏幕指定区域里的数字（人口、资源、计数等）。
+
+    底层用 OCR（光学字符识别 / Optical Character Recognition）把截图里的数字“认”成数值，
+    再用正则提取。常用于读人口「当前/上限」、食物/金币存量等。小字建议把「缩放比例」调到 2~3 倍更准。
+    """
+
     type_id = "sense.ocr_number"
     category = "感知"
-    title = "OCR数字"
+    title = "识别数字"
     inputs = [data_in("image", DataType.IMAGE, label="图像")]
     outputs = [
         data_out("value", DataType.NUMBER, label="数值"),

@@ -16,15 +16,22 @@ from __future__ import annotations
 import math
 from collections import deque
 
-# 节点下方"附属卡片"（模板缩略图预览 + 用户描述）的尺寸常量，必须与 editor.js 的画法保持一致，
+# LiteGraph 的节点高度常量（须与 vendor/litegraph.js 一致）：本体高 = 标题 + 端口行 + 控件行。
+# estimate_size 必须按"实际会画出的控件数（含采集按钮）"算高，否则排版预留 < 实际渲染 -> 重叠。
+TITLE_H = 30.0        # NODE_TITLE_HEIGHT：标题条（画在 pos.y 之上）
+SLOT_H = 20.0         # NODE_SLOT_HEIGHT：每个端口行高
+WIDGET_H = 20.0       # NODE_WIDGET_HEIGHT：每个控件行高（实际占用 WIDGET_H+4）
+MIN_W_WIDGETS = 210.0  # 含控件时 LiteGraph 的最小宽 NODE_WIDTH(140)*1.5
+
+# 节点下方"附属卡片"（模板预览列表 + 用户描述）的尺寸常量，必须与 editor.js 的画法保持一致，
 # 否则自动排版预留的高度与实际渲染对不上、会重叠或留白。
-THUMB = 44.0          # 缩略图边长
-THUMB_GAP = 6.0       # 缩略图间距
+LIST_TH = 36.0        # 列表行里的缩略图边长
+LIST_ROW = 40.0       # 列表每行高（缩略图 + 文件名）
 CARD_PAD = 8.0        # 卡片内边距
 CARD_GAP = 4.0        # 卡片与节点之间的缝
 NOTE_LH = 16.0        # 描述行高
-DIVIDER = 6.0         # 描述与缩略图之间的分隔
-PREVIEW_CAP = 12      # 最多显示的缩略图数（多出来用 "+N" 表示）
+DIVIDER = 6.0         # 描述与列表之间的分隔
+PREVIEW_CAP = 12      # 最多显示的图片行数（多出来用 "+N" 表示）
 
 
 def _text_w(s: str) -> float:
@@ -32,15 +39,42 @@ def _text_w(s: str) -> float:
     return sum(17.0 if ord(c) > 0x2E80 else 9.0 for c in s)
 
 
+def _button_count(node) -> int:
+    """该节点会被 editor.js(addParamWidget) 额外加多少个"采集"按钮控件——必须与前端规则一致。"""
+    color_keys = {s.key for s in node.params if getattr(s, "ptype", None) == "color"}
+    n = 0
+    for s in node.params:
+        t = getattr(s, "ptype", None)
+        if t in ("template", "templates"):      # 选择图片… + 截取模板…
+            n += 2
+        elif t == "region":                      # 框选区域…
+            n += 1
+        elif t == "point":                       # 取点…（若配套有颜色参数则由"取点吸色"代劳，不另放）
+            if s.key.replace("pixel", "color") not in color_keys:
+                n += 1
+        elif t in ("color", "key", "keys"):      # 取点吸色… / 捕获按键… / 选择修饰键…
+            n += 1
+    return n
+
+
 def estimate_size(node) -> tuple[float, float]:
-    """估算节点"本体"在画布上的宽高（像素），不含下方附属卡片。"""
+    """估算节点"本体"（标题+端口+控件）在画布上的宽高（像素），不含下方附属卡片。
+
+    与 LiteGraph.computeSize 同公式：高 = 标题 + max(入,出)行*SLOT + 控件数*(WIDGET+4)+8，
+    控件数含参数控件【和】采集按钮，否则按钮多出来的高度没预留 -> 与下方节点重叠。
+    """
     title_w = _text_w(node.title) + 46
     port_w = max([_text_w(p.display) + 46 for p in (list(node.inputs) + list(node.outputs))] or [0])
     param_w = max([_text_w(p.label) + 196 for p in node.params] or [0])  # 标签 + 输入框宽度
     w = max(160.0, title_w, port_w, param_w)
-    rows_io = len(node.inputs) + len(node.outputs)
-    h = 36 + rows_io * 24 + len(node.params) * 30 + 16
-    return (w, float(h))
+    n_widgets = len(node.params) + _button_count(node)
+    if n_widgets:
+        w = max(w, MIN_W_WIDGETS)
+    rows = max(len(node.inputs), len(node.outputs), 1)
+    body = rows * SLOT_H
+    if n_widgets:
+        body += n_widgets * (WIDGET_H + 4) + 8
+    return (w, TITLE_H + body)
 
 
 def _template_paths(node) -> list:
@@ -57,7 +91,10 @@ def _template_paths(node) -> list:
 
 
 def _card_h(node, note: str, width: float) -> float:
-    """节点下方附属卡片（描述+缩略图）的总占高；无内容返回 0。与 editor.js 的卡片画法对应。"""
+    """节点下方附属卡片（描述 + 模板列表）的总占高；无内容返回 0。与 editor.js 的卡片画法对应。
+
+    模板按"列表"呈现：每个图片占一行（缩略图 + 文件名），故高度 = 行数 * LIST_ROW。
+    """
     inner = max(1.0, width - 2 * CARD_PAD)
     note_h = 0.0
     if note:
@@ -68,24 +105,22 @@ def _card_h(node, note: str, width: float) -> float:
             lines += max(1, math.ceil(tw / inner))
         note_h = lines * NOTE_LH
     paths = _template_paths(node)
-    prev_h = 0.0
+    list_h = 0.0
     if paths:
-        per_row = max(1, int(inner // (THUMB + THUMB_GAP)))
         shown = min(len(paths), PREVIEW_CAP)
-        rows = math.ceil(shown / per_row)
-        prev_h = rows * (THUMB + THUMB_GAP)
+        list_h = shown * LIST_ROW
         if len(paths) > shown:
-            prev_h += NOTE_LH
-    if note_h == 0 and prev_h == 0:
+            list_h += NOTE_LH        # "+N 张" 提示行
+    if note_h == 0 and list_h == 0:
         return 0.0
-    total = CARD_PAD + note_h + prev_h + CARD_PAD
-    if note_h and prev_h:
+    total = CARD_PAD + note_h + list_h + CARD_PAD
+    if note_h and list_h:
         total += DIVIDER
     return CARD_GAP + total
 
 
 def full_size(graph, nid, size_fn=None) -> tuple[float, float]:
-    """节点的"占位尺寸" = 本体 + 下方附属卡片。排版与重叠校验都用它，才能给预览/描述留出空间。"""
+    """节点的"占位尺寸" = 本体（含标题）+ 下方附属卡片。排版与重叠校验都用它，给预览/描述留空间。"""
     node = graph.nodes[nid]
     w, h = (size_fn(nid) if size_fn else estimate_size(node))
     return (w, h + _card_h(node, graph.notes.get(nid, ""), w))

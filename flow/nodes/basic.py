@@ -225,19 +225,41 @@ class GetVar(DataNode):
 
 
 # ==================== 调试 ====================
+def _fmt_log(v) -> str:
+    """日志取值的友好格式：浮点保留 3 位小数（去掉多余的 0），其余原样。"""
+    if isinstance(v, float):
+        return f"{v:.3f}".rstrip("0").rstrip(".")
+    return str(v)
+
+
 @register
 class LogNode(ControlNode):
+    """日志：把文本 + 最多三个数据值打印到运行日志（调试/观察检测结果用）。
+
+    多个「值」按顺序拼接。例：把「三态遮挡检测」的「状态」接到「值」、「置信度」接到「值2」，
+    再在「文本」里写个前缀，日志就会输出形如「遮挡 完全遮挡 0.83」。
+    （日志当前打印到控制台/日志文件；在编辑器里实时查看属于后续“编辑器内运行”能力。）
+    """
+
     type_id = "debug.log"
     category = "调试"
     title = "日志"
-    inputs = [exec_in("in"), data_in("value", DataType.ANY, label="值")]
+    inputs = [
+        exec_in("in"),
+        data_in("value", DataType.ANY, label="值"),
+        data_in("value2", DataType.ANY, label="值2", help="可选的第二个值（如把状态接值、置信度接值2）"),
+        data_in("value3", DataType.ANY, label="值3", help="可选的第三个值"),
+    ]
     outputs = [exec_out("out")]
     params = [ParamSpec("message", "文本", "str", default="")]
 
     def execute(self, ctx, inputs):
-        msg = self.values["message"]
-        val = inputs.get("value")
-        if val is not None:
-            msg = f"{msg} {val}" if msg else str(val)
-        ctx.log("INFO", msg)
+        parts = []
+        if self.values["message"]:
+            parts.append(str(self.values["message"]))
+        for key in ("value", "value2", "value3"):
+            v = inputs.get(key)
+            if v is not None:
+                parts.append(_fmt_log(v))
+        ctx.log("INFO", " ".join(parts))
         return {}, "out"
