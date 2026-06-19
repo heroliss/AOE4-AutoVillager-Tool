@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "普通出农",
+  "name": "市场出商队",
   "nodes": [
     {
       "id": "tick",
@@ -100,7 +100,7 @@
           1025
         ],
         "templates": [
-          "templates/cunmin.png"
+          "templates/trade_cart.png"
         ],
         "threshold": 0.6
       }
@@ -198,9 +198,9 @@
       "params": {
         "region": [
           50,
-          1222,
+          1180,
           140,
-          1248
+          1206
         ],
         "scale": 1.0,
         "allowlist": "0123456789OolIsS ",
@@ -234,7 +234,7 @@
         0.0
       ],
       "params": {
-        "value": 50
+        "value": 100
       }
     },
     {
@@ -379,65 +379,13 @@
         0.0
       ],
       "params": {
-        "key": "h",
+        "key": "g",
         "modifiers": "",
         "repeat": 1,
         "shift_batch": false,
         "batch_size": 5,
         "post_escape": false
       }
-    },
-    {
-      "id": "tc",
-      "type": "game.tc_count",
-      "pos": [
-        0.0,
-        0.0
-      ],
-      "params": {
-        "icon_region": [
-          444,
-          1212,
-          492,
-          1259
-        ],
-        "single_region": [
-          300,
-          1140,
-          354,
-          1194
-        ],
-        "single_template": "templates/tc_single.png",
-        "numbered_templates": [
-          "templates/tc_number_1.png",
-          "templates/tc_number_2.png",
-          "templates/tc_number_3.png",
-          "templates/tc_number_4.png",
-          "templates/tc_number_5.png",
-          "templates/tc_number_6.png"
-        ],
-        "threshold": 0.7,
-        "crop_size": 20,
-        "early_exit": 0.95
-      }
-    },
-    {
-      "id": "if_tcok",
-      "type": "control.if",
-      "pos": [
-        0.0,
-        0.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_tcfail",
-      "type": "control.end",
-      "pos": [
-        0.0,
-        0.0
-      ],
-      "params": {}
     },
     {
       "id": "c_pertc",
@@ -447,7 +395,7 @@
         0.0
       ],
       "params": {
-        "value": 3
+        "value": 5
       }
     },
     {
@@ -469,7 +417,7 @@
         0.0
       ],
       "params": {
-        "cost_per_unit": 50,
+        "cost_per_unit": 100,
         "cap": -1
       }
     },
@@ -558,6 +506,17 @@
         0.0
       ],
       "params": {}
+    },
+    {
+      "id": "c_one",
+      "type": "data.const_number",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "value": 1
+      }
     }
   ],
   "exec_edges": [
@@ -696,19 +655,7 @@
     [
       "select_b",
       "out",
-      "if_tcok",
-      "in"
-    ],
-    [
-      "if_tcok",
-      "true",
       "queue",
-      "in"
-    ],
-    [
-      "if_tcok",
-      "false",
-      "end_tcfail",
       "in"
     ],
     [
@@ -828,20 +775,14 @@
       "cond"
     ],
     [
-      "tc",
-      "ok",
-      "if_tcok",
-      "cond"
-    ],
-    [
       "c_pertc",
       "value",
       "planned",
       "a"
     ],
     [
-      "tc",
-      "count",
+      "c_one",
+      "value",
       "planned",
       "b"
     ],

@@ -14,6 +14,8 @@ import os
 from flow.core import Graph, Executor, ExecutionContext, create_node, registry, DataNode
 import flow.nodes  # noqa: F401  注册全部节点
 from flow.flows.villager import build_villager_graph
+from flow.flows.trade_cart import build_trade_cart_graph
+from flow.flows.jin import build_jin_graph
 
 
 class Stub(DataNode):
@@ -27,8 +29,8 @@ class Stub(DataNode):
         return dict(self._outs)
 
 
-def run_with_stubs(stub_map: dict, dry_run=True) -> tuple[list[str], ExecutionContext]:
-    g = build_villager_graph()
+def run_with_stubs(build, stub_map: dict, dry_run=True) -> tuple[list[str], ExecutionContext]:
+    g = build()
     for nid, outs in stub_map.items():
         g.nodes[nid] = Stub(outs)
     logs: list[str] = []
@@ -58,7 +60,7 @@ def main() -> None:
     ok &= check(f"已注册 {len(registry())} 个节点 (>=30)", len(registry()) >= 30)
 
     print("== 出农流程：正常路径 (无村民/资源充足/1个TC) ==")
-    logs, ctx = run_with_stubs(HAPPY)
+    logs, ctx = run_with_stubs(build_villager_graph, HAPPY)
     queue_logs = [m for m in logs if "按键 q" in m]
     ok &= check("触发排队出农", len(queue_logs) == 1)
     ok &= check("出兵数量 = min(3*1, 150, 300//50) = 3", queue_logs and "x3" in queue_logs[0])
@@ -69,26 +71,61 @@ def main() -> None:
     ok &= check("帧末已解除输入屏蔽", ctx._block_active is False)
 
     print("== 跳过路径：检测到村民正在生产 ==")
-    logs, _ = run_with_stubs({**HAPPY, "vill": {"found": True, "confidence": 0.9, "which": 0}})
+    logs, _ = run_with_stubs(build_villager_graph, {**HAPPY, "vill": {"found": True, "confidence": 0.9, "which": 0}})
     ok &= check("不触发排队", not any("按键 q" in m for m in logs))
 
     print("== 跳过路径：不在游戏中 ==")
-    logs, _ = run_with_stubs({**HAPPY, "win": {"in_game": False, "active": False}})
+    logs, _ = run_with_stubs(build_villager_graph, {**HAPPY, "win": {"in_game": False, "active": False}})
     ok &= check("不触发任何操作", not any("[干跑]" in m for m in logs))
 
     print("== 跳过路径：UI 遮挡 ==")
-    logs, _ = run_with_stubs({**HAPPY, "occ": {"blocked": True, "in_transition": False, "clear": False, "confidence": 0.9, "state": "完全遮挡"}})
+    logs, _ = run_with_stubs(build_villager_graph, {**HAPPY, "occ": {"blocked": True, "in_transition": False, "clear": False, "confidence": 0.9, "state": "完全遮挡"}})
     ok &= check("遮挡时不排队", not any("按键 q" in m for m in logs))
 
     print("== 跳过路径：食物不足 ==")
-    logs, _ = run_with_stubs({**HAPPY, "food": {"value": 30, "value2": None, "ok": True}})
+    logs, _ = run_with_stubs(build_villager_graph, {**HAPPY, "food": {"value": 30, "value2": None, "ok": True}})
     ok &= check("食物不足不排队", not any("按键 q" in m for m in logs))
 
     print("== 跳过路径：TC 检测失败（验证锁/屏蔽兜底释放）==")
-    logs, ctx = run_with_stubs({**HAPPY, "tc": {"count": 0, "ok": False}})
+    logs, ctx = run_with_stubs(build_villager_graph, {**HAPPY, "tc": {"count": 0, "ok": False}})
     ok &= check("TC失败不排队", not any("按键 q" in m for m in logs))
     ok &= check("TC失败后仍释放了操作锁", ctx._lock_held is False)
     ok &= check("TC失败后仍解除了输入屏蔽", ctx._block_active is False)
+
+    # ==================== 市场出商队 ====================
+    print("== 市场出商队：正常路径（黄金充足，单一市场）==")
+    tc_stub = {
+        "win": {"in_game": True, "active": True},
+        "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02},
+        "vill": {"found": False, "confidence": 0.05, "which": -1},
+        "pop": {"value": 50, "value2": 200, "ok": True},
+        "food": {"value": 600, "value2": None, "ok": True},  # 资源=黄金
+    }
+    logs, _ = run_with_stubs(build_trade_cart_graph, tc_stub)
+    q = [m for m in logs if "按键 q" in m]
+    ok &= check("触发出商队", len(q) == 1)
+    ok &= check("数量 = min(5, 150, 600//100=6) = 5", q and "x5" in q[0])
+    ok &= check("选中市场(G键)", any("按键 g" in m for m in logs))
+
+    # ==================== 金朝双出农 ====================
+    JIN = {
+        "win": {"in_game": True, "active": True},
+        "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02},
+        "vill": {"found": False, "confidence": 0.05, "which": -1},  # 村民+乡骑均不在队列
+        "pop": {"value": 50, "value2": 200, "ok": True},
+        "food": {"value": 300, "value2": None, "ok": True},
+        "gold": {"value": 300, "value2": None, "ok": True},
+        "tc": {"count": 1, "ok": True},
+    }
+    print("== 金朝：黄金充足 -> 优先出乡骑 ==")
+    logs, _ = run_with_stubs(build_jin_graph, JIN)
+    ok &= check("出乡骑(W键) x2 = min(2,150,300//80=3)", any("按键 w x2" in m for m in logs))
+    ok &= check("不出村民(Q键)", not any("按键 q" in m for m in logs))
+
+    print("== 金朝：黄金不足 -> 回退出村民 ==")
+    logs, _ = run_with_stubs(build_jin_graph, {**JIN, "gold": {"value": 50, "value2": None, "ok": True}})
+    ok &= check("不出乡骑(W键)", not any("按键 w" in m for m in logs))
+    ok &= check("回退出村民(Q键) x3 = min(3,150,300//50=6)", any("按键 q x3" in m for m in logs))
 
     print("== JSON 序列化往返 ==")
     g = build_villager_graph()
@@ -97,10 +134,13 @@ def main() -> None:
     ok &= check("往返结构一致", g2.to_dict() == data)
     ok &= check(f"节点数 {len(g.nodes)} / 执行连线 {len(g.exec_edges)} / 数据连线 {len(g.data_edges)}", True)
 
-    # 落盘默认模板，供后续编辑器/headless 使用
+    # 落盘三个默认流程，供后续编辑器/headless 使用
     os.makedirs("flows", exist_ok=True)
-    g.save("flows/villager.flow.json")
-    print("已写出 flows/villager.flow.json")
+    for fname, build in (("villager", build_villager_graph),
+                         ("trade_cart", build_trade_cart_graph),
+                         ("jin", build_jin_graph)):
+        build().save(f"flows/{fname}.flow.json")
+        print(f"已写出 flows/{fname}.flow.json")
 
     print("\n" + ("全部通过 OK" if ok else "存在失败 FAIL"))
     raise SystemExit(0 if ok else 1)

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "普通出农",
+  "name": "金朝双出农",
   "nodes": [
     {
       "id": "tick",
@@ -100,7 +100,8 @@
           1025
         ],
         "templates": [
-          "templates/cunmin.png"
+          "templates/cunmin.png",
+          "templates/xiangqi.png"
         ],
         "threshold": 0.6
       }
@@ -203,7 +204,27 @@
           1248
         ],
         "scale": 1.0,
-        "allowlist": "0123456789OolIsS ",
+        "allowlist": "0123456789/\\|OolIsS ",
+        "regex": "(\\d+)",
+        "aggregate": "first"
+      }
+    },
+    {
+      "id": "gold",
+      "type": "sense.ocr_number",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "region": [
+          50,
+          1180,
+          140,
+          1206
+        ],
+        "scale": 1.0,
+        "allowlist": "0123456789/\\|OolIsS ",
         "regex": "(\\d+)",
         "aggregate": "first"
       }
@@ -219,46 +240,6 @@
     },
     {
       "id": "end_popfail",
-      "type": "control.end",
-      "pos": [
-        0.0,
-        0.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "c_minfood",
-      "type": "data.const_number",
-      "pos": [
-        0.0,
-        0.0
-      ],
-      "params": {
-        "value": 50
-      }
-    },
-    {
-      "id": "cmp_food",
-      "type": "logic.compare",
-      "pos": [
-        0.0,
-        0.0
-      ],
-      "params": {
-        "op": ">="
-      }
-    },
-    {
-      "id": "if_foodok",
-      "type": "control.if",
-      "pos": [
-        0.0,
-        0.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_foodlow",
       "type": "control.end",
       "pos": [
         0.0,
@@ -372,7 +353,7 @@
       "params": {}
     },
     {
-      "id": "select_b",
+      "id": "select_tc",
       "type": "action.press_key",
       "pos": [
         0.0,
@@ -440,18 +421,18 @@
       "params": {}
     },
     {
-      "id": "c_pertc",
+      "id": "c_xq_per",
       "type": "data.const_number",
       "pos": [
         0.0,
         0.0
       ],
       "params": {
-        "value": 3
+        "value": 2
       }
     },
     {
-      "id": "planned",
+      "id": "planned_xq",
       "type": "math.arith",
       "pos": [
         0.0,
@@ -462,7 +443,41 @@
       }
     },
     {
-      "id": "produce",
+      "id": "produce_xq",
+      "type": "game.produce_count",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "cost_per_unit": 80,
+        "cap": -1
+      }
+    },
+    {
+      "id": "c_v_per",
+      "type": "data.const_number",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "value": 3
+      }
+    },
+    {
+      "id": "planned_v",
+      "type": "math.arith",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "op": "*"
+      }
+    },
+    {
+      "id": "produce_v",
       "type": "game.produce_count",
       "pos": [
         0.0,
@@ -474,7 +489,143 @@
       }
     },
     {
-      "id": "queue",
+      "id": "sw_xq",
+      "type": "data.switch",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "on": true
+      }
+    },
+    {
+      "id": "sw_v",
+      "type": "data.switch",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "on": true
+      }
+    },
+    {
+      "id": "c_gold_thr",
+      "type": "data.const_number",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "value": 100
+      }
+    },
+    {
+      "id": "cmp_gold",
+      "type": "logic.compare",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "op": ">="
+      }
+    },
+    {
+      "id": "cmp_xq_cnt",
+      "type": "logic.compare",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "op": ">"
+      }
+    },
+    {
+      "id": "and_xq1",
+      "type": "logic.and",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "and_xq2",
+      "type": "logic.and",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "if_xq",
+      "type": "control.if",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "cmp_v_cnt",
+      "type": "logic.compare",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "op": ">"
+      }
+    },
+    {
+      "id": "and_v",
+      "type": "logic.and",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "if_v",
+      "type": "control.if",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "end_none",
+      "type": "control.end",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "queue_xq",
+      "type": "action.press_key",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {
+        "key": "w",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": true,
+        "batch_size": 5,
+        "post_escape": true
+      }
+    },
+    {
+      "id": "queue_v",
       "type": "action.press_key",
       "pos": [
         0.0,
@@ -630,25 +781,13 @@
     [
       "if_popok",
       "true",
-      "if_foodok",
+      "if_slots",
       "in"
     ],
     [
       "if_popok",
       "false",
       "end_popfail",
-      "in"
-    ],
-    [
-      "if_foodok",
-      "true",
-      "if_slots",
-      "in"
-    ],
-    [
-      "if_foodok",
-      "false",
-      "end_foodlow",
       "in"
     ],
     [
@@ -690,11 +829,11 @@
     [
       "relmod1",
       "out",
-      "select_b",
+      "select_tc",
       "in"
     ],
     [
-      "select_b",
+      "select_tc",
       "out",
       "if_tcok",
       "in"
@@ -702,7 +841,7 @@
     [
       "if_tcok",
       "true",
-      "queue",
+      "if_xq",
       "in"
     ],
     [
@@ -712,7 +851,37 @@
       "in"
     ],
     [
-      "queue",
+      "if_xq",
+      "true",
+      "queue_xq",
+      "in"
+    ],
+    [
+      "if_xq",
+      "false",
+      "if_v",
+      "in"
+    ],
+    [
+      "if_v",
+      "true",
+      "queue_v",
+      "in"
+    ],
+    [
+      "if_v",
+      "false",
+      "end_none",
+      "in"
+    ],
+    [
+      "queue_xq",
+      "out",
+      "restore",
+      "in"
+    ],
+    [
+      "queue_v",
       "out",
       "restore",
       "in"
@@ -780,24 +949,6 @@
       "cond"
     ],
     [
-      "food",
-      "value",
-      "cmp_food",
-      "a"
-    ],
-    [
-      "c_minfood",
-      "value",
-      "cmp_food",
-      "b"
-    ],
-    [
-      "cmp_food",
-      "result",
-      "if_foodok",
-      "cond"
-    ],
-    [
       "pop",
       "value2",
       "slots",
@@ -834,39 +985,159 @@
       "cond"
     ],
     [
-      "c_pertc",
+      "c_xq_per",
       "value",
-      "planned",
+      "planned_xq",
       "a"
     ],
     [
       "tc",
       "count",
-      "planned",
+      "planned_xq",
       "b"
     ],
     [
-      "planned",
+      "planned_xq",
       "value",
-      "produce",
+      "produce_xq",
       "planned"
     ],
     [
       "slots",
       "value",
-      "produce",
+      "produce_xq",
+      "available_slots"
+    ],
+    [
+      "gold",
+      "value",
+      "produce_xq",
+      "resource"
+    ],
+    [
+      "c_v_per",
+      "value",
+      "planned_v",
+      "a"
+    ],
+    [
+      "tc",
+      "count",
+      "planned_v",
+      "b"
+    ],
+    [
+      "planned_v",
+      "value",
+      "produce_v",
+      "planned"
+    ],
+    [
+      "slots",
+      "value",
+      "produce_v",
       "available_slots"
     ],
     [
       "food",
       "value",
-      "produce",
+      "produce_v",
       "resource"
     ],
     [
-      "produce",
+      "gold",
+      "value",
+      "cmp_gold",
+      "a"
+    ],
+    [
+      "c_gold_thr",
+      "value",
+      "cmp_gold",
+      "b"
+    ],
+    [
+      "produce_xq",
       "count",
-      "queue",
+      "cmp_xq_cnt",
+      "a"
+    ],
+    [
+      "c_zero",
+      "value",
+      "cmp_xq_cnt",
+      "b"
+    ],
+    [
+      "sw_xq",
+      "value",
+      "and_xq1",
+      "a"
+    ],
+    [
+      "cmp_gold",
+      "result",
+      "and_xq1",
+      "b"
+    ],
+    [
+      "and_xq1",
+      "result",
+      "and_xq2",
+      "a"
+    ],
+    [
+      "cmp_xq_cnt",
+      "result",
+      "and_xq2",
+      "b"
+    ],
+    [
+      "and_xq2",
+      "result",
+      "if_xq",
+      "cond"
+    ],
+    [
+      "produce_xq",
+      "count",
+      "queue_xq",
+      "count"
+    ],
+    [
+      "produce_v",
+      "count",
+      "cmp_v_cnt",
+      "a"
+    ],
+    [
+      "c_zero",
+      "value",
+      "cmp_v_cnt",
+      "b"
+    ],
+    [
+      "sw_v",
+      "value",
+      "and_v",
+      "a"
+    ],
+    [
+      "cmp_v_cnt",
+      "result",
+      "and_v",
+      "b"
+    ],
+    [
+      "and_v",
+      "result",
+      "if_v",
+      "cond"
+    ],
+    [
+      "produce_v",
+      "count",
+      "queue_v",
       "count"
     ]
   ]
