@@ -141,6 +141,18 @@ const ED = (function () {
       finally { for (const s of saved) s[0].value = s[1]; }
     };
 
+    // 多选后整体拖动：点击"已在多选中的节点"且无修饰键时，保留整个多选（默认会清空只留这个，导致只拖动一个）
+    const _origProcNodeSel = LGraphCanvas.prototype.processNodeSelected;
+    LGraphCanvas.prototype.processNodeSelected = function (node, e) {
+      if (node && this.selected_nodes && this.selected_nodes[node.id] &&
+          Object.keys(this.selected_nodes).length > 1 &&
+          !(e && (e.shiftKey || e.ctrlKey || e.metaKey))) {
+        if (this.onNodeSelected) this.onNodeSelected(node);
+        return;   // 保留多选，使后续拖动移动全部选中节点
+      }
+      return _origProcNodeSel.call(this, node, e);
+    };
+
     // 右键菜单过高时内部滚动（而不是整体上下移动）
     if (!document.getElementById("aoe4-style")) {
       const st = document.createElement("style");
