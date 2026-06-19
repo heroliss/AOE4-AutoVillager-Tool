@@ -179,9 +179,9 @@ class Api:
         return None
 
     def autolayout(self, payload):
-        from ..layout import layered_layout
+        from ..layout import mainline_layout
         g = payload_to_graph(payload)
-        layered_layout(g)
+        mainline_layout(g)
         self._graph = g
         return graph_to_payload(g)
 

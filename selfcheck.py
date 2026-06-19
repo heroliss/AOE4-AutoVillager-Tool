@@ -132,11 +132,11 @@ def main() -> None:
     ok &= check("不出乡骑(W键)", not any("按键 w" in m for m in logs))
     ok &= check("回退出村民(Q键) x3 = min(3,150,300//50=6)", any("按键 q x3" in m for m in logs))
 
-    print("== 自动排版：无重叠 + 折叠紧凑 ==")
-    from flow.layout import layered_layout, no_overlaps, estimate_size
+    print("== 自动排版：主线+分支、无重叠、均衡 ==")
+    from flow.layout import mainline_layout, no_overlaps, estimate_size
     for name, build in (("出农", build_villager_graph), ("出商队", build_trade_cart_graph), ("金朝", build_jin_graph)):
         gg = build()
-        layered_layout(gg)
+        mainline_layout(gg)
         bad = no_overlaps(gg)
         xs = [gg.positions[n][0] for n in gg.nodes]
         ys = [gg.positions[n][1] for n in gg.nodes]
@@ -155,13 +155,13 @@ def main() -> None:
     ok &= check(f"节点数 {len(g.nodes)} / 执行连线 {len(g.exec_edges)} / 数据连线 {len(g.data_edges)}", True)
 
     # 落盘三个默认流程（含自动排版坐标），供编辑器/headless 使用
-    from flow.layout import layered_layout
+    from flow.layout import mainline_layout
     os.makedirs("flows", exist_ok=True)
     for fname, build in (("villager", build_villager_graph),
                          ("trade_cart", build_trade_cart_graph),
                          ("jin", build_jin_graph)):
         gg = build()
-        layered_layout(gg)
+        mainline_layout(gg)
         gg.save(f"flows/{fname}.flow.json")
         print(f"已写出 flows/{fname}.flow.json")
 
