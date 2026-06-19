@@ -112,6 +112,14 @@ def build_combined_graph() -> Graph:
     add("delay", "control.delay", {"seconds": 3.0})
     add("unlock", "control.lock_release")
 
+    # ==================== 控制面板：把最常用的开关/数值置顶，普通用户不进图也能调 ====================
+    g.panel = [
+        ["sw_vill", "on"], ["sw_xq", "on"], ["sw_cart", "on"],   # 三段总开关
+        ["c_per_v", "value"], ["c_per_x", "value"], ["c_per_cart", "value"],  # 每TC/市场各排几个
+        ["win", "hdr"],            # HDR 模式（影响窗口检测取色）
+        ["tick", "interval"],      # 循环间隔
+    ]
+
     # ==================== 节点说明（编辑器里展示，帮助看懂每个节点的作用）====================
     g.notes.update({
         "tick": "每帧触发：整个流程的循环入口，按「循环间隔」决定多久跑一轮。",

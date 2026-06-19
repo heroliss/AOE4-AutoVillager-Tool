@@ -13,6 +13,8 @@ const ED = (function () {
   let booted = false;
   // 当前流程的元信息：名称/说明/文件路径/是否内置只读（保存时内置会被改为另存）
   let flowMeta = { name: "", desc: "", path: null, readonly: false };
+  // 控制面板置顶项：有序的 [nodeId, paramKey]（随流程保存）。
+  let panelPins = [];
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
@@ -724,7 +726,8 @@ const ED = (function () {
         dst: b._id, dst_port: b.inputs[l.target_slot].name,
       });
     }
-    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", nodes, edges };
+    const panel = panelPins.filter(([nid]) => graph._nodes.some((n) => n._id === nid));
+    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, nodes, edges };
   }
 
   function setStatus(t) { document.getElementById("status").textContent = t; }
@@ -765,11 +768,13 @@ const ED = (function () {
       readonly: ("readonly" in flow) ? !!flow.readonly : flowMeta.readonly,
     };
     if (!keepHistory) { undoStack = []; redoStack = []; }   // 新流程：清空撤销历史（排版除外）
+    panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 2)) : [];
     const added = buildGraph(flow);
     const total = (flow.nodes || []).length;
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
     setStatus(`流程：${flowMeta.name} ｜ 节点 ${added}/${total}`);
     updateFlowMeta();
+    renderPanel();
     snapshotNow();   // 记录初始快照，作为撤销的基线
     if (clean) markSaved();                         // 刚载入＝与磁盘一致，清除“未保存”标记
     else { attachBaselineRefs(); refreshDirty(); }  // 排版后保留原基线，重新挂上控件引用
@@ -815,6 +820,78 @@ const ED = (function () {
     mk("内置流程（只读）", groups["flows"]);
     mk("我的流程", groups["user_flows"]);
     selectCurrentInList();
+  }
+
+  // ---- 控制面板（顶部，置顶常用参数；勾选在节点说明里）----
+  function nodeByOurId(id) { return (graph && graph._nodes || []).find((n) => n._id === id) || null; }
+  function isPinned(nid, key) { return panelPins.some((p) => p[0] === nid && p[1] === key); }
+  function togglePin(nid, key) {
+    const i = panelPins.findIndex((p) => p[0] === nid && p[1] === key);
+    if (i >= 0) panelPins.splice(i, 1); else panelPins.push([nid, key]);
+    renderPanel(); scheduleSnap(); refreshDirty();
+    if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
+  }
+  function panelLabel(node, key) {
+    const note = (node._note || "").trim();
+    if (note) return note.split(/[。\n]/)[0];        // 用描述首句作标签，最直观
+    const d = defByType[node._typeId];
+    const p = d && (d.params || []).find((q) => q.key === key);
+    return (node.title || "节点") + "·" + ((p && p.label) || key);
+  }
+  function setPanelValue(node, key, val) {
+    const w = (node.widgets || []).find((x) => x._key === key);
+    if (!w) return;
+    w.value = val;
+    if (node.properties) node.properties[key] = val;
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty();
+  }
+  function renderPanel() {
+    const el = document.getElementById("panel");
+    if (!el) return;
+    el.innerHTML = "";
+    const live = panelPins.filter((p) => nodeByOurId(p[0]));
+    if (!live.length) { el.style.display = "none"; return; }
+    el.style.display = "flex";
+    const title = document.createElement("span");
+    title.className = "ptitle"; title.textContent = "控制面板";
+    el.appendChild(title);
+    for (const [nid, key] of live) {
+      const node = nodeByOurId(nid);
+      const w = (node.widgets || []).find((x) => x._key === key);
+      if (!w) continue;
+      const item = document.createElement("span"); item.className = "pitem";
+      const lab = document.createElement("label");
+      lab.textContent = panelLabel(node, key); lab.title = node._note || panelLabel(node, key);
+      item.appendChild(lab);
+      let ctrl;
+      if (w.type === "toggle") {
+        ctrl = document.createElement("input"); ctrl.type = "checkbox"; ctrl.checked = !!w.value;
+        ctrl.onchange = () => setPanelValue(node, key, ctrl.checked);
+      } else if (w.type === "combo") {
+        ctrl = document.createElement("select");
+        for (const v of ((w.options && w.options.values) || [])) {
+          const o = document.createElement("option"); o.value = v; o.textContent = v;
+          if (String(v) === String(w.value)) o.selected = true;
+          ctrl.appendChild(o);
+        }
+        ctrl.onchange = () => setPanelValue(node, key, ctrl.value);
+      } else if (w.type === "number") {
+        ctrl = document.createElement("input"); ctrl.type = "number"; ctrl.value = w.value;
+        if (w.options && w.options.precision === 0) ctrl.step = "1";
+        ctrl.onchange = () => setPanelValue(node, key, Number(ctrl.value));
+      } else {
+        ctrl = document.createElement("input"); ctrl.type = "text";
+        ctrl.value = w.value == null ? "" : String(w.value);
+        ctrl.onchange = () => setPanelValue(node, key, ctrl.value);
+      }
+      item.appendChild(ctrl);
+      const x = document.createElement("span");
+      x.className = "punpin"; x.textContent = "✕"; x.title = "从面板移除";
+      x.onclick = () => togglePin(nid, key);
+      item.appendChild(x);
+      el.appendChild(item);
+    }
   }
 
   // 让下拉显示“当前打开的流程”：按路径精确匹配，匹配不到再按文件名，仍不到则置空(-1)。
@@ -950,7 +1027,18 @@ const ED = (function () {
       for (const p of ps)
         html += `<div style="margin-top:2px"><b style="color:#bcd">${esc(p.label)}</b>：${esc(p.help)}</div>`;
     }
+    // 显示到控制面板：勾选哪些参数置顶到顶部面板（给不进图的用户用）
+    const pinnable = (d.params || []);
+    if (pinnable.length) {
+      html += `<div style="${sub}">显示到控制面板（勾选置顶到顶部）</div>`;
+      for (const p of pinnable)
+        html += `<label style="display:block;cursor:pointer;color:#aeb6c2">` +
+                `<input type="checkbox" data-pin="${esc(p.key)}" ${isPinned(node._id, p.key) ? "checked" : ""}> ${esc(p.label)}</label>`;
+    }
     helpEl.innerHTML = html;
+    helpEl.querySelectorAll("[data-pin]").forEach((cb) => {
+      cb.onchange = () => togglePin(node._id, cb.getAttribute("data-pin"));
+    });
     // 已修改（未保存）的参数：列出 旧→新 并给“恢复”链接（每项 + 全部）
     const changed = (node.widgets || []).filter(paramChanged);
     if (changed.length) {
@@ -1044,7 +1132,9 @@ const ED = (function () {
       "· 单击参数输入框：直接编辑，<b>实时生效</b>（无需确认按钮）<br>" +
       "· 右键连线（线上任意处）：删除连线　· 双击节点标题：折叠/展开<br>" +
       "· Ctrl+Z 撤销　· Ctrl+Y 或 Ctrl+Shift+Z 重做<br>" +
-      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存</div>" +
+      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存<br>" +
+      "· 选中节点→右下角说明里勾选「显示到控制面板」，把常用开关/数值置顶到顶部面板，" +
+      "普通使用时不必进节点图也能调（✕ 可从面板移除）</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>在游戏画面上直接采集</b>（节点里相应参数下方的按钮）<br>" +
       "· <b>框选区域…</b>：按住左键拖出矩形，Enter 确认（区域参数）<br>" +
@@ -1067,19 +1157,23 @@ const ED = (function () {
     refreshDirty();
     // 选中的节点参数有改动时，同步刷新右下角“已修改”列表（橙点本就实时随重绘更新）
     if (selectedNode && helpEl && helpEl.style.display !== "none") showNodeHelp(selectedNode);
+    renderPanel();   // 面板控件值与节点保持同步
   }
   function scheduleSnap() { clearTimeout(snapTimer); snapTimer = setTimeout(snapshotNow, 250); }
   function applySnapshot(s) {
     suppressSnap = true;
+    const data = JSON.parse(s);
     const cam = [canvas.ds.scale, canvas.ds.offset[0], canvas.ds.offset[1]];  // 保持视角不变
     // 折叠状态不进撤销：重建后沿用当前折叠状态，避免撤销把折叠的节点又展开
     const collapsed = new Set();
     for (const n of graph._nodes) if (n.flags && n.flags.collapsed) collapsed.add(n._id);
-    buildGraph(JSON.parse(s));
+    buildGraph(data);
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
+    panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 2)) : [];   // 置顶项随撤销/重做恢复
     attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
     canvas.setDirty(true, true);
+    renderPanel();
     suppressSnap = false;
   }
   function undo() {
@@ -1160,7 +1254,11 @@ const ED = (function () {
       graph.onConnectionChange = scheduleSnap;
       graph.onNodeAdded = scheduleSnap;
       // 删除节点：除快照外，隐藏右下角说明面板（否则被删节点的说明会残留）
-      graph.onNodeRemoved = () => { scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none"; };
+      graph.onNodeRemoved = () => {
+        panelPins = panelPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));   // 删节点连带移除其面板项
+        renderPanel();
+        scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none";
+      };
       canvas.onNodeMoved = scheduleSnap;
       // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
       canvas.canvas.addEventListener("pointerdown", onRightDown, true);

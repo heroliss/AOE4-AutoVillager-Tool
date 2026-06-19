@@ -154,7 +154,8 @@ def graph_to_payload(graph: Graph) -> dict:
               "kind": "exec"} for e in graph.exec_edges]
     edges += [{"src": e.src_id, "src_port": e.src_port, "dst": e.dst_id, "dst_port": e.dst_port,
                "kind": "data"} for e in graph.data_edges]
-    return {"name": graph.name, "description": graph.description, "nodes": nodes, "edges": edges}
+    return {"name": graph.name, "description": graph.description,
+            "panel": [list(x) for x in graph.panel], "nodes": nodes, "edges": edges}
 
 
 def payload_to_graph(payload: dict) -> Graph:
@@ -173,6 +174,8 @@ def payload_to_graph(payload: dict) -> Graph:
         g.add(nd["id"], node, (pos[0], pos[1]))
         if nd.get("note"):
             g.notes[nd["id"]] = nd["note"]
+    # 面板置顶项：仅保留指向现存节点的 [node_id, key]
+    g.panel = [list(p) for p in payload.get("panel", []) if len(p) >= 2 and p[0] in g.nodes]
     kinds = _port_kind_map()
     for e in payload.get("edges", []):
         src_type = next((n["type"] for n in payload["nodes"] if n["id"] == e["src"]), None)

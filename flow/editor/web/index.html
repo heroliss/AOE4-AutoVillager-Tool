@@ -7,6 +7,7 @@
 <style>
   html, body { margin: 0; height: 100%; background: #1c1f26; color: #cfd3da;
                font-family: "Microsoft YaHei", "SimHei", sans-serif; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
   #toolbar { height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 10px;
              background: #23272f; border-bottom: 1px solid #333; overflow: hidden; }
   /* 按钮/下拉：固定大小，窗口变窄也不压缩、不换行 */
@@ -26,8 +27,23 @@
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #flowmeta .ro { color: #e6a23c; }
   #toolbar optgroup { color: #8b909a; font-style: normal; }
-  #wrap { position: absolute; top: 38px; left: 0; right: 0; bottom: 0; }
+  #wrap { flex: 1 1 auto; position: relative; min-height: 0; }
   canvas { display: block; }
+  /* 控制面板：置顶常用开关/数值，普通用户不进节点图也能调（在节点说明里勾选要显示的参数）。 */
+  #panel { flex: none; display: none; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+           padding: 6px 12px; background: #1f232b; border-bottom: 1px solid #2c313a;
+           max-height: 28vh; overflow-y: auto; }
+  #panel .ptitle { color: #8b909a; font-size: 12px; font-weight: bold; }
+  #panel .pitem { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #cfd3da; }
+  #panel .pitem label { color: #aeb6c2; max-width: 220px; overflow: hidden;
+                        text-overflow: ellipsis; white-space: nowrap; }
+  #panel input[type=number], #panel input[type=text], #panel select {
+           background: #15171c; color: #cfd3da; border: 1px solid #444; border-radius: 4px;
+           height: 22px; font-size: 12px; }
+  #panel input[type=number] { width: 60px; }
+  #panel select { max-width: 160px; }
+  #panel .punpin { cursor: pointer; color: #7f8895; }
+  #panel .punpin:hover { color: #e88; }
 </style>
 </head>
 <body>
@@ -48,6 +64,7 @@
     <span class="spacer"></span>
     <span id="status">提示：右键空白处添加节点 · 滚轮缩放 · 拖动平移 · 详见“帮助”</span>
   </div>
+  <div id="panel"></div>
   <div id="wrap"><canvas id="graph"></canvas></div>
 
   <script src="vendor/litegraph.js"></script>

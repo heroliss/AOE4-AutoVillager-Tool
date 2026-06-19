@@ -43,6 +43,8 @@ class Graph:
     def __init__(self, name: str = "", description: str = "") -> None:
         self.name = name
         self.description = description    # 流程整体说明（仅展示，不参与执行）
+        # 置顶到“控制面板”的参数：有序的 [node_id, param_key] 列表（仅编辑器面板用，不参与执行）。
+        self.panel: list = []
         self.nodes: dict[str, Node] = {}
         self.positions: dict[str, tuple[float, float]] = {}
         self.exec_edges: list[Edge] = []
@@ -94,8 +96,9 @@ class Graph:
         return {
             "version": SCHEMA_VERSION,
             "name": self.name,
-            # 仅在有说明时写出，避免改动既有流程文件/破坏往返一致性
+            # 仅在有内容时写出，避免改动既有流程文件/破坏往返一致性
             **({"description": self.description} if self.description else {}),
+            **({"panel": [list(x) for x in self.panel]} if self.panel else {}),
             "nodes": [
                 {
                     "id": node_id,
@@ -114,6 +117,7 @@ class Graph:
     @classmethod
     def from_dict(cls, data: dict) -> "Graph":
         g = cls(name=data.get("name", ""), description=data.get("description", ""))
+        g.panel = [list(x) for x in data.get("panel", [])]
         for nd in data.get("nodes", []):
             node = create_node(nd["type"])
             # 仅写入已声明的参数，忽略多余键，缺失键保留默认
