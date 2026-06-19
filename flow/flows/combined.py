@@ -115,12 +115,41 @@ def build_combined_graph() -> Graph:
     add("delay", "control.delay", {"seconds": 3.0})
     add("unlock", "control.lock_release")
 
-    # ==================== 控制面板：把最常用的开关/数值置顶，普通用户不进图也能调 ====================
+    # ==================== 控制面板：把最常用的开关/数值置顶（并起好名字），普通用户不进图也能调 ====================
+    # 每项 [节点id, 参数键, 面板显示名]。
     g.panel = [
-        ["sw_vill", "on"], ["sw_xq", "on"], ["sw_cart", "on"],   # 三段总开关
-        ["c_per_v", "value"], ["c_per_x", "value"], ["c_per_cart", "value"],  # 每TC/市场各排几个
-        ["win", "hdr"],            # HDR 模式（影响窗口检测取色）
-        ["tick", "interval"],      # 循环间隔
+        ["sw_vill", "on", "出村民"],
+        ["sw_xq", "on", "出乡骑(金朝)"],
+        ["sw_cart", "on", "出商队(市场)"],
+        ["c_per_v", "value", "每个TC出村民数"],
+        ["c_per_x", "value", "每个TC出乡骑数"],
+        ["c_per_cart", "value", "每个市场出商队数"],
+        ["win", "hdr", "HDR模式"],
+        ["tick", "interval", "循环间隔(秒)"],
+        ["delay", "seconds", "每轮等待(秒)"],
+        ["queue_v", "key", "村民生产键"],
+        ["queue_x", "key", "乡骑生产键"],
+        ["queue_cart", "key", "商队生产键"],
+        ["sel_market", "key", "选中市场键"],
+    ]
+
+    # ==================== 可视化分组：把三段(+共享/收尾)框起来，一眼看清结构 ====================
+    g.groups = [
+        {"title": "共享前段（每帧一次）", "color": "#4a8a8a",
+         "members": ["tick", "mod", "if_mod", "win", "if_win", "occ", "if_blocked", "if_trans",
+                     "prefetch", "pop", "slots", "food", "gold", "tc", "c_one",
+                     "lock", "block_begin", "save_sel", "relmod1"]},
+        {"title": "村民段", "color": "#3a6ea5",
+         "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v",
+                     "c_per_v", "plan_v", "prod_v", "queue_v", "esc_v"]},
+        {"title": "乡骑段（金朝）", "color": "#8a5a9a",
+         "members": ["sw_xq", "if_sw_xq", "q_xq", "if_qxq", "sel_tc_x",
+                     "c_per_x", "plan_x", "prod_x", "queue_x", "esc_x"]},
+        {"title": "商队段（市场）", "color": "#a5793a",
+         "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market",
+                     "c_per_cart", "plan_cart", "prod_cart", "queue_cart", "esc_cart"]},
+        {"title": "收尾（整批一次）", "color": "#5a9367",
+         "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
     ]
 
     # ==================== 节点说明（编辑器里展示，帮助看懂每个节点的作用）====================

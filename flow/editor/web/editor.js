@@ -15,6 +15,9 @@ const ED = (function () {
   let flowMeta = { name: "", desc: "", path: null, readonly: false };
   // 控制面板置顶项：有序的 [nodeId, paramKey]（随流程保存）。
   let panelPins = [];
+  // 可视化分组：[{title, color, members:[ourNodeId...]}]，框随成员节点自动包裹（仅展示，随流程保存）。
+  let groupDefs = [];
+  const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
@@ -89,9 +92,18 @@ const ED = (function () {
       });
       return false;
     };
-    // 画布空白右键：只留"添加节点"（去掉 Add Group / Align / 子图等）
+    // 画布空白右键：添加节点 + 分组管理（去掉 Add Group / Align / 子图等原生项）
     LGraphCanvas.prototype.getCanvasMenuOptions = function () {
-      return [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
+      const sel = Object.values(this.selected_nodes || {});
+      const opts = [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
+      opts.push({
+        content: "▦ 把选中节点编为一组…（" + sel.length + "）",
+        disabled: sel.length === 0,
+        callback: () => createGroupFromSelection(sel),
+      });
+      if (groupDefs.length)
+        opts.push({ content: "管理分组…", callback: () => manageGroups() });
+      return opts;
     };
     // 节点右键：精简到 克隆 / 删除 + 节点自定义项（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/
     // Collapse/Pin/Colors/Shapes 等堆叠项）。务必调用 node.getExtraMenuOptions，否则“添加/编辑描述”不出现。
@@ -422,6 +434,134 @@ const ED = (function () {
     return out;
   }
   function baseName(p) { return String(p).split(/[\\/]/).pop(); }
+
+  // 节点下方“附属卡片”（描述+缩略图）的高度，与 nodeDrawForeground 的画法一致；用于分组框包住卡片。
+  function cardHeightOf(node, ctx) {
+    const note = node._note || "";
+    const paths = nodePreviewPaths(node);
+    if (!note && !paths.length) return 0;
+    const inner = Math.max(1, node.size[0] - 2 * CARD.PAD);
+    ctx.font = "12px 'Microsoft YaHei',sans-serif";
+    const noteLines = note ? wrapText(ctx, "📝 " + note, inner).length : 0;
+    const shown = Math.min(paths.length, CARD.CAP);
+    const perRow = Math.max(1, Math.floor(inner / (CARD.TH + CARD.GAP)));
+    const rows = paths.length ? Math.ceil(shown / perRow) : 0;
+    const extra = paths.length > shown ? CARD.NOTE_LH : 0;
+    let bodyH = noteLines * CARD.NOTE_LH + rows * (CARD.TH + CARD.GAP) + extra;
+    if (noteLines && rows) bodyH += CARD.DIV;
+    return CARD.CGAP + CARD.PAD * 2 + bodyH;
+  }
+
+  // 画“分组框”（在节点后面，随成员节点自动包裹）。onDrawBackground 在画布变换内调用，用图坐标。
+  const GROUP_PAD = 16, GROUP_TOP = 28;   // 四周留白 / 顶部给标题留的高度
+  function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
+  function groupBox(g, ctx) {
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
+    for (const mid of (g.members || [])) {
+      const n = nodeByOurId(mid);
+      if (!n) continue;
+      any = true;
+      const top = n.pos[1] - (LiteGraph.NODE_TITLE_HEIGHT || 30);
+      const bottom = n.pos[1] + n.size[1] + ((n.flags && n.flags.collapsed) ? 0 : cardHeightOf(n, ctx));
+      x0 = Math.min(x0, n.pos[0]); y0 = Math.min(y0, top);
+      x1 = Math.max(x1, n.pos[0] + n.size[0]); y1 = Math.max(y1, bottom);
+    }
+    if (!any) return null;
+    return [x0 - GROUP_PAD, y0 - GROUP_TOP, (x1 - x0) + 2 * GROUP_PAD, (y1 - y0) + GROUP_TOP + GROUP_PAD];
+  }
+  function drawGroups(ctx) {
+    if (!groupDefs.length) return;
+    ctx.save();
+    groupDefs.forEach((g, i) => {
+      const box = groupBox(g, ctx);
+      if (!box) return;
+      const [x, y, w, h] = box, col = groupColor(g, i);
+      roundRect(ctx, x, y, w, h, 10);
+      ctx.fillStyle = col + "22"; ctx.fill();          // 半透明填充
+      ctx.strokeStyle = col + "cc"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = col; ctx.font = "bold 14px 'Microsoft YaHei',sans-serif";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText("▦ " + (g.title || "分组"), x + 10, y + 19);
+    });
+    ctx.restore();
+  }
+
+  // 通用的小输入对话框（返回 Promise<string|null>，取消为 null）。
+  function askText(title, value) {
+    return new Promise((resolve) => {
+      document.getElementById("askdlg")?.remove();
+      const box = document.createElement("div");
+      box.id = "askdlg";
+      box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(360px,90vw);" +
+        "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:150;" +
+        "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+      box.innerHTML = `<b style='color:#e6c07b'>${esc(title)}</b>` +
+        `<input id='ask_in' style='width:100%;margin-top:8px;background:#15171c;color:#cfd3da;border:1px solid #444;` +
+        `border-radius:4px;padding:6px;box-sizing:border-box;font:13px "Microsoft YaHei",sans-serif'/>` +
+        "<div style='margin-top:10px;text-align:right'>" +
+        "<button id='ask_ok' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>确定</button> " +
+        "<button id='ask_cancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>取消</button></div>";
+      document.body.appendChild(box);
+      const inp = box.querySelector("#ask_in");
+      inp.value = value == null ? "" : value; inp.focus(); inp.select();
+      const done = (v) => { box.remove(); resolve(v); };
+      inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") done(inp.value); else if (e.key === "Escape") done(null); };
+      box.querySelector("#ask_ok").onclick = () => done(inp.value);
+      box.querySelector("#ask_cancel").onclick = () => done(null);
+    });
+  }
+
+  async function createGroupFromSelection(nodes) {
+    const name = await askText("新建分组（把选中的节点框成一组）", "分组" + (groupDefs.length + 1));
+    if (name == null) return;
+    groupDefs.push({ title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length],
+                     members: nodes.map((n) => n._id) });
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty();
+    setStatus("已新建分组：" + (name.trim() || "分组"));
+  }
+
+  // 管理分组：改名 / 改色 / 解散（解散只去掉框，不删节点）。改动实时生效。
+  function manageGroups() {
+    document.getElementById("grpdlg")?.remove();
+    const box = document.createElement("div");
+    box.id = "grpdlg";
+    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(440px,92vw);" +
+      "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
+      "padding:14px 16px;z-index:150;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+    document.body.appendChild(box);
+    const render = () => {
+      let h = "<b style='color:#e6c07b'>管理分组</b>（解散只去掉框，不删节点）";
+      if (!groupDefs.length) h += "<div style='color:#7f8895;margin-top:8px'>暂无分组。框选若干节点后右键“把选中节点编为一组”。</div>";
+      groupDefs.forEach((g, i) => {
+        const col = groupColor(g, i);
+        h += `<div data-i="${i}" style="display:flex;align-items:center;gap:6px;margin-top:8px">` +
+             `<span style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
+             `<input data-act="title" value="${esc(g.title || "")}" style="flex:1;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;padding:3px 6px;font:13px 'Microsoft YaHei',sans-serif">` +
+             `<span style="color:#7f8895">${(g.members || []).length}个</span>` +
+             `<button data-act="color" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:2px 8px;cursor:pointer">换色</button>` +
+             `<button data-act="del" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:2px 8px;cursor:pointer">解散</button></div>`;
+      });
+      h += "<div style='margin-top:12px;text-align:right'><button id='grp_close' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>关闭</button></div>";
+      box.innerHTML = h;
+      box.querySelectorAll("[data-i]").forEach((row) => {
+        const i = +row.getAttribute("data-i");
+        row.querySelector("[data-act='title']").onkeydown = (e) => e.stopPropagation();
+        row.querySelector("[data-act='title']").onchange = (e) => {
+          groupDefs[i].title = e.target.value.trim() || "分组"; apply();
+        };
+        row.querySelector("[data-act='color']").onclick = () => {
+          const cur = GROUP_COLORS.indexOf(groupDefs[i].color);
+          groupDefs[i].color = GROUP_COLORS[(cur + 1) % GROUP_COLORS.length]; apply(); render();
+        };
+        row.querySelector("[data-act='del']").onclick = () => { groupDefs.splice(i, 1); apply(); render(); };
+      });
+      box.querySelector("#grp_close").onclick = () => box.remove();
+    };
+    const apply = () => { if (canvas) canvas.setDirty(true, true); scheduleSnap(); refreshDirty(); };
+    render();
+  }
+
   // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板缩略图网格）。
   function nodeDrawForeground(ctx) {
     if (this.flags && this.flags.collapsed) return;
@@ -603,6 +743,7 @@ const ED = (function () {
 
   // ---- 未保存修改标记（全局 ●未保存 + 每个参数的橙点/恢复）----
   let savedSig = null;           // 全局：上次保存/载入时 collect() 的签名
+  let savedBaseline = null;      // 上次保存/载入时的规范化流程对象（解析自 savedSig），用于"修改内容"对比
   let savedParams = {};          // 每参数基线：nodeId -> { key: 基线值 }
   // 规范化签名：按 id/连线排序后再 JSON，使"点选节点导致的 z 序变化"(LiteGraph bringToFront 会重排
   // graph._nodes)不被误判为"未保存"。只有真正的参数/连线/位置/名称改动才算改动。
@@ -615,7 +756,9 @@ const ED = (function () {
         const kb = b.src + "|" + b.src_port + "|" + b.dst + "|" + b.dst_port;
         return ka < kb ? -1 : ka > kb ? 1 : 0;
       });
-      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, nodes, edges });
+      const groups = (c.groups || []).map((g) => ({ title: g.title, color: g.color, members: g.members.slice().sort() }))
+        .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
+      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, nodes, edges });
     } catch (e) { return null; }
   }
   function markSaved() {         // 保存/载入后：把“当前”设为基线，清除所有标记
@@ -625,6 +768,7 @@ const ED = (function () {
       savedParams[n._id] = m;
     }
     savedSig = curSig();
+    try { savedBaseline = savedSig ? JSON.parse(savedSig) : null; } catch (e) { savedBaseline = null; }
     attachBaselineRefs();
     showDirty(false);
   }
@@ -636,10 +780,85 @@ const ED = (function () {
   }
   function paramChanged(w) { return !!(w && w._key && w._saved !== undefined && String(w.value) !== String(w._saved)); }
   function refreshDirty() { showDirty(savedSig !== null && curSig() !== savedSig); }
+  let _lastDirty = null;
   function showDirty(d) {
     const el = document.getElementById("dirty");
     if (el) el.textContent = d ? "●未保存" : "";
     try { document.title = (d ? "*" : "") + "AOE4 Flow Editor"; } catch (e) {}
+    // 把“是否有未保存修改”同步给 Python，供关闭窗口时弹确认（仅在状态变化时调，省得频繁过桥）
+    if (d !== _lastDirty) {
+      _lastDirty = d;
+      try { api().set_dirty(!!d); } catch (e) {}
+    }
+  }
+  function isDirty() { return savedSig !== null && curSig() !== savedSig; }
+
+  // 列出“与上次保存相比改了什么”（给切换/退出时的确认框显示）。
+  function paramLabelByType(type, key) {
+    const d = defByType[type];
+    const p = d && (d.params || []).find((q) => q.key === key);
+    return (p && p.label) || key;
+  }
+  function summarizeChanges() {
+    if (!savedBaseline) return [];
+    const cur = collect(), out = [];
+    const titleOf = (n) => (defByType[n.type] && defByType[n.type].title) || n.type;
+    if (cur.name !== savedBaseline.name) out.push(`流程名称：${savedBaseline.name} → ${cur.name}`);
+    if ((cur.description || "") !== (savedBaseline.description || "")) out.push("流程说明已修改");
+    const baseN = {}; for (const n of savedBaseline.nodes) baseN[n.id] = n;
+    const curN = {}; for (const n of cur.nodes) curN[n.id] = n;
+    for (const n of cur.nodes) if (!baseN[n.id]) out.push(`＋ 新增节点：${titleOf(n)}`);
+    for (const n of savedBaseline.nodes) if (!curN[n.id]) out.push(`－ 删除节点：${titleOf(n)}`);
+    let moved = 0;
+    for (const n of cur.nodes) {
+      const b = baseN[n.id]; if (!b) continue;
+      for (const k in (n.params || {}))
+        if (String(n.params[k]) !== String((b.params || {})[k]))
+          out.push(`◇ ${titleOf(n)}·${paramLabelByType(n.type, k)}：${(b.params || {})[k]} → ${n.params[k]}`);
+      if ((n.note || "") !== (b.note || "")) out.push(`◇ ${titleOf(n)}：描述已修改`);
+      const bp = b.pos || [0, 0], np = n.pos || [0, 0];
+      if (Math.round(bp[0]) !== Math.round(np[0]) || Math.round(bp[1]) !== Math.round(np[1])) moved++;
+    }
+    if (moved) out.push(`◇ ${moved} 个节点位置移动`);
+    const ek = (e) => e.src + "|" + e.src_port + "|" + e.dst + "|" + e.dst_port;
+    const baseE = new Set(savedBaseline.edges.map(ek)), curE = new Set(cur.edges.map(ek));
+    const ea = cur.edges.filter((e) => !baseE.has(ek(e))).length;
+    const er = savedBaseline.edges.filter((e) => !curE.has(ek(e))).length;
+    if (ea) out.push(`＋ 新增连线 ${ea} 条`);
+    if (er) out.push(`－ 删除连线 ${er} 条`);
+    if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
+    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, m: (g.members || []).slice().sort() }))
+      .sort((a, b) => (a.t < b.t ? -1 : 1)));
+    if (gsig(cur.groups) !== gsig(savedBaseline.groups)) out.push("◇ 分组已修改");
+    return out;
+  }
+
+  // 有未保存修改时弹确认框（列出修改内容），返回 Promise<"save"|"discard"|"cancel">。
+  function confirmUnsaved(actionLabel) {
+    return new Promise((resolve) => {
+      if (!isDirty()) { resolve("discard"); return; }
+      document.getElementById("unsaveddlg")?.remove();
+      const changes = summarizeChanges();
+      const box = document.createElement("div");
+      box.id = "unsaveddlg";
+      box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(520px,94vw);" +
+        "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
+        "padding:14px 16px;z-index:200;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+      let h = `<b style='color:#e6c07b'>有未保存的修改</b><div style='color:#9aa3af;margin-top:4px'>${esc(actionLabel || "继续操作")}前要保存吗？</div>`;
+      h += "<div style='margin-top:8px;max-height:40vh;overflow:auto;background:#1b1f27;border:1px solid #2c323c;border-radius:6px;padding:8px 10px;color:#bcd'>";
+      if (changes.length) h += changes.map((c) => `<div style="margin:2px 0;white-space:pre-wrap">${esc(c)}</div>`).join("");
+      else h += "<div style='color:#7f8895'>（有改动，但无法逐项列出）</div>";
+      h += "</div><div style='margin-top:12px;text-align:right'>" +
+        "<button id='us_save' style='background:#3a5a3a;color:#dfe;border:1px solid #5a6;border-radius:4px;padding:4px 14px;cursor:pointer'>保存并继续</button> " +
+        "<button id='us_discard' style='background:#2f343d;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:4px 14px;cursor:pointer'>不保存</button> " +
+        "<button id='us_cancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:4px 14px;cursor:pointer'>取消</button></div>";
+      box.innerHTML = h;
+      document.body.appendChild(box);
+      const done = (v) => { box.remove(); resolve(v); };
+      box.querySelector("#us_save").onclick = () => done("save");
+      box.querySelector("#us_discard").onclick = () => done("discard");
+      box.querySelector("#us_cancel").onclick = () => done("cancel");
+    });
   }
   function labelOf(node, key) {
     const d = defByType[node && node._typeId];
@@ -770,10 +989,22 @@ const ED = (function () {
       });
     }
     const panel = panelPins.filter(([nid]) => graph._nodes.some((n) => n._id === nid));
-    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, nodes, edges };
+    const ids = new Set(graph._nodes.map((n) => n._id));
+    const groups = groupDefs
+      .map((g) => ({ title: g.title, color: g.color, members: (g.members || []).filter((m) => ids.has(m)) }))
+      .filter((g) => g.members.length);
+    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, nodes, edges };
   }
 
-  function setStatus(t) { document.getElementById("status").textContent = t; }
+  // 操作提示走底部居中的临时浮层（toast），与工具栏的“文件信息”分开、互不覆盖；几秒后淡出。
+  let toastTimer = null;
+  function setStatus(t) {
+    const el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = t; el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
+  }
 
   // minScale：可读下限。适应窗口按钮用 0.15（真·全图）；载入用较大的下限（可读，
   // 大图放不下时锚定左上角=流程起点，用户再平移/缩放）。
@@ -812,6 +1043,9 @@ const ED = (function () {
     };
     if (!keepHistory) { undoStack = []; redoStack = []; }   // 新流程：清空撤销历史（排版除外）
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
+    groupDefs = Array.isArray(flow.groups)
+      ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
+      : [];
     const added = buildGraph(flow);
     const total = (flow.nodes || []).length;
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
@@ -999,6 +1233,19 @@ const ED = (function () {
     updateFlowMeta();
   }
 
+  // 打开/切换其它流程前：若有未保存修改先确认（保存并继续 / 不保存 / 取消）。
+  // 返回 true＝可以继续；false＝用户取消（调用方应中止）。
+  async function guardUnsaved(actionLabel) {
+    const choice = await confirmUnsaved(actionLabel);
+    if (choice === "cancel") return false;
+    if (choice === "save") {
+      const p = await api().save(collect());
+      if (!p) return false;            // 在系统保存框里取消了 -> 不继续
+      await afterSaved(p);
+    }
+    return true;                       // 已保存 或 选择不保存
+  }
+
   const self = {
     async save() {
       try {
@@ -1017,6 +1264,7 @@ const ED = (function () {
     editFlowInfo,
     async open() {
       try {
+        if (!(await guardUnsaved("打开其它流程"))) return;
         const flow = await api().open_dialog();
         if (flow) load(flow);
       } catch (err) { showError("打开失败：" + (err.stack || err)); }
@@ -1024,6 +1272,7 @@ const ED = (function () {
     async openBuiltin(path) {
       if (!path) return;
       try {
+        if (!(await guardUnsaved("切换流程"))) { selectCurrentInList(); return; }  // 取消则下拉选回当前
         const flow = await api().open_path(path);
         if (flow) load(flow);   // load -> updateFlowMeta -> 下拉自动选中该项
       } catch (err) { showError("打开流程失败：" + (err.stack || err)); selectCurrentInList(); }
@@ -1284,6 +1533,9 @@ const ED = (function () {
     buildGraph(data);
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
     panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 3)) : [];   // 置顶项(含自定义名)随撤销/重做恢复
+    groupDefs = Array.isArray(data.groups)
+      ? data.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
+      : [];   // 分组随撤销/重做恢复
     attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
     canvas.setDirty(true, true);
@@ -1363,6 +1615,7 @@ const ED = (function () {
       canvas.show_info = false;          // 隐藏左下角 T/I/N/V/FPS 调试信息（对普通用户无意义）
       canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
+      canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）
       setupHelpPanel();
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
       graph.onConnectionChange = scheduleSnap;
@@ -1370,6 +1623,9 @@ const ED = (function () {
       // 删除节点：除快照外，隐藏右下角说明面板（否则被删节点的说明会残留）
       graph.onNodeRemoved = () => {
         panelPins = panelPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));   // 删节点连带移除其面板项
+        const ids = new Set(graph._nodes.map((n) => n._id));
+        for (const g of groupDefs) g.members = (g.members || []).filter((m) => ids.has(m));
+        groupDefs = groupDefs.filter((g) => g.members.length);   // 空组自动消失
         renderPanel();
         scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none";
       };

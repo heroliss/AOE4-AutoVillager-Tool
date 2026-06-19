@@ -155,7 +155,9 @@ def graph_to_payload(graph: Graph) -> dict:
     edges += [{"src": e.src_id, "src_port": e.src_port, "dst": e.dst_id, "dst_port": e.dst_port,
                "kind": "data"} for e in graph.data_edges]
     return {"name": graph.name, "description": graph.description,
-            "panel": [list(x) for x in graph.panel], "nodes": nodes, "edges": edges}
+            "panel": [list(x) for x in graph.panel],
+            "groups": [dict(x) for x in graph.groups],
+            "nodes": nodes, "edges": edges}
 
 
 def payload_to_graph(payload: dict) -> Graph:
@@ -176,6 +178,12 @@ def payload_to_graph(payload: dict) -> Graph:
             g.notes[nd["id"]] = nd["note"]
     # 面板置顶项：仅保留指向现存节点的 [node_id, key]
     g.panel = [list(p) for p in payload.get("panel", []) if len(p) >= 2 and p[0] in g.nodes]
+    # 分组：成员只保留现存节点；丢弃空组
+    for gr in payload.get("groups", []):
+        members = [m for m in (gr.get("members") or []) if m in g.nodes]
+        if members:
+            g.groups.append({"title": gr.get("title", "分组"),
+                             "color": gr.get("color", ""), "members": members})
     kinds = _port_kind_map()
     for e in payload.get("edges", []):
         src_type = next((n["type"] for n in payload["nodes"] if n["id"] == e["src"]), None)
@@ -198,9 +206,15 @@ class Api:
         self._window = None
         self._graph: Optional[Graph] = None
         self._path: Optional[str] = None
+        self._dirty = False        # 前端镜像过来的“有未保存修改”，关闭窗口时据此弹确认
 
     def get_defs(self):
         return node_defs()
+
+    def set_dirty(self, flag):
+        """前端在 ●未保存 状态变化时调用，使关闭窗口能弹保存确认。"""
+        self._dirty = bool(flag)
+        return True
 
     def _payload(self, graph):
         """流程载荷 + 元信息（当前文件路径、是否内置只读），供前端显示文件来源与只读提示。"""
@@ -376,6 +390,20 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     index = os.path.join(WEB_DIR, "index.html")
     api._window = webview.create_window("AOE4 Flow Editor", url=index, js_api=api,
                                         width=1320, height=820)
+
+    # 关闭窗口时，若有未保存修改则弹原生确认（返回 False 取消关闭）。前端通过 set_dirty 同步脏标记。
+    def _confirm_close():
+        if not getattr(api, "_dirty", False):
+            return True
+        try:
+            return bool(api._window.create_confirmation_dialog(
+                "未保存的修改", "当前流程有未保存的修改，确定退出吗？\n（取消可返回编辑器再保存）"))
+        except Exception:
+            return True   # 对话框不可用就不阻拦关闭
+    try:
+        api._window.events.closing += _confirm_close
+    except Exception:
+        pass
     # 前端通过 js_api 轮询拉取启动数据（pywebview 注入 api 有延迟，前端会等到就绪再拉），
     # 不再用 evaluate_js 主动 push —— 那条路在 WebView2 上有跨线程 COM 报错且不稳定。
     debug = os.environ.get("AOE4_EDITOR_DEBUG") == "1"  # 置 1 可开 WebView2 开发者工具

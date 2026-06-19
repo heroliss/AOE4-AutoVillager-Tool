@@ -246,8 +246,8 @@ def layered_layout(graph, size_fn=None, node_gap: float = 30.0, band_gap: float 
             x += w + node_gap
 
 
-def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: float = 34.0,
-                    col_gap: float = 64.0, x0: float = 40.0, y0: float = 40.0) -> None:
+def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: float = 48.0,
+                    col_gap: float = 80.0, x0: float = 40.0, y0: float = 40.0) -> None:
     """主线+分支式排版：执行流(控制节点)排成一条【始终向右、不折行】的笔直主线；每个节点的
     数据来源放在它【更靠前的列、主线下方】，使数据连线一律从左向右、且不跨越白色主线地汇入；
     支线再按"接入消费者的连接点高度"对齐排列，尽量避免连线扭麻花。

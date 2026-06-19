@@ -19,13 +19,21 @@
   #toolbar select { max-width: 200px; }
   #toolbar .sep { flex: none; width: 1px; height: 20px; background: #3a404a; margin: 0 3px; }
   #toolbar .spacer { flex: 1 1 auto; min-width: 6px; }
-  /* 信息文字：空间不足时自身截断（加省略号），绝不挤压按钮 */
-  #status { color: #8b909a; font-size: 12px; flex: 0 1 auto; min-width: 0;
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 工具栏右侧只放“静态使用提示”，空间不足时自身截断（绝不挤压按钮/文件信息） */
+  #hint { color: #6c727c; font-size: 12px; flex: 0 1 auto; min-width: 0;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #dirty { color: #e6a23c; font-size: 12px; font-weight: bold; flex: none; }
-  #flowmeta { color: #cfd3da; font-size: 12px; flex: 0 1 auto; min-width: 0; max-width: 260px;
+  /* 文件信息（当前在编辑哪个流程）：固定在工具栏左侧，不被操作提示覆盖 */
+  #flowmeta { color: #cfd3da; font-size: 12px; flex: 0 1 auto; min-width: 0; max-width: 320px;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #flowmeta .ro { color: #e6a23c; }
+  /* 操作提示（已保存/已撤销/已排版…）：底部居中的临时浮层，几秒后淡出，不再和文件信息抢位置 */
+  #toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+           background: #2b3038ee; color: #e6e9ee; border: 1px solid #3a404a; border-radius: 6px;
+           padding: 6px 14px; font-size: 13px; box-shadow: 0 4px 16px #0007; z-index: 200;
+           opacity: 0; pointer-events: none; transition: opacity .25s; max-width: 80%;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #toast.show { opacity: 1; }
   #toolbar optgroup { color: #8b909a; font-style: normal; }
   #wrap { flex: 1 1 auto; position: relative; min-height: 0; }
   canvas { display: block; }
@@ -62,10 +70,11 @@
     <span id="flowmeta"></span>
     <span id="dirty"></span>
     <span class="spacer"></span>
-    <span id="status">提示：右键空白处添加节点 · 滚轮缩放 · 拖动平移 · 详见“帮助”</span>
+    <span id="hint">提示：右键空白处添加节点 · 滚轮缩放 · 拖动平移 · 详见“帮助”</span>
   </div>
   <div id="panel"></div>
   <div id="wrap"><canvas id="graph"></canvas></div>
+  <div id="toast"></div>
 
   <script src="vendor/litegraph.js"></script>
   <script src="editor.js"></script>
