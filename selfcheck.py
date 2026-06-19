@@ -82,6 +82,11 @@ def main() -> None:
     logs, _ = run_with_stubs(build_villager_graph, {**HAPPY, "occ": {"blocked": True, "in_transition": False, "clear": False, "confidence": 0.9, "state": "完全遮挡"}})
     ok &= check("遮挡时不排队", not any("按键 q" in m for m in logs))
 
+    print("== 跳过路径：队列图标半透明UI动画（transition_guard）==")
+    logs, _ = run_with_stubs(build_villager_graph,
+                             {**HAPPY, "vill": {"found": False, "in_transition": True, "which": -1}})
+    ok &= check("UI渐变中不排队", not any("按键 q" in m for m in logs))
+
     print("== 跳过路径：食物不足 ==")
     logs, _ = run_with_stubs(build_villager_graph, {**HAPPY, "food": {"value": 30, "value2": None, "ok": True}})
     ok &= check("食物不足不排队", not any("按键 q" in m for m in logs))

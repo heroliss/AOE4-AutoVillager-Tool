@@ -102,8 +102,18 @@
         "templates": [
           "templates/cunmin.png"
         ],
-        "threshold": 0.6
+        "threshold": 0.6,
+        "transition_guard": true
       }
+    },
+    {
+      "id": "or_trans",
+      "type": "logic.or",
+      "pos": [
+        0.0,
+        0.0
+      ],
+      "params": {}
     },
     {
       "id": "if_blocked",
@@ -764,6 +774,18 @@
     [
       "occ",
       "in_transition",
+      "or_trans",
+      "a"
+    ],
+    [
+      "vill",
+      "in_transition",
+      "or_trans",
+      "b"
+    ],
+    [
+      "or_trans",
+      "result",
       "if_trans",
       "cond"
     ],

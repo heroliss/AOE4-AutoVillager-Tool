@@ -94,7 +94,8 @@ class TemplateMatch(DataNode):
     outputs = [
         data_out("found", DataType.BOOL),
         data_out("confidence", DataType.NUMBER),
-        data_out("which", DataType.NUMBER),  # 命中的模板序号（0 起），用于多模板
+        data_out("which", DataType.NUMBER),          # 命中的模板序号（0 起），用于多模板
+        data_out("in_transition", DataType.BOOL),    # 半透明UI渐入渐出（需开启 transition_guard）
     ]
     params = [
         ParamSpec("region", "区域", "region", default=[0, 0, 100, 100],
@@ -103,7 +104,15 @@ class TemplateMatch(DataNode):
                   help="一个或多个模板路径；任一命中即 found=真，输出最高置信度"),
         ParamSpec("threshold", "匹配阈值", "float", default=0.6,
                   minimum=0.0, maximum=1.0, step=0.01),
+        ParamSpec("transition_guard", "半透明UI抑制", "bool", default=False,
+                  help="开启后用最近置信度变化模式识别UI渐入渐出，期间 in_transition=真、found=假，"
+                       "避免在UI动画时误判（移植自旧 villager_training_detector 的策略1/2/3）"),
     ]
+
+    def __init__(self):
+        super().__init__()
+        from collections import deque
+        self._recent = deque(maxlen=5)  # 最近置信度历史，用于半透明UI检测
 
     def evaluate(self, ctx, inputs):
         img = inputs.get("image")
@@ -117,8 +126,38 @@ class TemplateMatch(DataNode):
             if conf > best_conf:
                 best_conf, best_idx = conf, i
         found = best_conf >= self.values["threshold"]
-        self.live = {"confidence": best_conf, "found": found, "which": best_idx}
-        return {"found": found, "confidence": best_conf, "which": best_idx}
+
+        in_transition = False
+        if self.values["transition_guard"]:
+            in_transition = self._detect_transition(best_conf)
+            if in_transition:
+                found = False
+
+        self.live = {"confidence": best_conf, "found": found,
+                     "which": best_idx, "in_transition": in_transition}
+        return {"found": found, "confidence": best_conf,
+                "which": best_idx, "in_transition": in_transition}
+
+    def _detect_transition(self, conf: float) -> bool:
+        """三策略识别 UI 渐入渐出动画（移植自旧实现）。"""
+        self._recent.append(conf)
+        if len(self._recent) < 3:
+            return False
+        lo, hi = min(self._recent), max(self._recent)
+        rng = hi - lo
+        # 策略1：中等置信度 + 快速变化
+        if 0.3 <= conf < 0.65 and rng > 0.1:
+            return True
+        # 策略2：置信度从高位突然下降
+        if conf < 0.5 and hi > 0.6 and rng > 0.2:
+            return True
+        # 策略3：连续下降的尾声
+        if conf < 0.4:
+            last3 = list(self._recent)[-3:]
+            declining = all(last3[i + 1] <= last3[i] + 0.05 for i in range(len(last3) - 1))
+            if declining and (last3[0] - last3[-1]) > 0.1:
+                return True
+        return False
 
 
 # ==================== OCR 数字 ====================

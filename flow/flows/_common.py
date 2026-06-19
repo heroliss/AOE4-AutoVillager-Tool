@@ -62,7 +62,8 @@ def build_single_type(cfg: dict) -> Graph:
     add("occ", "game.occlusion", {"region": cfg["blocked_region"], "template": cfg["blocked_template"]})
     add("vill", "sense.template_match",
         {"region": cfg["queue_region"], "templates": cfg["occupancy_templates"],
-         "threshold": cfg["occupancy_threshold"]})
+         "threshold": cfg["occupancy_threshold"], "transition_guard": True})
+    add("or_trans", "logic.or")  # 遮挡渐变 或 队列图标半透明动画，任一即视为渐变中
     add("if_blocked", "control.if")
     add("end_blocked", "control.end")
     add("if_trans", "control.if")
@@ -159,7 +160,9 @@ def build_single_type(cfg: dict) -> Graph:
     # ==================== 数据流 ====================
     g.connect_data("win", "in_game", "if_win", "cond")
     g.connect_data("occ", "blocked", "if_blocked", "cond")
-    g.connect_data("occ", "in_transition", "if_trans", "cond")
+    g.connect_data("occ", "in_transition", "or_trans", "a")
+    g.connect_data("vill", "in_transition", "or_trans", "b")
+    g.connect_data("or_trans", "result", "if_trans", "cond")
     g.connect_data("vill", "found", "if_vill", "cond")
     g.connect_data("pop", "ok", "if_popok", "cond")
 

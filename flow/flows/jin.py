@@ -62,8 +62,9 @@ def build_jin_graph() -> Graph:
     # —— 队列占用：村民 或 乡骑（多模板任一命中）——
     add("occ", "game.occlusion", {"region": BLOCKED_REGION, "template": "templates/blocked.png"})
     add("vill", "sense.template_match",
-        {"region": QUEUE_REGION, "threshold": 0.6,
+        {"region": QUEUE_REGION, "threshold": 0.6, "transition_guard": True,
          "templates": ["templates/cunmin.png", "templates/xiangqi.png"]})
+    add("or_trans", "logic.or")
     add("if_blocked", "control.if")
     add("end_blocked", "control.end")
     add("if_trans", "control.if")
@@ -173,7 +174,9 @@ def build_jin_graph() -> Graph:
     # ==================== 数据流 ====================
     g.connect_data("win", "in_game", "if_win", "cond")
     g.connect_data("occ", "blocked", "if_blocked", "cond")
-    g.connect_data("occ", "in_transition", "if_trans", "cond")
+    g.connect_data("occ", "in_transition", "or_trans", "a")
+    g.connect_data("vill", "in_transition", "or_trans", "b")
+    g.connect_data("or_trans", "result", "if_trans", "cond")
     g.connect_data("vill", "found", "if_vill", "cond")
     g.connect_data("pop", "ok", "if_popok", "cond")
 
