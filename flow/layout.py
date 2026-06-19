@@ -151,14 +151,15 @@ def layered_layout(graph, size_fn=None, node_gap: float = 30.0, band_gap: float 
             x += w + node_gap
 
 
-def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: float = 26.0,
-                    col_gap: float = 56.0, row_gap: float = 80.0, x0: float = 40.0, y0: float = 40.0) -> None:
-    """主线+分支式排版：执行流(控制节点)排成一条主线（蛇形折行），每个节点的数据来源
-    节点作为"分支"竖直堆叠在其正上方。这样主线一眼可辨，数据连线大多朝同一方向短距汇入。
+def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: float = 34.0,
+                    col_gap: float = 64.0, x0: float = 40.0, y0: float = 40.0) -> None:
+    """主线+分支式排版：执行流(控制节点)排成一条【始终向右、不折行】的主线，每个节点的
+    数据来源放在它【左上方】（更靠前的列），使数据连线一律从左向右汇入；同一列里的支线
+    再按"接入下游的输入端口次序"自上而下排，尽量减少连线交叉。
 
-    - 列号：控制节点按执行流最长路径定列；数据节点归到其消费者所在列（堆在其上方）。
-    - 折行：列按目标宽度折成多行，奇数行反向（蛇形），使行间衔接短。
-    - 行内：控制节点对齐到该行底部（形成水平主线），数据分支自下而上按"距主线层数"堆叠。
+    - 主线列号：控制节点按执行流最长路径定列，单行从左到右铺开（宽就宽，但主线一眼可辨）。
+    - 支线列号：数据节点放在"消费者列 - 1"，链式来源逐级再向左 —— 来源在前、消费在后。
+    - 落位：主线块贴行底形成一条水平主线；数据支线自下而上堆在主线上方。
     """
     nodes = list(graph.nodes)
     if not nodes:
@@ -198,86 +199,89 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: flo
             if m in col and col[m] < col[n] + 1:
                 col[m] = col[n] + 1
 
-    # —— 数据节点：列=消费者列；depth=到主线的数据链层数（越大越靠上）——
-    cons = {n: [] for n in nodes}
-    for e in list(graph.data_edges) + list(graph.exec_edges):
-        if e.src_id in cons and e.dst_id in graph.nodes:
-            cons[e.src_id].append(e.dst_id)
-    cmemo, dmemo = {}, {}
+    # —— 数据节点：列 = 其(数据)消费者最左列 - 1（来源在前），链式逐级再左移 ——
+    dcons = {n: [] for n in nodes}      # 数据来源 -> 其数据消费者列表
+    for e in graph.data_edges:
+        if e.src_id in dcons and e.dst_id in graph.nodes:
+            dcons[e.src_id].append(e.dst_id)
+    cmemo = {}
 
     def dcol(n):
         if n in spine_set:
             return col[n]
         if n in cmemo:
             return cmemo[n]
-        cmemo[n] = 0
-        cs = cons.get(n, [])
-        cmemo[n] = min((dcol(c) for c in cs), default=0)
+        cmemo[n] = 0                    # 防御环：先占位
+        cs = dcons.get(n, [])
+        cmemo[n] = min((dcol(c) for c in cs), default=1) - 1
         return cmemo[n]
 
-    def ddepth(n):
-        if n in spine_set:
-            return 0
-        if n in dmemo:
-            return dmemo[n]
-        dmemo[n] = 1
-        cs = cons.get(n, [])
-        dmemo[n] = 1 + max((ddepth(c) for c in cs), default=0)
-        return dmemo[n]
-
-    ncols = (max(col.values()) if col else 0) + 1
-    columns = [[] for _ in range(ncols)]   # 每列：(节点, 是否主线, depth)
     for n in nodes:
-        c = col[n] if n in spine_set else dcol(n)
-        columns[c].append(n)
+        if n not in spine_set:
+            col[n] = dcol(n)
 
-    # 每列度量：宽=列内最宽；主线块高 + 数据块高
-    col_w = [0.0] * ncols
-    spineH = [0.0] * ncols
-    dataH = [0.0] * ncols
-    col_spine = [[] for _ in range(ncols)]
-    col_data = [[] for _ in range(ncols)]
-    for c in range(ncols):
-        for n in columns[c]:
-            col_w[c] = max(col_w[c], sz[n][0])
-            (col_spine if n in spine_set else col_data)[c].append(n)
-        col_data[c].sort(key=lambda n: -ddepth(n))   # 越深越靠上
-        col_spine[c].sort(key=lambda n: col[n])
-        if col_spine[c]:
-            spineH[c] = sum(sz[n][1] for n in col_spine[c]) + node_gap * (len(col_spine[c]) - 1)
-        if col_data[c]:
-            dataH[c] = sum(sz[n][1] for n in col_data[c]) + node_gap * (len(col_data[c]) - 1)
-    colH = [spineH[c] + (branch_gap if dataH[c] and spineH[c] else 0) + dataH[c] for c in range(ncols)]
+    # 归一化列号从 0 开始（数据链可能产生负列）
+    base = min(col.values())
+    for n in col:
+        col[n] -= base
 
-    # —— 折行：选每行列数使版面大致均衡 ——
-    avg_w = sum(col_w) / ncols + col_gap
-    max_h = max(colH) if colH else 1.0
-    cols_per_row = max(1, round((ncols * (max_h + row_gap) / max(1.0, avg_w)) ** 0.5))
-    rows = [list(range(i, min(i + cols_per_row, ncols))) for i in range(0, ncols, cols_per_row)]
+    # —— 同列支线排序键：按"接入最靠右消费者的输入端口序"，减少连线交叉 ——
+    def port_index(node_id, port_name):
+        for i, p in enumerate(graph.nodes[node_id].inputs):
+            if p.name == port_name:
+                return i
+        return 0
 
-    # —— 落位：主线对齐到各行底部；数据分支自下而上堆在其上方 ——
-    y = y0
-    for r, row_cols in enumerate(rows):
-        rowH = max((colH[c] for c in row_cols), default=0.0)
-        # 蛇形：奇数行反向放置（视觉上行间衔接更短）
-        placed = list(reversed(row_cols)) if (r % 2) else row_cols
-        x = x0
-        for c in placed:
-            spine_top = y + rowH - spineH[c]      # 主线块顶部（块底贴行底）
-            yy = spine_top
-            for n in col_spine[c]:
-                w, h = sz[n]
-                graph.positions[n] = (x + (col_w[c] - w) / 2.0, yy)
-                yy += h + node_gap
-            # 数据分支：堆在主线上方
-            yb = spine_top - branch_gap
-            for n in reversed(col_data[c]):       # 靠近主线的(depth小)在下
-                w, h = sz[n]
-                yb -= h
-                graph.positions[n] = (x + (col_w[c] - w) / 2.0, yb)
-                yb -= node_gap
-            x += col_w[c] + col_gap
-        y += rowH + row_gap
+    order_key = {}
+    for n in nodes:
+        if n in spine_set:
+            continue
+        best = None
+        for e in graph.data_edges:
+            if e.src_id == n and e.dst_id in col:
+                k = (col[e.dst_id], port_index(e.dst_id, e.dst_port))
+                if best is None or k > best:
+                    best = k
+        order_key[n] = best or (0, 0)
+
+    # —— 按列归并 + 度量 ——
+    by_col = {}
+    for n in nodes:
+        by_col.setdefault(col[n], []).append(n)
+    cols_sorted = sorted(by_col)
+
+    col_w, col_spine, col_data, colH = {}, {}, {}, {}
+    for c in cols_sorted:
+        ns = by_col[c]
+        col_w[c] = max(sz[n][0] for n in ns)
+        sp = sorted((n for n in ns if n in spine_set), key=lambda n: col[n])
+        da = sorted((n for n in ns if n not in spine_set), key=lambda n: order_key[n])
+        col_spine[c], col_data[c] = sp, da
+        spineH = sum(sz[n][1] for n in sp) + node_gap * (len(sp) - 1) if sp else 0.0
+        dataH = sum(sz[n][1] for n in da) + node_gap * (len(da) - 1) if da else 0.0
+        colH[c] = spineH + (branch_gap if (sp and da) else 0.0) + dataH
+
+    rowH = max(colH.values()) if colH else 0.0
+
+    # —— 落位：单行；主线贴行底成一条水平线，数据支线自上而下堆在其上方 ——
+    x = x0
+    for c in cols_sorted:
+        sp, da = col_spine[c], col_data[c]
+        spineH = sum(sz[n][1] for n in sp) + node_gap * (len(sp) - 1) if sp else 0.0
+        spine_top = y0 + rowH - spineH          # 主线块顶（块底贴行底）
+        yy = spine_top
+        for n in sp:
+            w, h = sz[n]
+            graph.positions[n] = (x + (col_w[c] - w) / 2.0, yy)
+            yy += h + node_gap
+        # 数据支线：从主线上方往上堆；端口序小者(接上方端口)放更上方，减少交叉
+        yb = spine_top - branch_gap
+        for n in reversed(da):
+            w, h = sz[n]
+            yb -= h
+            graph.positions[n] = (x + (col_w[c] - w) / 2.0, yb)
+            yb -= node_gap
+        x += col_w[c] + col_gap
 
 
 def needs_layout(graph) -> bool:

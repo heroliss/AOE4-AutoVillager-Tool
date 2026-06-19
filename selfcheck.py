@@ -132,7 +132,7 @@ def main() -> None:
     ok &= check("不出乡骑(W键)", not any("按键 w" in m for m in logs))
     ok &= check("回退出村民(Q键) x3 = min(3,150,300//50=6)", any("按键 q x3" in m for m in logs))
 
-    print("== 自动排版：主线+分支、无重叠、均衡 ==")
+    print("== 自动排版：主线横向铺开、支线左上汇入、无重叠 ==")
     from flow.layout import mainline_layout, no_overlaps, estimate_size
     for name, build in (("出农", build_villager_graph), ("出商队", build_trade_cart_graph), ("金朝", build_jin_graph)):
         gg = build()
@@ -143,9 +143,8 @@ def main() -> None:
         ws = [estimate_size(gg.nodes[n]) for n in gg.nodes]
         width = max(x + w for x, (w, h) in zip(xs, ws)) - min(xs)
         height = max(y + h for y, (w, h) in zip(ys, ws)) - min(ys)
-        aspect = max(width, height) / max(1.0, min(width, height))
         ok &= check(f"{name}: 无节点重叠", not bad)
-        ok &= check(f"{name}: 版面 {int(width)}x{int(height)} 长宽比 {aspect:.2f}（均衡、不再单向过长）", aspect < 2.2)
+        ok &= check(f"{name}: 主线横向铺开 版面 {int(width)}x{int(height)}（宽>高）", width > height)
 
     print("== JSON 序列化往返 ==")
     g = build_villager_graph()
