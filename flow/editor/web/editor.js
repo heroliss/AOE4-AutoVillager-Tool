@@ -491,6 +491,10 @@ const ED = (function () {
       "width:min(640px,92vw);max-height:80%;overflow:auto;background:#23272f;color:#cfd3da;" +
       "border:1px solid #3a404a;border-radius:8px;padding:14px 18px;z-index:100;" +
       "box-shadow:0 8px 30px #000a;font:13px/1.7 'Microsoft YaHei',sans-serif;";
+    // 一段线样色块 + 文字，用于颜色图例
+    const wire = (color, label) =>
+      `<span style="display:inline-block;width:24px;border-top:3px solid ${color};` +
+      `vertical-align:middle;margin:0 4px 0 10px"></span>${label}`;
     helpModal.innerHTML =
       "<div style='display:flex;align-items:center;margin-bottom:6px'>" +
       "<b style='font-size:15px;color:#e6e9ee;flex:1'>编辑器帮助</b>" +
@@ -502,6 +506,11 @@ const ED = (function () {
       "不同颜色＝不同类型（数值/是否/图像/区域…）。<br>" +
       "· <b>判断与分支</b>：检测/比较类节点只输出一个“是/否”（彩线）；把它接到「分支」的“条件”，" +
       "再从「真」「假」两个出口分别往后连——判断本身和“分岔”是分开的两件事。</div>" +
+      "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
+      "<b style='color:#e6c07b'>彩线颜色＝数据类型</b>（连什么类型就显什么色）<br>" +
+      wire("#7AB0EE", "数值") + wire("#E0A85A", "是否(布尔)") + wire("#9AD08A", "文本") +
+      wire("#C792DF", "图像") + wire("#69b0a0", "区域/坐标") + wire("#cf8a6a", "颜色") + "<br>" +
+      "<span style='color:#7f8895'>当前流程的数据多是数字与是/否，所以你主要看到蓝、黄两色；用到其它类型时会出现对应颜色。</span></div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>常用操作</b><br>" +
       "· 右键空白处：添加节点　· 滚轮：缩放　· 拖动空白：平移<br>" +

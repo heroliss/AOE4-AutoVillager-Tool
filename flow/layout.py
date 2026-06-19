@@ -154,13 +154,14 @@ def layered_layout(graph, size_fn=None, node_gap: float = 30.0, band_gap: float 
 def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: float = 34.0,
                     col_gap: float = 64.0, x0: float = 40.0, y0: float = 40.0) -> None:
     """主线+分支式排版：执行流(控制节点)排成一条【始终向右、不折行】的笔直主线；每个节点的
-    数据来源放在它【更靠前的列】，使数据连线一律从左向右汇入；支线再【平分到主线上下两侧】，
-    并按"接入消费者的连接点高度"对齐排列，尽量避免连线扭麻花。
+    数据来源放在它【更靠前的列、主线下方】，使数据连线一律从左向右、且不跨越白色主线地汇入；
+    支线再按"接入消费者的连接点高度"对齐排列，尽量避免连线扭麻花。
 
     - 主线列号：控制节点按执行流最长路径定列，单行从左到右铺开（宽就宽，但主线一眼可辨）。
     - 支线列号：数据节点放在"消费者列 - 1"，链式来源逐级再向左 —— 来源在前、消费在后。
     - 落位：先放主线（各列块顶对齐成一条水平线）；再从右往左放支线（保证消费者已就位），
-      按消费者输入连接点的高度排序、平分到主线上下两侧——接入点高者在上、低者在下，连线就近少交叉。
+      一律挂到主线下方、按消费者输入连接点高度排序——接入点高者贴近主线、低者更靠下。
+      （数据端口都在节点"进入"口之下，支线从下方汇入才不会与主线交叉。）
     """
     nodes = list(graph.nodes)
     if not nodes:
@@ -263,33 +264,21 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: flo
               if e.src_id == n and e.dst_id in graph.positions]
         return sum(ys) / len(ys) if ys else Y_SPINE
 
-    # —— 再放数据支线：从右往左逐列（保证消费者已就位），按消费者连接点高度排序，
-    #    并把支线平分到主线上下两侧——接入点高者在上、低者在下，连线就近、少交叉。——
-    odd_toggle = 0
+    # —— 再放数据支线：从右往左逐列（保证消费者已就位），一律挂在主线【下方】，按"接入消费者
+    #    连接点的高度"排序——接入点高者贴近主线、低者更靠下。全部在下方是为了不跨越白色主线：
+    #    数据输入端口都在节点的执行口(进入)之下，支线在下方汇入才不会与主线交叉、不扭麻花。——
     for c in reversed(cols_sorted):
         da = [n for n in by_col[c] if n not in spine_set]
         if not da:
             continue
         da.sort(key=anchor_y)
-        mid = len(da) // 2
-        if len(da) % 2 == 1:                  # 奇数个：让"多出来的一个"在上下之间轮换，整体更平衡
-            if odd_toggle % 2:
-                mid = len(da) - mid
-            odd_toggle += 1
-        upper, lower = da[:mid], da[mid:]     # 接入点偏高的一半在上，偏低的一半在下
-        yb = spine_top[c] - branch_gap        # 上方：贴近主线者接入点较低，最上者接入点最高
-        for n in reversed(upper):
-            w, h = sz[n]
-            yb -= h
-            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yb)
-            yb -= node_gap
-        yb = spine_bot[c] + branch_gap        # 下方：贴近主线者接入点较高，最下者接入点最低
-        for n in lower:
+        yb = spine_bot[c] + branch_gap
+        for n in da:
             w, h = sz[n]
             graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yb)
             yb += h + node_gap
 
-    # 主线上方支线会落到负 y，整体平移使最上沿对齐到 y0
+    # 整体平移，使最上沿（主线）对齐到 y0
     if graph.positions:
         dy = y0 - min(p[1] for p in graph.positions.values())
         for n in graph.positions:

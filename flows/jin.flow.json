@@ -7,7 +7,7 @@
       "type": "event.on_tick",
       "pos": [
         40.0,
-        618.0
+        40.0
       ],
       "params": {
         "interval": 0.1
@@ -18,7 +18,7 @@
       "type": "sense.modifier_down",
       "pos": [
         49.0,
-        758.0
+        180.0
       ],
       "params": {
         "keys": "shift,ctrl,alt"
@@ -29,7 +29,7 @@
       "type": "control.if",
       "pos": [
         494.5,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -38,7 +38,7 @@
       "type": "sense.window_check",
       "pos": [
         403.0,
-        274.0
+        222.0
       ],
       "params": {
         "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
@@ -69,7 +69,7 @@
       "type": "control.if",
       "pos": [
         887.5,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -78,7 +78,7 @@
       "type": "game.occlusion",
       "pos": [
         810.0,
-        178.0
+        222.0
       ],
       "params": {
         "region": [
@@ -100,7 +100,7 @@
       "type": "sense.template_match",
       "pos": [
         818.0,
-        800.0
+        654.0
       ],
       "params": {
         "region": [
@@ -122,7 +122,7 @@
       "type": "logic.or",
       "pos": [
         1189.0,
-        800.0
+        222.0
       ],
       "params": {}
     },
@@ -131,7 +131,7 @@
       "type": "control.if",
       "pos": [
         1189.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -140,7 +140,7 @@
       "type": "control.if",
       "pos": [
         1413.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -149,7 +149,7 @@
       "type": "control.if",
       "pos": [
         1697.5,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -158,7 +158,7 @@
       "type": "control.prefetch_full",
       "pos": [
         2025.5,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -167,7 +167,7 @@
       "type": "sense.ocr_number",
       "pos": [
         1637.0,
-        286.0
+        222.0
       ],
       "params": {
         "region": [
@@ -187,7 +187,7 @@
       "type": "sense.ocr_number",
       "pos": [
         3795.5,
-        932.0
+        924.0
       ],
       "params": {
         "region": [
@@ -207,7 +207,7 @@
       "type": "sense.ocr_number",
       "pos": [
         3437.0,
-        286.0
+        558.0
       ],
       "params": {
         "region": [
@@ -227,7 +227,7 @@
       "type": "control.if",
       "pos": [
         2336.5,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -236,7 +236,7 @@
       "type": "math.arith",
       "pos": [
         1982.0,
-        430.0
+        174.0
       ],
       "params": {
         "op": "-"
@@ -247,7 +247,7 @@
       "type": "data.const_number",
       "pos": [
         1990.5,
-        752.0
+        354.0
       ],
       "params": {
         "value": 0
@@ -258,7 +258,7 @@
       "type": "logic.compare",
       "pos": [
         2293.0,
-        800.0
+        222.0
       ],
       "params": {
         "op": ">"
@@ -269,7 +269,7 @@
       "type": "control.if",
       "pos": [
         2604.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -278,7 +278,7 @@
       "type": "control.lock_acquire",
       "pos": [
         2828.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -287,7 +287,7 @@
       "type": "control.input_block_begin",
       "pos": [
         3060.5,
-        618.0
+        40.0
       ],
       "params": {
         "max_duration": 3.0
@@ -298,7 +298,7 @@
       "type": "action.press_key",
       "pos": [
         3432.0,
-        618.0
+        40.0
       ],
       "params": {
         "key": "0",
@@ -314,7 +314,7 @@
       "type": "action.release_modifiers",
       "pos": [
         3856.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -323,7 +323,7 @@
       "type": "action.press_key",
       "pos": [
         4152.5,
-        618.0
+        40.0
       ],
       "params": {
         "key": "h",
@@ -339,7 +339,7 @@
       "type": "game.tc_count",
       "pos": [
         3052.0,
-        274.0
+        336.0
       ],
       "params": {
         "icon_region": [
@@ -373,7 +373,7 @@
       "type": "control.if",
       "pos": [
         4554.5,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -382,7 +382,7 @@
       "type": "data.const_number",
       "pos": [
         3095.0,
-        782.0
+        204.0
       ],
       "params": {
         "value": 2
@@ -393,7 +393,7 @@
       "type": "math.arith",
       "pos": [
         3454.0,
-        956.0
+        378.0
       ],
       "params": {
         "op": "*"
@@ -404,7 +404,7 @@
       "type": "game.produce_count",
       "pos": [
         3787.0,
-        352.0
+        306.0
       ],
       "params": {
         "cost_per_unit": 80,
@@ -416,7 +416,7 @@
       "type": "data.const_number",
       "pos": [
         3462.5,
-        1136.0
+        1014.0
       ],
       "params": {
         "value": 3
@@ -427,7 +427,7 @@
       "type": "math.arith",
       "pos": [
         3812.5,
-        752.0
+        744.0
       ],
       "params": {
         "op": "*"
@@ -438,7 +438,7 @@
       "type": "game.produce_count",
       "pos": [
         4149.0,
-        1136.0
+        708.0
       ],
       "params": {
         "cost_per_unit": 50,
@@ -450,7 +450,7 @@
       "type": "data.switch",
       "pos": [
         3821.0,
-        40.0
+        174.0
       ],
       "params": {
         "on": true
@@ -461,7 +461,7 @@
       "type": "data.switch",
       "pos": [
         4519.5,
-        478.0
+        372.0
       ],
       "params": {
         "on": true
@@ -472,7 +472,7 @@
       "type": "data.const_number",
       "pos": [
         3462.5,
-        154.0
+        882.0
       ],
       "params": {
         "value": 100
@@ -483,7 +483,7 @@
       "type": "logic.compare",
       "pos": [
         3812.5,
-        172.0
+        564.0
       ],
       "params": {
         "op": ">="
@@ -494,7 +494,7 @@
       "type": "logic.compare",
       "pos": [
         4174.5,
-        956.0
+        528.0
       ],
       "params": {
         "op": ">"
@@ -505,7 +505,7 @@
       "type": "logic.and",
       "pos": [
         4218.0,
-        460.0
+        378.0
       ],
       "params": {}
     },
@@ -514,7 +514,7 @@
       "type": "logic.and",
       "pos": [
         4554.5,
-        328.0
+        222.0
       ],
       "params": {}
     },
@@ -523,7 +523,7 @@
       "type": "control.if",
       "pos": [
         4822.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -532,7 +532,7 @@
       "type": "logic.compare",
       "pos": [
         4511.0,
-        800.0
+        504.0
       ],
       "params": {
         "op": ">"
@@ -543,7 +543,7 @@
       "type": "logic.and",
       "pos": [
         4822.0,
-        800.0
+        222.0
       ],
       "params": {}
     },
@@ -552,7 +552,7 @@
       "type": "control.if",
       "pos": [
         5111.5,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -561,7 +561,7 @@
       "type": "action.press_key",
       "pos": [
         5046.0,
-        792.0
+        214.0
       ],
       "params": {
         "key": "w",
@@ -577,7 +577,7 @@
       "type": "action.press_key",
       "pos": [
         5401.0,
-        618.0
+        40.0
       ],
       "params": {
         "key": "q",
@@ -593,7 +593,7 @@
       "type": "action.press_key",
       "pos": [
         5756.0,
-        618.0
+        40.0
       ],
       "params": {
         "key": "0",
@@ -609,7 +609,7 @@
       "type": "action.press_key",
       "pos": [
         6111.0,
-        618.0
+        40.0
       ],
       "params": {
         "key": "0",
@@ -625,7 +625,7 @@
       "type": "action.release_modifiers",
       "pos": [
         6466.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -634,7 +634,7 @@
       "type": "control.input_block_end",
       "pos": [
         6690.0,
-        618.0
+        40.0
       ],
       "params": {}
     },
@@ -643,7 +643,7 @@
       "type": "control.delay",
       "pos": [
         6914.0,
-        618.0
+        40.0
       ],
       "params": {
         "seconds": 3.0
@@ -654,7 +654,7 @@
       "type": "control.lock_release",
       "pos": [
         7191.0,
-        618.0
+        40.0
       ],
       "params": {}
     }
