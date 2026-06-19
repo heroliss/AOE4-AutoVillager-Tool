@@ -54,13 +54,13 @@ def node_defs() -> list[dict]:
             "help": _doc_summary(cls),
             "doc": _doc_full(cls),
             "inputs": [{"name": p.name, "kind": p.kind.value, "dtype": p.dtype.value,
-                        "label": p.display, "help": p.help} for p in cls.inputs],
+                        "label": p.display, "help": p.help, "advanced": p.advanced} for p in cls.inputs],
             "outputs": [{"name": p.name, "kind": p.kind.value, "dtype": p.dtype.value,
-                         "label": p.display, "help": p.help} for p in cls.outputs],
+                         "label": p.display, "help": p.help, "advanced": p.advanced} for p in cls.outputs],
             "params": [{"key": s.key, "label": s.label, "ptype": s.ptype,
                         "default": _param_to_js_raw(s, s.default), "choices": s.choices,
                         "min": s.minimum, "max": s.maximum, "step": s.step,
-                        "help": s.help} for s in cls.params],
+                        "help": s.help, "advanced": s.advanced} for s in cls.params],
         })
     return defs
 

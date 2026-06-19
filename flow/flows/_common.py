@@ -103,7 +103,7 @@ def build_single_type(cfg: dict) -> Graph:
     add("planned", "math.arith", {"op": "*"})
     add("produce", "game.produce_count", {"cost_per_unit": cfg["cost_per_unit"], "cap": -1})
 
-    add("queue", "action.press_key", {"key": cfg["queue_key"], "post_escape": True})
+    add("queue", "action.press_key", {"key": cfg["queue_key"]})
     add("restore", "action.press_key", {"key": "0"})
     add("disband", "action.press_key", {"key": "0", "modifiers": "ctrl,alt"})
     add("relmod2", "action.release_modifiers")

@@ -34,8 +34,13 @@ const ED = (function () {
     }
     el.textContent = "⚠ 出错（点击关闭）：\n" + msg;
   }
-  window.addEventListener("error", (e) =>
-    showError((e.message || e.error || "脚本错误") + "\n  " + (e.filename || "") + ":" + (e.lineno || "")));
+  // "ResizeObserver loop ..." 是浏览器在一帧内多次布局时发出的【良性】告警（规范建议忽略），
+  // 不是真错误；否则一启动就被弹成红框。其余错误照常显示。
+  window.addEventListener("error", (e) => {
+    const m = String(e && e.message || "");
+    if (m.indexOf("ResizeObserver loop") >= 0) return;
+    showError((e.message || e.error || "脚本错误") + "\n  " + (e.filename || "") + ":" + (e.lineno || ""));
+  });
   window.addEventListener("unhandledrejection", (e) => {
     const r = e.reason;
     showError("Promise 被拒绝：" + (r && (r.stack || r.message) || r));
@@ -50,6 +55,7 @@ const ED = (function () {
     C["string"] = "#9AD08A";
     C["image"] = "#C792DF";
     C["region"] = "#69b0a0"; C["point"] = "#69b0a0"; C["color"] = "#cf8a6a";
+    C["list"] = "#d6c15a";   // 列表（如识别到的多个数字）
   }
 
   function slotType(p) {
@@ -318,6 +324,8 @@ const ED = (function () {
         if (!k) { setStatus("已取消捕获"); return; }
         apply(k, "已捕获按键：" + k);
       }));
+      // ESC/回车/F1 等无法被“捕获按键”录到（Esc 是采集的取消键），用特殊键面板直接选。
+      mkBtn("特殊键…", () => specialKeyMenu((name) => apply(name, "已设为特殊键：" + name)));
     }
     // 注：修饰键(keys)已是下拉控件（见上方控件创建），无需额外按钮。
 
@@ -332,6 +340,36 @@ const ED = (function () {
   // 修饰键下拉选项（友好标签；Python 侧与 csv "ctrl,shift" 互转）。
   const MOD_LABELS = ["（无）", "Shift", "Ctrl", "Alt", "Win",
     "Ctrl+Shift", "Ctrl+Alt", "Shift+Alt", "Ctrl+Shift+Alt"];
+  // 无法用“捕获按键”录入的特殊键（名字＝pydirectinput/采集工具的规范名，见 capture.py）。
+  const SPECIAL_KEYS = [
+    ["esc", "Esc"], ["enter", "回车"], ["tab", "Tab"], ["space", "空格"],
+    ["backspace", "退格"], ["delete", "Delete"], ["insert", "Insert"],
+    ["up", "↑"], ["down", "↓"], ["left", "←"], ["right", "→"],
+    ["home", "Home"], ["end", "End"], ["pageup", "PgUp"], ["pagedown", "PgDn"],
+    ["f1", "F1"], ["f2", "F2"], ["f3", "F3"], ["f4", "F4"], ["f5", "F5"], ["f6", "F6"],
+    ["f7", "F7"], ["f8", "F8"], ["f9", "F9"], ["f10", "F10"], ["f11", "F11"], ["f12", "F12"],
+  ];
+  // 弹出“特殊键”选择面板：点一个就回调其规范名（用于 ESC/回车/F1 等无法捕获的键）。
+  function specialKeyMenu(onPick) {
+    document.getElementById("speckey")?.remove();
+    const box = document.createElement("div");
+    box.id = "speckey";
+    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(360px,92vw);" +
+      "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:12px 14px;z-index:140;" +
+      "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+    let h = "<b style='color:#e6c07b'>选择特殊键</b>（ESC/回车/F1 等无法用“捕获按键”录入的键）" +
+            "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-top:10px'>";
+    for (const [name, label] of SPECIAL_KEYS)
+      h += `<button data-k="${name}" style="background:#2f343d;color:#cfd3da;border:1px solid #444;` +
+           `border-radius:4px;padding:3px 8px;cursor:pointer;min-width:42px">${label}</button>`;
+    h += "</div><div style='margin-top:10px;text-align:right'>" +
+         "<button id='speckcancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>取消</button></div>";
+    box.innerHTML = h;
+    document.body.appendChild(box);
+    box.querySelectorAll("[data-k]").forEach((b) =>
+      b.onclick = () => { box.remove(); onPick(b.getAttribute("data-k")); });
+    box.querySelector("#speckcancel").onclick = () => box.remove();
+  }
 
   // ---- 模板缩略图：本地文件不让网页直接读，由 Python 读成 data URL 回传，这里缓存 ----
   const imgCache = {};   // path -> HTMLImageElement | "loading" | "fail"
@@ -640,6 +678,11 @@ const ED = (function () {
           for (const p of D.inputs) this.addInput(p.name, slotType(p), { label: p.label });
           for (const p of D.params) addParamWidget(this, p, D);
           for (const p of D.outputs) this.addOutput(p.name, slotType(p), { label: p.label });
+          // 进阶/次要端口：把端口点画灰，视觉上降级、提示一般用不到（详细在说明的“进阶”区折叠）。
+          // 只改颜色、不改 label，保证排版预留宽度与实际渲染一致。
+          const dimSlot = (slot) => { if (slot) { slot.color_on = "#6b7280"; slot.color_off = "#3f444d"; } };
+          (D.inputs || []).forEach((p, i) => { if (p.advanced) dimSlot(this.inputs[i]); });
+          (D.outputs || []).forEach((p, i) => { if (p.advanced) dimSlot(this.outputs[i]); });
           this.size[0] = Math.max(this.size[0] || 0, nodeMinWidth(D));  // 加宽容纳"参数名+值"，与排版预留一致
           this._typeId = D.type;
           if (!this._id) this._id = D.type.split(".").pop() + "_" + (seq++);
@@ -768,7 +811,7 @@ const ED = (function () {
       readonly: ("readonly" in flow) ? !!flow.readonly : flowMeta.readonly,
     };
     if (!keepHistory) { undoStack = []; redoStack = []; }   // 新流程：清空撤销历史（排版除外）
-    panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 2)) : [];
+    panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
     const added = buildGraph(flow);
     const total = (flow.nodes || []).length;
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
@@ -825,18 +868,37 @@ const ED = (function () {
   // ---- 控制面板（顶部，置顶常用参数；勾选在节点说明里）----
   function nodeByOurId(id) { return (graph && graph._nodes || []).find((n) => n._id === id) || null; }
   function isPinned(nid, key) { return panelPins.some((p) => p[0] === nid && p[1] === key); }
+  function pinEntry(nid, key) { return panelPins.find((p) => p[0] === nid && p[1] === key); }
   function togglePin(nid, key) {
     const i = panelPins.findIndex((p) => p[0] === nid && p[1] === key);
-    if (i >= 0) panelPins.splice(i, 1); else panelPins.push([nid, key]);
+    if (i >= 0) panelPins.splice(i, 1); else panelPins.push([nid, key, ""]);
     renderPanel(); scheduleSnap(); refreshDirty();
     if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
   }
-  function panelLabel(node, key) {
-    const note = (node._note || "").trim();
-    if (note) return note.split(/[。\n]/)[0];        // 用描述首句作标签，最直观
+  // 设置某置顶项“在面板上显示的名称”（空＝用默认名）。
+  function setPinLabel(nid, key, name) {
+    const e = pinEntry(nid, key);
+    if (!e) return;
+    e[2] = String(name || "").trim();
+    renderPanel(); scheduleSnap(); refreshDirty();
+  }
+  // 默认显示名：参数自身的标签（不再用整段描述——同一节点可置顶多个参数，描述会重名）。
+  function defaultPinLabel(node, key) {
     const d = defByType[node._typeId];
     const p = d && (d.params || []).find((q) => q.key === key);
-    return (node.title || "节点") + "·" + ((p && p.label) || key);
+    return (p && p.label) || key;
+  }
+  function panelLabel(node, key) {
+    const e = pinEntry(node._id, key);
+    return (e && e[2]) ? e[2] : defaultPinLabel(node, key);   // 自定义名优先
+  }
+  // 在节点图里定位到某节点：选中并居中（取代“从面板移除”按钮，避免误点删除）。
+  function locateNode(node) {
+    if (!node || !canvas) return;
+    try { canvas.centerOnNode(node); } catch (e) {}
+    try { canvas.selectNode(node, false); } catch (e) {}
+    selectedNode = node; showNodeHelp(node);   // 顺带展开右下角说明（在那里可取消显示）
+    canvas.setDirty(true, true);
   }
   function setPanelValue(node, key, val) {
     const w = (node.widgets || []).find((x) => x._key === key);
@@ -862,7 +924,9 @@ const ED = (function () {
       if (!w) continue;
       const item = document.createElement("span"); item.className = "pitem";
       const lab = document.createElement("label");
-      lab.textContent = panelLabel(node, key); lab.title = node._note || panelLabel(node, key);
+      lab.textContent = panelLabel(node, key);
+      // 悬停才显示节点描述（描述可能很长，平时不占地方）
+      lab.title = (node._note || "").trim() || panelLabel(node, key);
       item.appendChild(lab);
       let ctrl;
       if (w.type === "toggle") {
@@ -886,10 +950,12 @@ const ED = (function () {
         ctrl.onchange = () => setPanelValue(node, key, ctrl.value);
       }
       item.appendChild(ctrl);
-      const x = document.createElement("span");
-      x.className = "punpin"; x.textContent = "✕"; x.title = "从面板移除";
-      x.onclick = () => togglePin(nid, key);
-      item.appendChild(x);
+      // 🎯 定位：选中并居中到该节点（取代“移除”按钮，避免误点删除；移除在右下角说明里取消勾选）
+      const loc = document.createElement("span");
+      loc.className = "ploc"; loc.textContent = "🎯";
+      loc.title = "定位到此节点（在右下角说明里可取消显示 / 改显示名）";
+      loc.onclick = () => locateNode(node);
+      item.appendChild(loc);
       el.appendChild(item);
     }
   }
@@ -975,11 +1041,23 @@ const ED = (function () {
     help: toggleHelp,
   };
 
-  function resize() {
+  // 在 ResizeObserver 回调里【同步】改 canvas 尺寸会再触发布局 -> 浏览器报 "ResizeObserver loop"。
+  // 故把真正的尺寸调整推迟到下一帧（rAF），并合并连续触发，既消除告警又保持实时。
+  let _resizePending = false;
+  function doResize() {
+    _resizePending = false;
     const w = document.getElementById("wrap");
     const c = document.getElementById("graph");
-    c.width = w.clientWidth; c.height = w.clientHeight;
+    if (!w || !c) return;
+    if (c.width !== w.clientWidth || c.height !== w.clientHeight) {
+      c.width = w.clientWidth; c.height = w.clientHeight;
+    }
     if (canvas) { canvas.resize(); canvas.setDirty(true, true); }
+  }
+  function resize() {
+    if (_resizePending) return;
+    _resizePending = true;
+    requestAnimationFrame(doResize);
   }
 
   // ---- 选中节点时显示中文说明（节点简介 + 各参数用法）----
@@ -1007,6 +1085,16 @@ const ED = (function () {
     return `<div style="margin-top:2px">${tag} <b style="color:#bcd">${esc(p.label || p.name)}</b>：${esc(p.help)}</div>`;
   }
 
+  // 右下角说明各区段的“展开/折叠”记忆（节点切换/重绘时保持用户的展开状态）。
+  let helpOpen = { params: true, ports: false, adv: false, pin: false };
+  // 折叠区段：<details> 原生折叠；data-sec 用于记忆展开状态。
+  function section(key, title, body, count) {
+    const head = count != null ? `${title}（${count}）` : title;
+    return `<details data-sec="${key}"${helpOpen[key] ? " open" : ""}>` +
+           `<summary style="cursor:pointer;color:#8b909a;margin-top:6px;border-top:1px solid #3a404a;padding-top:4px;outline:none">${head}</summary>` +
+           `<div style="padding-top:2px">${body}</div></details>`;
+  }
+
   function showNodeHelp(node) {
     if (!helpEl) return;
     const d = defByType[node && node._typeId];
@@ -1015,29 +1103,55 @@ const ED = (function () {
     let html = `<div style="font-weight:bold;color:#e6e9ee;margin-bottom:2px">${esc(d.title)}</div>`;
     const doc = d.doc || d.help || "";
     if (doc) html += `<div style="color:#9aa3af;white-space:pre-line">${esc(doc)}</div>`;
-    // 仅展示“含义不直观、带专门说明”的端口（如分支的 条件/真/假），不堆叠每一个端口
-    const ports = (d.inputs || []).concat(d.outputs || []).filter((p) => p.help);
-    if (ports.length) {
-      html += `<div style="${sub}">端口说明</div>`;
-      for (const p of ports) html += portLine(p);
+
+    const allPorts = (d.inputs || []).concat(d.outputs || []);
+    // 主要参数说明（默认展开）；进阶参数/端口折到“进阶”区，避免误导用户以为都得用。
+    const ps = (d.params || []).filter((p) => p.help && !p.advanced);
+    if (ps.length)
+      html += section("params", "参数说明",
+        ps.map((p) => `<div style="margin-top:2px"><b style="color:#bcd">${esc(p.label)}</b>：${esc(p.help)}</div>`).join(""), ps.length);
+    // 主要端口说明（默认折叠）：只列含义不直观、带说明的主端口
+    const ports = allPorts.filter((p) => p.help && !p.advanced);
+    if (ports.length)
+      html += section("ports", "端口说明", ports.map(portLine).join(""), ports.length);
+    // 进阶（一般用不到）：把次要端口/参数集中折叠，明确告诉用户平时不必接/不必改
+    const advPorts = allPorts.filter((p) => p.advanced);
+    const advParams = (d.params || []).filter((p) => p.advanced);
+    if (advPorts.length || advParams.length) {
+      let b = "<div style='color:#7f8895;margin-bottom:2px'>以下为次要/调试用，平时无需接线或修改。</div>";
+      b += advPorts.map(portLine).join("");
+      b += advParams.map((p) => `<div style="margin-top:2px"><b style="color:#9aa0aa">${esc(p.label)}</b>：${esc(p.help || "")}</div>`).join("");
+      html += section("adv", "进阶（一般用不到）", b, advPorts.length + advParams.length);
     }
-    const ps = (d.params || []).filter((p) => p.help);
-    if (ps.length) {
-      html += `<div style="${sub}">参数说明</div>`;
-      for (const p of ps)
-        html += `<div style="margin-top:2px"><b style="color:#bcd">${esc(p.label)}</b>：${esc(p.help)}</div>`;
-    }
-    // 显示到控制面板：勾选哪些参数置顶到顶部面板（给不进图的用户用）
+
+    // 显示到控制面板：勾选哪些参数置顶到顶部面板；已勾选的可单独设“面板显示名”。
     const pinnable = (d.params || []);
     if (pinnable.length) {
-      html += `<div style="${sub}">显示到控制面板（勾选置顶到顶部）</div>`;
-      for (const p of pinnable)
-        html += `<label style="display:block;cursor:pointer;color:#aeb6c2">` +
-                `<input type="checkbox" data-pin="${esc(p.key)}" ${isPinned(node._id, p.key) ? "checked" : ""}> ${esc(p.label)}</label>`;
+      let b = "";
+      for (const p of pinnable) {
+        const pinned = isPinned(node._id, p.key);
+        b += `<div style="margin-top:3px"><label style="cursor:pointer;color:#aeb6c2">` +
+             `<input type="checkbox" data-pin="${esc(p.key)}" ${pinned ? "checked" : ""}> ${esc(p.label)}</label>`;
+        if (pinned) {
+          const cur = (pinEntry(node._id, p.key) || [])[2] || "";
+          b += ` <input type="text" data-pinlabel="${esc(p.key)}" value="${esc(cur)}" ` +
+               `placeholder="${esc(defaultPinLabel(node, p.key))}" title="在控制面板上显示的名称（留空＝用默认）" ` +
+               `style="width:110px;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;font-size:12px;padding:1px 4px">`;
+        }
+        b += `</div>`;
+      }
+      html += section("pin", "显示到控制面板", b, null);
     }
     helpEl.innerHTML = html;
+    helpEl.querySelectorAll("details[data-sec]").forEach((dt) => {
+      dt.addEventListener("toggle", () => { helpOpen[dt.getAttribute("data-sec")] = dt.open; });
+    });
     helpEl.querySelectorAll("[data-pin]").forEach((cb) => {
       cb.onchange = () => togglePin(node._id, cb.getAttribute("data-pin"));
+    });
+    helpEl.querySelectorAll("[data-pinlabel]").forEach((inp) => {
+      inp.onchange = () => setPinLabel(node._id, inp.getAttribute("data-pinlabel"), inp.value);
+      inp.onkeydown = (e) => e.stopPropagation();   // 输入框内按键不触发画布快捷键
     });
     // 已修改（未保存）的参数：列出 旧→新 并给“恢复”链接（每项 + 全部）
     const changed = (node.widgets || []).filter(paramChanged);
@@ -1123,7 +1237,7 @@ const ED = (function () {
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>彩线颜色＝数据类型</b>（连什么类型就显什么色）<br>" +
       wire("#7AB0EE", "数值") + wire("#E0A85A", "是否(布尔)") + wire("#9AD08A", "文本") +
-      wire("#C792DF", "图像") + wire("#69b0a0", "区域/坐标") + wire("#cf8a6a", "颜色") + "<br>" +
+      wire("#d6c15a", "列表") + wire("#C792DF", "图像") + wire("#69b0a0", "区域/坐标") + wire("#cf8a6a", "颜色") + "<br>" +
       "<span style='color:#7f8895'>当前流程的数据多是数字与是/否，所以你主要看到蓝、黄两色；用到其它类型时会出现对应颜色。</span></div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>常用操作</b><br>" +
@@ -1169,7 +1283,7 @@ const ED = (function () {
     for (const n of graph._nodes) if (n.flags && n.flags.collapsed) collapsed.add(n._id);
     buildGraph(data);
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
-    panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 2)) : [];   // 置顶项随撤销/重做恢复
+    panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 3)) : [];   // 置顶项(含自定义名)随撤销/重做恢复
     attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
     canvas.setDirty(true, true);
@@ -1271,7 +1385,7 @@ const ED = (function () {
         if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
         else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
       });
-      resize();
+      doResize();   // 首次同步定尺寸（之后的 resize 走 rAF 合并）
       window.addEventListener("resize", resize);
       // 用 ResizeObserver 让窗口拖拽改变大小时内容实时刷新（window resize 在部分情况下不够即时）
       try { new ResizeObserver(resize).observe(document.getElementById("wrap")); } catch (e) {}

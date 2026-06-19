@@ -16,9 +16,12 @@ def _parse_mods(text: str) -> list[str]:
 class PressKey(ControlNode):
     """按键：按下某个键，可附带修饰键(Ctrl/Shift/…)，重复「数量」次（次数可由「数量」输入连入）。
 
-    说明：AOE4 里对生产按钮按住 Shift 点一下会一次排 5 个（这是游戏自带设定，与本工具无关）；
-    若想用它，把「修饰键」设为 Shift 并相应调整次数即可。本节点不再内置“每5个”的批量开关——
-    那只对生产单位有意义，且用在编组(Ctrl+数字)等操作上反而会出错。
+    这是个通用按键节点，不限于生产单位——选建筑、编组(Ctrl+数字)、按 ESC 取消等都用它。
+    · 想按 ESC/回车/F1 等无法用「捕获按键」录到的键？用「按键」旁的“特殊键…”按钮选，或直接
+      在输入框里键入名字（如 esc、enter、tab、space、f1、up、down）。
+    · 不再内置“结束后按ESC”：要按 ESC 就在本节点后面再接一个「按键(esc)」即可（更通用、不绑死）。
+    · AOE4 里对生产按钮按住 Shift 点一下会一次排 5 个（游戏自带设定，与本工具无关）；想用就把
+      「修饰键」设为 Shift；但用在编组(Ctrl+数字)等操作上加 Shift 反而会出错，故不内置批量开关。
     """
 
     type_id = "action.press_key"
@@ -27,11 +30,12 @@ class PressKey(ControlNode):
     inputs = [exec_in("in"), data_in("count", DataType.NUMBER, label="数量")]
     outputs = [exec_out("out")]
     params = [
-        ParamSpec("key", "按键", "key", default="q"),
-        ParamSpec("modifiers", "修饰键", "keys", default="", help="从下拉选择按键时要附带的修饰键组合（如 Ctrl+Shift）。"),
+        ParamSpec("key", "按键", "key", default="q",
+                  help="要按的键。普通键可用“捕获按键”录入；ESC/回车/F1 等用“特殊键…”按钮选，"
+                       "或直接键入名字（esc、enter、tab、space、f1、up、down、delete…）。"),
+        ParamSpec("modifiers", "修饰键", "keys", default="", help="按键时附带的修饰键组合（如 Ctrl+Shift）。"),
         ParamSpec("repeat", "重复次数", "int", default=1, minimum=1, maximum=100,
                   help="按几下；未连入「数量」时用此值，连入则用其数值。"),
-        ParamSpec("post_escape", "结束后按ESC", "bool", default=False),
     ]
 
     def execute(self, ctx, inputs):
@@ -45,8 +49,7 @@ class PressKey(ControlNode):
 
         if ctx.dry_run:
             desc = ("+".join(mods + [key])) if mods else key
-            ctx.log("INFO", f"[干跑] 按键 {desc} x{n}"
-                            + ("，再按ESC" if self.values["post_escape"] else ""))
+            ctx.log("INFO", f"[干跑] 按键 {desc} x{n}")
             return {}, "out"
 
         pdi = ctx.input()
@@ -56,9 +59,6 @@ class PressKey(ControlNode):
             pdi.press(key)
         for m in reversed(mods):
             pdi.keyUp(m)
-
-        if self.values["post_escape"]:
-            pdi.press("escape")
         return {}, "out"
 
 

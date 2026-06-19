@@ -78,7 +78,8 @@ def build_combined_graph() -> Graph:
     add("c_per_v", "data.const_number", {"value": 3})
     add("plan_v", "math.arith", {"op": "*"})
     add("prod_v", "game.produce_count", {"cost_per_unit": 50, "cap": -1})
-    add("queue_v", "action.press_key", {"key": "q", "post_escape": True})
+    add("queue_v", "action.press_key", {"key": "q"})
+    add("esc_v", "action.press_key", {"key": "esc"})     # 排完按 ESC 取消选中
 
     # ==================== 乡骑段 ====================
     add("sw_xq", "data.switch", {"on": False})              # 开关：是否生产乡骑（金朝）
@@ -90,7 +91,8 @@ def build_combined_graph() -> Graph:
     add("c_per_x", "data.const_number", {"value": 2})
     add("plan_x", "math.arith", {"op": "*"})
     add("prod_x", "game.produce_count", {"cost_per_unit": 80, "cap": -1})
-    add("queue_x", "action.press_key", {"key": "w", "post_escape": True})
+    add("queue_x", "action.press_key", {"key": "w"})
+    add("esc_x", "action.press_key", {"key": "esc"})
 
     # ==================== 商队段 ====================
     add("sw_cart", "data.switch", {"on": False})            # 开关：是否生产商队（市场）
@@ -102,7 +104,8 @@ def build_combined_graph() -> Graph:
     add("c_per_cart", "data.const_number", {"value": 5})
     add("plan_cart", "math.arith", {"op": "*"})
     add("prod_cart", "game.produce_count", {"cost_per_unit": 100, "cap": -1})
-    add("queue_cart", "action.press_key", {"key": "q", "post_escape": True})
+    add("queue_cart", "action.press_key", {"key": "q"})
+    add("esc_cart", "action.press_key", {"key": "esc"})
 
     # ==================== 收尾（整批一次）====================
     add("restore", "action.press_key", {"key": "0"})
@@ -149,7 +152,8 @@ def build_combined_graph() -> Graph:
         "c_per_v": "每个城镇中心一次排几个村民。",
         "plan_v": "计划数 = 每TC数量 × TC个数。",
         "prod_v": "实际产量 = min(计划, 人口空位, 食物÷单价)。",
-        "queue_v": "按 Q 排队生产村民（按实际产量次数），完事按 ESC。",
+        "queue_v": "按 Q 排队生产村民（按实际产量次数）。",
+        "esc_v": "按 ESC 取消选中（排完村民后清掉选择，避免影响后续）。",
         "sw_xq": "【开关】是否生产乡骑（金朝特色）。默认关。",
         "if_sw_xq": "乡骑开关：开→进入乡骑段；关→跳到商队段。",
         "q_xq": "检测队列里是否已有乡骑。",
@@ -158,7 +162,8 @@ def build_combined_graph() -> Graph:
         "c_per_x": "每个城镇中心一次排几个乡骑。",
         "plan_x": "计划数 = 每TC数量 × TC个数。",
         "prod_x": "实际产量 = min(计划, 人口空位, 黄金÷单价)。",
-        "queue_x": "按 W 排队生产乡骑，完事按 ESC。",
+        "queue_x": "按 W 排队生产乡骑。",
+        "esc_x": "按 ESC 取消选中。",
         "sw_cart": "【开关】是否生产商队（市场出商队）。默认关。",
         "if_sw_cart": "商队开关：开→进入商队段；关→进入收尾。",
         "q_cart": "检测队列里是否已有商队。",
@@ -167,7 +172,8 @@ def build_combined_graph() -> Graph:
         "c_per_cart": "每个市场一次排几个商队。",
         "plan_cart": "计划数 = 每市场数量 × 市场个数(此处常量1)。",
         "prod_cart": "实际产量 = min(计划, 人口空位, 黄金÷单价)。",
-        "queue_cart": "按 Q 排队生产商队，完事按 ESC。",
+        "queue_cart": "按 Q 排队生产商队。",
+        "esc_cart": "按 ESC 取消选中。",
         "restore": "按 0 恢复操作前暂存的编组选择。",
         "disband": "Ctrl+Alt+0：解散临时编组，避免污染玩家的编组。",
         "relmod2": "再次松开修饰键，确保收尾干净。",
@@ -195,7 +201,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_qvill", "false", "sel_tc_v", "in")   # 队列没有村民才生产
     g.connect_exec("if_qvill", "true", "if_sw_xq", "in")
     g.connect_exec("sel_tc_v", "out", "queue_v", "in")
-    g.connect_exec("queue_v", "out", "if_sw_xq", "in")
+    g.connect_exec("queue_v", "out", "esc_v", "in")
+    g.connect_exec("esc_v", "out", "if_sw_xq", "in")
 
     # 乡骑段
     g.connect_exec("if_sw_xq", "true", "if_qxq", "in")
@@ -203,7 +210,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_qxq", "false", "sel_tc_x", "in")
     g.connect_exec("if_qxq", "true", "if_sw_cart", "in")
     g.connect_exec("sel_tc_x", "out", "queue_x", "in")
-    g.connect_exec("queue_x", "out", "if_sw_cart", "in")
+    g.connect_exec("queue_x", "out", "esc_x", "in")
+    g.connect_exec("esc_x", "out", "if_sw_cart", "in")
 
     # 商队段
     g.connect_exec("if_sw_cart", "true", "if_qcart", "in")
@@ -211,7 +219,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_qcart", "false", "sel_market", "in")
     g.connect_exec("if_qcart", "true", "restore", "in")
     g.connect_exec("sel_market", "out", "queue_cart", "in")
-    g.connect_exec("queue_cart", "out", "restore", "in")
+    g.connect_exec("queue_cart", "out", "esc_cart", "in")
+    g.connect_exec("esc_cart", "out", "restore", "in")
 
     # 收尾
     g.connect_exec("restore", "out", "disband", "in")

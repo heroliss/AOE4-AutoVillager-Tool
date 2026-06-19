@@ -36,7 +36,12 @@ class PixelColor(DataNode):
     type_id = "sense.pixel_color"
     category = "感知"
     title = "像素颜色"
-    outputs = [data_out("match", DataType.BOOL, label="匹配"), data_out("color", DataType.COLOR, label="颜色")]
+    outputs = [
+        data_out("match", DataType.BOOL, label="匹配",
+                 help="主要输出：该点颜色是否与「目标颜色」相符（在容差内）。"),
+        data_out("color", DataType.COLOR, label="颜色", advanced=True,
+                 help="进阶：该点的实际颜色(RGB)，用于调试/取色，一般不接。"),
+    ]
     params = [
         ParamSpec("point", "坐标", "point", default=[0, 0]),
         ParamSpec("color", "目标颜色", "color", default=[0, 0, 0]),
@@ -59,7 +64,12 @@ class WindowCheck(DataNode):
     type_id = "sense.window_check"
     category = "感知"
     title = "游戏窗口检测"
-    outputs = [data_out("in_game", DataType.BOOL, label="在游戏中"), data_out("active", DataType.BOOL, label="窗口激活")]
+    outputs = [
+        data_out("in_game", DataType.BOOL, label="在游戏中",
+                 help="主要输出：当前确实在游戏对局内（标题匹配【且】检测像素颜色符合）。通常只用这个。"),
+        data_out("active", DataType.BOOL, label="窗口激活", advanced=True,
+                 help="进阶：仅判断前台窗口标题是否像游戏（不看像素）。一般用「在游戏中」即可。"),
+    ]
     params = [
         ParamSpec("keywords", "窗口标题关键词", "str",
                   default="Age of Empires IV,帝国时代IV,帝国时代4",
@@ -104,10 +114,14 @@ class TemplateMatch(DataNode):
     title = "模板匹配"
     inputs = [data_in("image", DataType.IMAGE, label="图像")]
     outputs = [
-        data_out("found", DataType.BOOL, label="命中"),
-        data_out("confidence", DataType.NUMBER, label="置信度"),
-        data_out("which", DataType.NUMBER, label="命中序号"),     # 命中的模板序号（0 起），用于多模板
-        data_out("in_transition", DataType.BOOL, label="渐变中"),  # 半透明UI渐入渐出（需开启 transition_guard）
+        data_out("found", DataType.BOOL, label="命中",
+                 help="主要输出：区域里是否找到了模板（最高置信度≥匹配阈值）。通常只用这个，接到「分支」即可。"),
+        data_out("confidence", DataType.NUMBER, label="置信度", advanced=True,
+                 help="进阶/调试：最高的匹配相似度(0~1)。用于调「匹配阈值」时观察，一般不接。"),
+        data_out("which", DataType.NUMBER, label="命中序号", advanced=True,
+                 help="进阶：命中的是第几张模板（0 起；未命中=-1）。仅多模板时想区分命中了哪张才用。"),
+        data_out("in_transition", DataType.BOOL, label="渐变中", advanced=True,
+                 help="进阶：仅当开启「半透明UI抑制」时有意义——正处于UI渐入渐出动画期间为真（此时 found 强制为假）。"),
     ]
     params = [
         ParamSpec("region", "区域", "region", default=[0, 0, 100, 100],
@@ -116,8 +130,8 @@ class TemplateMatch(DataNode):
                   help="一个或多个模板路径；任一命中即 found=真，输出最高置信度"),
         ParamSpec("threshold", "匹配阈值", "float", default=0.6,
                   minimum=0.0, maximum=1.0, step=0.01),
-        ParamSpec("transition_guard", "半透明UI抑制", "bool", default=False,
-                  help="开启后用最近置信度变化模式识别UI渐入渐出，期间 in_transition=真、found=假，"
+        ParamSpec("transition_guard", "半透明UI抑制", "bool", default=False, advanced=True,
+                  help="进阶：开启后用最近置信度变化模式识别UI渐入渐出，期间 in_transition=真、found=假，"
                        "避免在UI动画时误判（移植自旧 villager_training_detector 的策略1/2/3）"),
     ]
 
@@ -173,21 +187,69 @@ class TemplateMatch(DataNode):
 
 
 # ==================== OCR 数字 ====================
+def _ocr_text(ctx, img, scale: float, allowlist) -> str:
+    """对一张图按缩放比例做 OCR，返回拼接后的原始文本（OcrText / OcrNumber 共用）。"""
+    img = _imaging.to_rgb(img)
+    if scale and scale != 1.0:
+        import cv2
+        h, w = img.shape[:2]
+        img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
+    allow = (allowlist or None)
+    results = ctx.ocr(img, allowlist=allow, detail=0)
+    return " ".join(results).strip()
+
+
+# ==================== OCR 文本（通用）====================
+@register
+class OcrText(DataNode):
+    """识别文本：读取屏幕指定区域里的文字，原样输出为字符串（通用 OCR）。
+
+    需要数字时改用「识别数字」（它在本节点基础上加了字符纠正+正则抽取）；想从这里的文本里抠数字，
+    可接「提取数字」节点。小字识别不准时把「缩放比例」调到 2~3 倍通常更好。
+    «字符白名单»留空＝认任意字符；填了就只认这些字符（能显著提高在已知字符集下的准确率）。
+    """
+
+    type_id = "sense.ocr_text"
+    category = "感知"
+    title = "识别文本"
+    inputs = [data_in("image", DataType.IMAGE, label="图像")]
+    outputs = [
+        data_out("text", DataType.STRING, label="文本", help="主要输出：认出的文字（多段会用空格拼接）。"),
+        data_out("ok", DataType.BOOL, label="成功", advanced=True, help="进阶：是否认到了非空文本。"),
+    ]
+    params = [
+        ParamSpec("region", "区域", "region", default=[0, 0, 200, 40],
+                  help="要识别文字的屏幕区域（左,上,右,下）。用区域框选工具更直观"),
+        ParamSpec("scale", "缩放比例", "float", default=1.0, minimum=0.1, maximum=4.0, step=0.1,
+                  help="识别前把截图放大的倍数；小字放大到 2~3 倍通常更准"),
+        ParamSpec("allowlist", "字符白名单", "str", default="", advanced=True,
+                  help="进阶：留空＝认任意字符；填了就只认这些字符（已知字符集时更准）。"),
+    ]
+
+    def evaluate(self, ctx, inputs):
+        img = inputs.get("image")
+        if img is None:
+            img = ctx.capture_region(self.values["region"])
+        raw = _ocr_text(ctx, img, self.values["scale"], self.values["allowlist"])
+        self.live = {"raw": raw}
+        return {"text": raw, "ok": bool(raw)}
+
+
+# ==================== OCR 数字 ====================
 @register
 class OcrNumber(DataNode):
-    """识别数字：读取屏幕指定区域里的数字（人口、资源、计数等），输出为可参与运算的数值。
+    """识别数字：读取屏幕指定区域里的数字（人口、资源、计数等），输出可参与运算的数值。
 
-    底层用 OCR（光学字符识别）把截图里的文字“认”出来——OCR 本身能认任意文字，本节点是它的
-    “数字特化版”：用「字符白名单」限定只认数字相关字符、再用「提取正则」从认出的文本里抠出数字，
-    所以输出的是数值而非一串文本（方便直接接「比较」「算式」）。原始文本也从「文本」口输出，便于调试。
+    它是「识别文本」的数字特化版：先 OCR 认字、把常见误识别纠正回数字（O→0、l/I→1、S→5），
+    再从文本里抠出所有数字。最通用的输出是「数字列表」——区域里有几个数字就给几个，
+    接「列表取值」「列表聚合(求和/取最值)」等通用节点即可灵活取用。为方便常见场景，本节点也
+    直接给出便捷输出「数值/数值2」(=按「提取正则」抠到的第1/2个，如人口「12/20」→12、20)。
 
     几个常见疑问：
     · 白名单里为什么有 O o l I s S 这些字母？——它们是数字最常见的误识别（0↔O、1↔l/I、5↔S），
       列进白名单让 OCR 不至于丢字，识别后再统一纠正回数字，准确率更高。
-    · 「提取正则」干嘛的？——从认出的文本里按模式抠数字：第1组→数值，第2组→数值2。
-      例如人口显示「12/20」，用 (\\d+)[/\\\\|](\\d+) 就能得到 数值=12、数值2=20（当前/上限）。
-    · 区域里有多个数字怎么办？——「多数字聚合」选 first 取正则首个匹配；选 sum 把区域内所有数字相加
-      （如分散显示的村民总数）。本节点不输出“数字列表”，需要逐个用可分别框小区域或用正则分组。
+    · 区域里有多个数字怎么办？——用「数字列表」输出，接「列表聚合」选 求和/最大/最小/平均/计数，
+      或接「列表取值」按序号取第几个。便捷输出「数值」默认给列表里第一个。
     · 小字识别不准？——把「缩放比例」调到 2~3 倍通常更准。
     """
 
@@ -196,24 +258,26 @@ class OcrNumber(DataNode):
     title = "识别数字"
     inputs = [data_in("image", DataType.IMAGE, label="图像")]
     outputs = [
-        data_out("value", DataType.NUMBER, label="数值"),
-        data_out("value2", DataType.NUMBER, label="数值2"),  # 第二个捕获组（如人口 当前/上限）
-        data_out("ok", DataType.BOOL, label="成功"),
-        data_out("text", DataType.STRING, label="文本"),     # OCR 认出的原始文本（调试/通用用途）
+        data_out("numbers", DataType.LIST, label="数字列表",
+                 help="主要输出：区域里认出的所有数字（已纠正）。接「列表取值/列表聚合」最通用。"),
+        data_out("value", DataType.NUMBER, label="数值",
+                 help="便捷输出：「提取正则」第1组（默认＝列表里第一个数字）。常见场景直接用它。"),
+        data_out("value2", DataType.NUMBER, label="数值2", advanced=True,
+                 help="进阶：「提取正则」第2组（如人口「12/20」的上限 20）。"),
+        data_out("ok", DataType.BOOL, label="成功", advanced=True, help="进阶：是否抠到了数字。"),
+        data_out("text", DataType.STRING, label="文本", advanced=True, help="进阶：OCR 原始文本（调试用）。"),
     ]
     params = [
         ParamSpec("region", "区域", "region", default=[0, 0, 100, 40],
                   help="要识别数字的屏幕区域（左,上,右,下）。用区域框选工具更直观"),
         ParamSpec("scale", "缩放比例", "float", default=1.0, minimum=0.1, maximum=4.0, step=0.1,
                   help="识别前把截图放大的倍数；小字放大到 2~3 倍通常更准"),
-        ParamSpec("allowlist", "字符白名单", "str", default="0123456789/\\|OolIsS ",
-                  help="只允许 OCR 认这些字符以提高准确率。含 O o l I s S 是因为它们是 0 1 5 的常见误识别，"
+        ParamSpec("allowlist", "字符白名单", "str", default="0123456789/\\|OolIsS ", advanced=True,
+                  help="进阶：只允许 OCR 认这些字符以提高准确率。含 O o l I s S 是因为它们是 0 1 5 的常见误识别，"
                        "认出后会自动纠正回数字；若要识别其它字符可自行增减。"),
-        ParamSpec("regex", "提取正则", "str", default=r"(\d+)",
-                  help="从认出的文本里抠数字：第1组->数值，第2组->数值2；如人口用 (\\d+)[/\\\\|](\\d+)"),
-        ParamSpec("aggregate", "多数字聚合", "enum", default="first",
-                  choices=["first", "sum"],
-                  help="first=取正则首个匹配；sum=区域内所有数字求和（村民总数用）"),
+        ParamSpec("regex", "提取正则", "str", default=r"(\d+)", advanced=True,
+                  help="进阶：决定便捷输出「数值/数值2」怎么抠：第1组->数值，第2组->数值2；如人口用 (\\d+)[/\\\\|](\\d+)。"
+                       "「数字列表」始终给出所有数字，不受此影响。"),
     ]
 
     # OCR 常见误识别纠正（O->0 等）
@@ -223,30 +287,13 @@ class OcrNumber(DataNode):
         img = inputs.get("image")
         if img is None:
             img = ctx.capture_region(self.values["region"])
-        img = _imaging.to_rgb(img)
+        raw = _ocr_text(ctx, img, self.values["scale"], self.values["allowlist"])
+        cleaned = raw.translate(self._FIX).replace(" ", "")
 
-        scale = self.values["scale"]
-        if scale != 1.0:
-            import cv2
-            h, w = img.shape[:2]
-            img = cv2.resize(img, (max(1, int(w * scale)), max(1, int(h * scale))))
-
-        allow = self.values["allowlist"] or None
-        results = ctx.ocr(img, allowlist=allow, detail=0)
-        raw = " ".join(results).strip()
-        cleaned = raw.translate(self._FIX)
-
-        if self.values["aggregate"] == "sum":
-            nums = [int(n) for n in re.findall(r"\d+", cleaned.replace(" ", ""))]
-            total = sum(nums)
-            self.live = {"raw": raw, "value": total}
-            return {"value": total, "value2": None, "ok": bool(nums), "text": raw}
-
-        m = re.search(self.values["regex"], cleaned.replace(" ", ""))
-        if not m:
-            self.live = {"raw": raw, "value": None}
-            return {"value": None, "value2": None, "ok": False, "text": raw}
-        v1 = int(m.group(1))
-        v2 = int(m.group(2)) if m.lastindex and m.lastindex >= 2 else None
-        self.live = {"raw": raw, "value": v1, "value2": v2}
-        return {"value": v1, "value2": v2, "ok": True, "text": raw}
+        numbers = [int(n) for n in re.findall(r"\d+", cleaned)]
+        m = re.search(self.values["regex"], cleaned)
+        v1 = int(m.group(1)) if m else (numbers[0] if numbers else None)
+        v2 = int(m.group(2)) if (m and m.lastindex and m.lastindex >= 2) else None
+        self.live = {"raw": raw, "value": v1, "value2": v2, "numbers": numbers}
+        return {"numbers": numbers, "value": v1, "value2": v2,
+                "ok": bool(numbers), "text": raw}

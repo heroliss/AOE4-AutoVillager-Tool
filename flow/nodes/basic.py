@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import operator
+import re
 from typing import Any, Optional
 
 from ..core import (
@@ -168,6 +169,115 @@ class ClampNode(DataNode):
     def evaluate(self, ctx, inputs):
         v = inputs.get("value") or 0
         return {"value": max(self.values["lo"], min(self.values["hi"], v))}
+
+
+# ==================== 列表 / 文本取数 ====================
+def _num(s):
+    """字符串 -> 数值：整数样式给 int，否则 float；都不行返回 None。"""
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        try:
+            return float(s)
+        except (TypeError, ValueError):
+            return None
+
+
+def _as_list(v):
+    """把输入规整成 list：本就是序列则原样，None 当空表，单值则包成单元素表。"""
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return [] if v is None else [v]
+
+
+@register
+class ExtractNumbers(DataNode):
+    """提取数字：从一段文本里按正则抠出所有数字，组成「数字列表」。
+
+    常接在「识别文本」之后，把认出的文字变成可计算的数字列表，再用「列表取值/列表聚合」处理；
+    这样「识别文本 → 提取数字 → 列表聚合/取值」就等价于一个可自由拆解的「识别数字」。
+    默认正则 \\d+ 抠所有连续数字；带捕获组则取每个匹配的第 1 组。
+    """
+    type_id = "data.extract_numbers"
+    category = "数据"
+    title = "提取数字"
+    inputs = [data_in("text", DataType.STRING, label="文本")]
+    outputs = [
+        data_out("numbers", DataType.LIST, label="数字列表", help="主要输出：抠出的所有数字。"),
+        data_out("count", DataType.NUMBER, label="个数", advanced=True, help="进阶：抠到几个数字。"),
+    ]
+    params = [ParamSpec("regex", "提取正则", "regex", default=r"\d+",
+                        help="抠数字的模式；带捕获组则取第 1 组，否则取整段匹配。")]
+
+    def evaluate(self, ctx, inputs):
+        text = str(inputs.get("text") or "")
+        nums = []
+        try:
+            pat = re.compile(self.values["regex"])
+        except re.error:
+            return {"numbers": [], "count": 0}
+        for m in pat.finditer(text):
+            n = _num(m.group(1) if m.groups() else m.group(0))
+            if n is not None:
+                nums.append(n)
+        return {"numbers": nums, "count": len(nums)}
+
+
+@register
+class ListGet(DataNode):
+    """列表取值：取「列表」里第 N 个元素（序号从 0 起，-1 表示最后一个）。越界给「默认值」。"""
+    type_id = "data.list_get"
+    category = "数据"
+    title = "列表取值"
+    inputs = [
+        data_in("list", DataType.LIST, label="列表"),
+        data_in("index", DataType.NUMBER, label="序号", advanced=True,
+                help="进阶：用连线指定序号；连入则优先于下面的「序号」参数。"),
+    ]
+    outputs = [
+        data_out("value", DataType.ANY, label="值", help="主要输出：取到的元素。"),
+        data_out("ok", DataType.BOOL, label="存在", advanced=True, help="进阶：该序号是否在范围内。"),
+    ]
+    params = [
+        ParamSpec("index", "序号", "int", default=0, help="0＝第一个；-1＝最后一个。"),
+        ParamSpec("default", "默认值", "float", default=0.0, help="越界或列表为空时输出此值。"),
+    ]
+
+    def evaluate(self, ctx, inputs):
+        lst = _as_list(inputs.get("list"))
+        i = inputs.get("index")
+        i = int(i) if i is not None else int(self.values["index"])
+        if -len(lst) <= i < len(lst):
+            return {"value": lst[i], "ok": True}
+        return {"value": self.values["default"], "ok": False}
+
+
+@register
+class ListAggregate(DataNode):
+    """列表聚合：把「列表」里的数字汇成一个值——求和 / 平均 / 最大 / 最小 / 计数 / 取首 / 取尾。
+
+    例：区域里有多组数字时，用「识别数字」的「数字列表」接这里选 sum 即可得到总和（取代旧的“多数字求和”）。
+    """
+    type_id = "data.list_aggregate"
+    category = "数据"
+    title = "列表聚合"
+    inputs = [data_in("list", DataType.LIST, label="列表")]
+    outputs = [data_out("value", DataType.NUMBER, label="结果")]
+    params = [ParamSpec("op", "方式", "enum", default="sum",
+                        choices=["sum", "avg", "min", "max", "count", "first", "last"],
+                        help="sum求和 / avg平均 / min最小 / max最大 / count个数 / first首个 / last末个")]
+
+    def evaluate(self, ctx, inputs):
+        lst = _as_list(inputs.get("list"))
+        op = self.values["op"]
+        if op == "count":
+            return {"value": len(lst)}
+        nums = [x for x in lst if isinstance(x, (int, float)) and not isinstance(x, bool)]
+        if not nums:
+            return {"value": 0}
+        funcs = {"sum": sum, "avg": lambda v: sum(v) / len(v),
+                 "min": min, "max": max, "first": lambda v: v[0], "last": lambda v: v[-1]}
+        return {"value": funcs.get(op, sum)(nums)}
 
 
 # ==================== 分支（按是/否分岔执行流）====================

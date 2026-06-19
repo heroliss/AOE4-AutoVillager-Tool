@@ -22,6 +22,7 @@ TITLE_H = 30.0        # NODE_TITLE_HEIGHT：标题条（画在 pos.y 之上）
 SLOT_H = 20.0         # NODE_SLOT_HEIGHT：每个端口行高
 WIDGET_H = 20.0       # NODE_WIDGET_HEIGHT：每个控件行高（实际占用 WIDGET_H+4）
 MIN_W_WIDGETS = 210.0  # 含控件时 LiteGraph 的最小宽 NODE_WIDTH(140)*1.5
+BODY_MARGIN = 6.0     # LiteGraph.computeSize 末尾固定 size[1]+=6 的边距；不算进来会少 6px 导致轻微重叠
 
 # 节点下方"附属卡片"（模板缩略图网格 + 用户描述）的尺寸常量，必须与 editor.js 的画法保持一致，
 # 否则自动排版预留的高度与实际渲染对不上、会重叠或留白。（编辑/增删图片用节点上的"编辑列表…"按钮。）
@@ -74,6 +75,7 @@ def estimate_size(node) -> tuple[float, float]:
     body = rows * SLOT_H
     if n_widgets:
         body += n_widgets * (WIDGET_H + 4) + 8
+    body += BODY_MARGIN     # 与 LiteGraph 末尾的 size[1]+=6 对齐
     return (w, TITLE_H + body)
 
 
