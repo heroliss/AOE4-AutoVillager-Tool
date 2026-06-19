@@ -55,15 +55,6 @@
       "params": {}
     },
     {
-      "id": "end_win",
-      "type": "control.end",
-      "pos": [
-        40.0,
-        1192.0
-      ],
-      "params": {}
-    },
-    {
       "id": "occ",
       "type": "game.occlusion",
       "pos": [
@@ -119,17 +110,8 @@
       "id": "if_blocked",
       "type": "control.if",
       "pos": [
-        230.0,
-        1156.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_blocked",
-      "type": "control.end",
-      "pos": [
         40.0,
-        1452.0
+        1156.0
       ],
       "params": {}
     },
@@ -137,17 +119,8 @@
       "id": "if_trans",
       "type": "control.if",
       "pos": [
-        230.0,
-        1416.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_trans",
-      "type": "control.end",
-      "pos": [
         40.0,
-        1712.0
+        1416.0
       ],
       "params": {}
     },
@@ -155,17 +128,8 @@
       "id": "if_vill",
       "type": "control.if",
       "pos": [
-        230.0,
-        1676.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_vill",
-      "type": "control.end",
-      "pos": [
         40.0,
-        1972.0
+        1676.0
       ],
       "params": {}
     },
@@ -173,7 +137,7 @@
       "id": "prefetch",
       "type": "control.prefetch_full",
       "pos": [
-        230.0,
+        40.0,
         1960.0
       ],
       "params": {}
@@ -228,15 +192,6 @@
       "params": {}
     },
     {
-      "id": "end_popfail",
-      "type": "control.end",
-      "pos": [
-        2561.0,
-        205.0
-      ],
-      "params": {}
-    },
-    {
       "id": "c_minfood",
       "type": "data.const_number",
       "pos": [
@@ -262,17 +217,8 @@
       "id": "if_foodok",
       "type": "control.if",
       "pos": [
-        2751.0,
-        169.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_foodlow",
-      "type": "control.end",
-      "pos": [
         2561.0,
-        594.0
+        169.0
       ],
       "params": {}
     },
@@ -313,17 +259,8 @@
       "id": "if_slots",
       "type": "control.if",
       "pos": [
-        2751.0,
-        558.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_full",
-      "type": "control.end",
-      "pos": [
         2561.0,
-        932.0
+        558.0
       ],
       "params": {}
     },
@@ -331,17 +268,8 @@
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        2751.0,
-        908.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_busy",
-      "type": "control.end",
-      "pos": [
         2561.0,
-        1192.0
+        908.0
       ],
       "params": {}
     },
@@ -349,7 +277,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        2751.0,
+        2561.0,
         1165.0
       ],
       "params": {
@@ -441,15 +369,6 @@
       "params": {}
     },
     {
-      "id": "end_tcfail",
-      "type": "control.end",
-      "pos": [
-        3110.0,
-        205.0
-      ],
-      "params": {}
-    },
-    {
       "id": "c_pertc",
       "type": "data.const_number",
       "pos": [
@@ -487,7 +406,7 @@
       "id": "queue",
       "type": "action.press_key",
       "pos": [
-        3300.0,
+        2920.0,
         91.0
       ],
       "params": {
@@ -503,7 +422,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        3110.0,
+        2920.0,
         480.0
       ],
       "params": {
@@ -519,7 +438,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        3110.0,
+        2920.0,
         818.0
       ],
       "params": {
@@ -535,7 +454,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        3110.0,
+        2920.0,
         1180.0
       ],
       "params": {}
@@ -544,7 +463,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        3110.0,
+        2920.0,
         1440.0
       ],
       "params": {}
@@ -553,7 +472,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        3110.0,
+        2920.0,
         1685.0
       ],
       "params": {
@@ -564,7 +483,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        3110.0,
+        2920.0,
         1960.0
       ],
       "params": {}
@@ -590,18 +509,6 @@
       "in"
     ],
     [
-      "if_win",
-      "false",
-      "end_win",
-      "in"
-    ],
-    [
-      "if_blocked",
-      "true",
-      "end_blocked",
-      "in"
-    ],
-    [
       "if_blocked",
       "false",
       "if_trans",
@@ -609,20 +516,8 @@
     ],
     [
       "if_trans",
-      "true",
-      "end_trans",
-      "in"
-    ],
-    [
-      "if_trans",
       "false",
       "if_vill",
-      "in"
-    ],
-    [
-      "if_vill",
-      "true",
-      "end_vill",
       "in"
     ],
     [
@@ -644,45 +539,21 @@
       "in"
     ],
     [
-      "if_popok",
-      "false",
-      "end_popfail",
-      "in"
-    ],
-    [
       "if_foodok",
       "true",
       "if_slots",
-      "in"
-    ],
-    [
-      "if_foodok",
-      "false",
-      "end_foodlow",
       "in"
     ],
     [
       "if_slots",
       "true",
       "lock",
-      "in"
-    ],
-    [
-      "if_slots",
-      "false",
-      "end_full",
       "in"
     ],
     [
       "lock",
       "ok",
       "block_begin",
-      "in"
-    ],
-    [
-      "lock",
-      "busy",
-      "end_busy",
       "in"
     ],
     [
@@ -713,12 +584,6 @@
       "if_tcok",
       "true",
       "queue",
-      "in"
-    ],
-    [
-      "if_tcok",
-      "false",
-      "end_tcfail",
       "in"
     ],
     [

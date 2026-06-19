@@ -56,7 +56,6 @@ def build_single_type(cfg: dict) -> Graph:
     add("pause", "control.pause_if_modifier")
     add("win", "sense.window_check", {"pixel": cfg["win_pixel"], "color": cfg["win_color"]})
     add("if_win", "control.if")
-    add("end_win", "control.end")
 
     # —— 队列占用状态 ——
     add("occ", "game.occlusion", {"region": cfg["blocked_region"], "template": cfg["blocked_template"]})
@@ -65,11 +64,8 @@ def build_single_type(cfg: dict) -> Graph:
          "threshold": cfg["occupancy_threshold"], "transition_guard": True})
     add("or_trans", "logic.or")  # 遮挡渐变 或 队列图标半透明动画，任一即视为渐变中
     add("if_blocked", "control.if")
-    add("end_blocked", "control.end")
     add("if_trans", "control.if")
-    add("end_trans", "control.end")
     add("if_vill", "control.if")
-    add("end_vill", "control.end")
 
     # —— 资源识别 ——
     add("prefetch", "control.prefetch_full")
@@ -78,22 +74,18 @@ def build_single_type(cfg: dict) -> Graph:
         {"region": cfg["resource_region"], "regex": cfg["resource_regex"],
          "allowlist": cfg["resource_allowlist"]})
     add("if_popok", "control.if")
-    add("end_popfail", "control.end")
 
     add("c_minfood", "data.const_number", {"value": cfg["min_resource"]})
     add("cmp_food", "logic.compare", {"op": ">="})
     add("if_foodok", "control.if")
-    add("end_foodlow", "control.end")
 
     add("slots", "math.arith", {"op": "-"})
     add("c_zero", "data.const_number", {"value": 0})
     add("cmp_slots", "logic.compare", {"op": ">"})
     add("if_slots", "control.if")
-    add("end_full", "control.end")
 
     # —— 操作区 ——
     add("lock", "control.lock_acquire")
-    add("end_busy", "control.end")
     add("block_begin", "control.input_block_begin", {"max_duration": 3.0})
     add("save_sel", "action.press_key", {"key": "0", "modifiers": "ctrl"})
     add("relmod1", "action.release_modifiers")
@@ -106,7 +98,6 @@ def build_single_type(cfg: dict) -> Graph:
             {"icon_region": b["icon_region"], "single_region": b["single_region"],
              "single_template": b["single_template"], "numbered_templates": b["numbered_templates"]})
         add("if_tcok", "control.if")
-        add("end_tcfail", "control.end")
 
     add("c_pertc", "data.const_number", {"value": cfg["per_building"]})
     add("planned", "math.arith", {"op": "*"})
@@ -122,32 +113,24 @@ def build_single_type(cfg: dict) -> Graph:
     add("unlock", "control.lock_release")
 
     # ==================== 执行流 ====================
+    # 注：条件分支若不接任何节点，即表示该情况下"结束本帧"（执行器走到无连出的出口自然停止）。
     g.connect_exec("tick", "out", "pause", "in")
     g.connect_exec("pause", "out", "if_win", "in")
     g.connect_exec("if_win", "true", "if_blocked", "in")
-    g.connect_exec("if_win", "false", "end_win", "in")
-    g.connect_exec("if_blocked", "true", "end_blocked", "in")
     g.connect_exec("if_blocked", "false", "if_trans", "in")
-    g.connect_exec("if_trans", "true", "end_trans", "in")
     g.connect_exec("if_trans", "false", "if_vill", "in")
-    g.connect_exec("if_vill", "true", "end_vill", "in")
     g.connect_exec("if_vill", "false", "prefetch", "in")
     g.connect_exec("prefetch", "out", "if_popok", "in")
     g.connect_exec("if_popok", "true", "if_foodok", "in")
-    g.connect_exec("if_popok", "false", "end_popfail", "in")
     g.connect_exec("if_foodok", "true", "if_slots", "in")
-    g.connect_exec("if_foodok", "false", "end_foodlow", "in")
     g.connect_exec("if_slots", "true", "lock", "in")
-    g.connect_exec("if_slots", "false", "end_full", "in")
     g.connect_exec("lock", "ok", "block_begin", "in")
-    g.connect_exec("lock", "busy", "end_busy", "in")
     g.connect_exec("block_begin", "out", "save_sel", "in")
     g.connect_exec("save_sel", "out", "relmod1", "in")
     g.connect_exec("relmod1", "out", "select_b", "in")
     if use_count:
         g.connect_exec("select_b", "out", "if_tcok", "in")
         g.connect_exec("if_tcok", "true", "queue", "in")
-        g.connect_exec("if_tcok", "false", "end_tcfail", "in")
     else:
         g.connect_exec("select_b", "out", "queue", "in")
     g.connect_exec("queue", "out", "restore", "in")

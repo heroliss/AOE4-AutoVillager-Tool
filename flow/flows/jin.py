@@ -57,7 +57,6 @@ def build_jin_graph() -> Graph:
     add("pause", "control.pause_if_modifier")
     add("win", "sense.window_check", {"pixel": WIN_PIXEL, "color": WIN_COLOR})
     add("if_win", "control.if")
-    add("end_win", "control.end")
 
     # —— 队列占用：村民 或 乡骑（多模板任一命中）——
     add("occ", "game.occlusion", {"region": BLOCKED_REGION, "template": "templates/blocked.png"})
@@ -66,11 +65,8 @@ def build_jin_graph() -> Graph:
          "templates": ["templates/cunmin.png", "templates/xiangqi.png"]})
     add("or_trans", "logic.or")
     add("if_blocked", "control.if")
-    add("end_blocked", "control.end")
     add("if_trans", "control.if")
-    add("end_trans", "control.end")
     add("if_vill", "control.if")
-    add("end_vill", "control.end")
 
     # —— 资源识别：人口 + 食物 + 黄金 ——
     add("prefetch", "control.prefetch_full")
@@ -78,24 +74,20 @@ def build_jin_graph() -> Graph:
     add("food", "sense.ocr_number", {"region": FOOD_REGION, "regex": r"(\d+)"})
     add("gold", "sense.ocr_number", {"region": GOLD_REGION, "regex": r"(\d+)"})
     add("if_popok", "control.if")
-    add("end_popfail", "control.end")
 
     add("slots", "math.arith", {"op": "-"})
     add("c_zero", "data.const_number", {"value": 0})
     add("cmp_slots", "logic.compare", {"op": ">"})
     add("if_slots", "control.if")
-    add("end_full", "control.end")
 
     # —— 操作区：加锁 + 屏蔽 + 存编组 + 选中所有TC（仅一次）+ 计数 ——
     add("lock", "control.lock_acquire")
-    add("end_busy", "control.end")
     add("block_begin", "control.input_block_begin", {"max_duration": 3.0})
     add("save_sel", "action.press_key", {"key": "0", "modifiers": "ctrl"})
     add("relmod1", "action.release_modifiers")
     add("select_tc", "action.press_key", {"key": "h"})
     add("tc", "game.tc_count", TC)
     add("if_tcok", "control.if")
-    add("end_tcfail", "control.end")
 
     # —— 两种单位的产能 ——
     add("c_xq_per", "data.const_number", {"value": XQ_PER_TC})
@@ -118,7 +110,6 @@ def build_jin_graph() -> Graph:
     add("cmp_v_cnt", "logic.compare", {"op": ">"})
     add("and_v", "logic.and")
     add("if_v", "control.if")
-    add("end_none", "control.end")
 
     # —— 出兵（两分支汇合到统一收尾）——
     add("queue_xq", "action.press_key",
@@ -133,35 +124,27 @@ def build_jin_graph() -> Graph:
     add("unlock", "control.lock_release")
 
     # ==================== 执行流 ====================
+    # 注：条件分支不接任何节点即表示该情况下"结束本帧"（执行器走到无连出的出口自然停止）。
     g.connect_exec("tick", "out", "pause", "in")
     g.connect_exec("pause", "out", "if_win", "in")
     g.connect_exec("if_win", "true", "if_blocked", "in")
-    g.connect_exec("if_win", "false", "end_win", "in")
-    g.connect_exec("if_blocked", "true", "end_blocked", "in")
     g.connect_exec("if_blocked", "false", "if_trans", "in")
-    g.connect_exec("if_trans", "true", "end_trans", "in")
     g.connect_exec("if_trans", "false", "if_vill", "in")
-    g.connect_exec("if_vill", "true", "end_vill", "in")
     g.connect_exec("if_vill", "false", "prefetch", "in")
     g.connect_exec("prefetch", "out", "if_popok", "in")
     g.connect_exec("if_popok", "true", "if_slots", "in")
-    g.connect_exec("if_popok", "false", "end_popfail", "in")
     g.connect_exec("if_slots", "true", "lock", "in")
-    g.connect_exec("if_slots", "false", "end_full", "in")
     g.connect_exec("lock", "ok", "block_begin", "in")
-    g.connect_exec("lock", "busy", "end_busy", "in")
     g.connect_exec("block_begin", "out", "save_sel", "in")
     g.connect_exec("save_sel", "out", "relmod1", "in")
     g.connect_exec("relmod1", "out", "select_tc", "in")
     g.connect_exec("select_tc", "out", "if_tcok", "in")
     g.connect_exec("if_tcok", "true", "if_xq", "in")
-    g.connect_exec("if_tcok", "false", "end_tcfail", "in")
     # 优先乡骑
     g.connect_exec("if_xq", "true", "queue_xq", "in")
     g.connect_exec("if_xq", "false", "if_v", "in")
     # 回退村民
     g.connect_exec("if_v", "true", "queue_v", "in")
-    g.connect_exec("if_v", "false", "end_none", "in")
     # 汇合收尾
     g.connect_exec("queue_xq", "out", "restore", "in")
     g.connect_exec("queue_v", "out", "restore", "in")

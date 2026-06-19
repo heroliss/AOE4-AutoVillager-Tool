@@ -1,28 +1,18 @@
 """
-控制流节点：结束本帧、整屏预取、定时门、修饰键暂停门、输入屏蔽作用域、文件锁。
+控制流节点：整屏预取、定时门、修饰键暂停门、输入屏蔽作用域、文件锁。
 
 这些把原主循环里的 continue / 每3秒检查 / 修饰键暂停 / BlockInput / 文件锁
 显式化为可连线的节点。输入屏蔽与文件锁用"开始/结束"两个节点表达作用域，
 执行器在每帧结束时兜底释放，避免跨帧泄漏。
+
+约定：执行流走到"没有连出的出口"即结束本帧（无需专门的"结束"节点）——
+例如条件节点的某个分支不接任何节点，就表示该情况下本帧到此为止。
 """
 from __future__ import annotations
 
 import time
 
 from ..core import ControlNode, ParamSpec, exec_in, exec_out, register
-
-
-@register
-class End(ControlNode):
-    """结束本帧（等价于旧代码里的 continue / 跳过本轮）。"""
-    type_id = "control.end"
-    category = "控制"
-    title = "结束本帧"
-    inputs = [exec_in("in")]
-    outputs = []
-
-    def execute(self, ctx, inputs):
-        return {}, None
 
 
 @register

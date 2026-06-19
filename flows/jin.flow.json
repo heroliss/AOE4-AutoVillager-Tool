@@ -55,15 +55,6 @@
       "params": {}
     },
     {
-      "id": "end_win",
-      "type": "control.end",
-      "pos": [
-        40.0,
-        1270.0
-      ],
-      "params": {}
-    },
-    {
       "id": "occ",
       "type": "game.occlusion",
       "pos": [
@@ -120,17 +111,8 @@
       "id": "if_blocked",
       "type": "control.if",
       "pos": [
-        230.0,
-        1234.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_blocked",
-      "type": "control.end",
-      "pos": [
         40.0,
-        1530.0
+        1234.0
       ],
       "params": {}
     },
@@ -138,17 +120,8 @@
       "id": "if_trans",
       "type": "control.if",
       "pos": [
-        230.0,
-        1494.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_trans",
-      "type": "control.end",
-      "pos": [
         40.0,
-        1790.0
+        1494.0
       ],
       "params": {}
     },
@@ -156,17 +129,8 @@
       "id": "if_vill",
       "type": "control.if",
       "pos": [
-        230.0,
-        1754.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_vill",
-      "type": "control.end",
-      "pos": [
         40.0,
-        2050.0
+        1754.0
       ],
       "params": {}
     },
@@ -174,7 +138,7 @@
       "id": "prefetch",
       "type": "control.prefetch_full",
       "pos": [
-        230.0,
+        40.0,
         2038.0
       ],
       "params": {}
@@ -249,15 +213,6 @@
       "params": {}
     },
     {
-      "id": "end_popfail",
-      "type": "control.end",
-      "pos": [
-        2855.0,
-        205.0
-      ],
-      "params": {}
-    },
-    {
       "id": "slots",
       "type": "math.arith",
       "pos": [
@@ -294,17 +249,8 @@
       "id": "if_slots",
       "type": "control.if",
       "pos": [
-        3045.0,
-        169.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_full",
-      "type": "control.end",
-      "pos": [
         2855.0,
-        594.0
+        169.0
       ],
       "params": {}
     },
@@ -312,17 +258,8 @@
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        3045.0,
-        570.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_busy",
-      "type": "control.end",
-      "pos": [
         2855.0,
-        932.0
+        570.0
       ],
       "params": {}
     },
@@ -330,7 +267,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        3045.0,
+        2855.0,
         905.0
       ],
       "params": {
@@ -422,15 +359,6 @@
       "params": {}
     },
     {
-      "id": "end_tcfail",
-      "type": "control.end",
-      "pos": [
-        2855.0,
-        2232.0
-      ],
-      "params": {}
-    },
-    {
       "id": "c_xq_per",
       "type": "data.const_number",
       "pos": [
@@ -513,7 +441,7 @@
       "id": "sw_v",
       "type": "data.switch",
       "pos": [
-        697.0,
+        507.0,
         1255.0
       ],
       "params": {
@@ -546,7 +474,7 @@
       "id": "cmp_xq_cnt",
       "type": "logic.compare",
       "pos": [
-        420.0,
+        230.0,
         1231.0
       ],
       "params": {
@@ -566,7 +494,7 @@
       "id": "and_xq2",
       "type": "logic.and",
       "pos": [
-        420.0,
+        230.0,
         1506.0
       ],
       "params": {}
@@ -575,7 +503,7 @@
       "id": "if_xq",
       "type": "control.if",
       "pos": [
-        3045.0,
+        2855.0,
         2196.0
       ],
       "params": {}
@@ -584,7 +512,7 @@
       "id": "cmp_v_cnt",
       "type": "logic.compare",
       "pos": [
-        957.0,
+        767.0,
         1231.0
       ],
       "params": {
@@ -595,7 +523,7 @@
       "id": "and_v",
       "type": "logic.and",
       "pos": [
-        610.0,
+        420.0,
         1506.0
       ],
       "params": {}
@@ -604,17 +532,8 @@
       "id": "if_v",
       "type": "control.if",
       "pos": [
-        3404.0,
+        3214.0,
         169.0
-      ],
-      "params": {}
-    },
-    {
-      "id": "end_none",
-      "type": "control.end",
-      "pos": [
-        3404.0,
-        594.0
       ],
       "params": {}
     },
@@ -622,7 +541,7 @@
       "id": "queue_xq",
       "type": "action.press_key",
       "pos": [
-        3594.0,
+        3404.0,
         91.0
       ],
       "params": {
@@ -638,7 +557,7 @@
       "id": "queue_v",
       "type": "action.press_key",
       "pos": [
-        3594.0,
+        3214.0,
         480.0
       ],
       "params": {
@@ -654,7 +573,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        3404.0,
+        3214.0,
         818.0
       ],
       "params": {
@@ -670,7 +589,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        3404.0,
+        3214.0,
         1156.0
       ],
       "params": {
@@ -686,7 +605,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        3404.0,
+        3214.0,
         1518.0
       ],
       "params": {}
@@ -695,7 +614,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        3404.0,
+        3214.0,
         1778.0
       ],
       "params": {}
@@ -704,7 +623,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        3404.0,
+        3214.0,
         2023.0
       ],
       "params": {
@@ -715,7 +634,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        3404.0,
+        3214.0,
         2220.0
       ],
       "params": {}
@@ -741,18 +660,6 @@
       "in"
     ],
     [
-      "if_win",
-      "false",
-      "end_win",
-      "in"
-    ],
-    [
-      "if_blocked",
-      "true",
-      "end_blocked",
-      "in"
-    ],
-    [
       "if_blocked",
       "false",
       "if_trans",
@@ -760,20 +667,8 @@
     ],
     [
       "if_trans",
-      "true",
-      "end_trans",
-      "in"
-    ],
-    [
-      "if_trans",
       "false",
       "if_vill",
-      "in"
-    ],
-    [
-      "if_vill",
-      "true",
-      "end_vill",
       "in"
     ],
     [
@@ -795,33 +690,15 @@
       "in"
     ],
     [
-      "if_popok",
-      "false",
-      "end_popfail",
-      "in"
-    ],
-    [
       "if_slots",
       "true",
       "lock",
       "in"
     ],
     [
-      "if_slots",
-      "false",
-      "end_full",
-      "in"
-    ],
-    [
       "lock",
       "ok",
       "block_begin",
-      "in"
-    ],
-    [
-      "lock",
-      "busy",
-      "end_busy",
       "in"
     ],
     [
@@ -852,12 +729,6 @@
       "if_tcok",
       "true",
       "if_xq",
-      "in"
-    ],
-    [
-      "if_tcok",
-      "false",
-      "end_tcfail",
       "in"
     ],
     [
@@ -876,12 +747,6 @@
       "if_v",
       "true",
       "queue_v",
-      "in"
-    ],
-    [
-      "if_v",
-      "false",
-      "end_none",
       "in"
     ],
     [
