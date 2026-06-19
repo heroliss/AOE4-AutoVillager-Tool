@@ -539,7 +539,13 @@ const ED = (function () {
     try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
     if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;  // 节点上交给 LiteGraph
     const link = linkNear(off[0], off[1]);
-    if (link) { e.preventDefault(); e.stopImmediatePropagation(); canvas.showLinkMenu(link, e); }
+    if (link) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      // 先关掉已打开的任何菜单，否则我们 stopImmediatePropagation 会让旧菜单的"点外部关闭"失效而叠加
+      try { LiteGraph.closeAllContextMenus(window); } catch (err) {}
+      canvas.showLinkMenu(link, e);
+    }
   }
 
   function start() {
