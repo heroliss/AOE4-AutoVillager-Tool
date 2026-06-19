@@ -236,23 +236,22 @@ const ED = (function () {
     // 图片模板参数：额外加一个"选择图片…"按钮，用系统文件框选图片填入（多模板可累加）
     if (p.ptype === "template" || p.ptype === "templates") {
       const multi = p.ptype === "templates";
-      const btn = node.addWidget("button", "选择图片…", null, async () => {
-        try {
-          setStatus("正在打开图片选择框…");
-          const a = api();
-          if (typeof a.pick_templates !== "function") {
-            showError("后端没有 pick_templates 方法，请重启编辑器（python run_editor.py …）。");
-            return;
-          }
-          const paths = await a.pick_templates(multi);
-          if (!paths || !paths.length) { setStatus("已取消选择图片"); return; }
-          const picked = paths.join(",");
-          w.value = (multi && w.value) ? (w.value + "," + picked) : picked;  // 多模板追加，单模板替换
-          cb(w.value);
-          if (canvas) canvas.setDirty(true, true);
-          setStatus("已选择 " + paths.length + " 张图片");
-        } catch (e) { showError("选择图片失败：" + (e && (e.stack || e.message) || e)); }
-      });
+      const doPick = () => {
+        // 关键：若在画布按钮回调里（鼠标交互未结束、画布仍持有指针捕获）直接弹系统【模态】
+        // 文件框，会与画布指针捕获冲突，对话框"只闪一下"就消失。延迟到交互结束后再弹即可。
+        setStatus("正在打开图片选择框…");
+        setTimeout(() => {
+          Promise.resolve(api().pick_templates(multi)).then((paths) => {
+            if (!paths || !paths.length) { setStatus("已取消选择图片"); return; }
+            const picked = paths.join(",");
+            w.value = (multi && w.value) ? (w.value + "," + picked) : picked;  // 多模板追加，单模板替换
+            cb(w.value);
+            if (canvas) canvas.setDirty(true, true);
+            setStatus("已选择 " + paths.length + " 张图片");
+          }).catch((e) => showError("选择图片失败：" + (e && (e.stack || e.message) || e)));
+        }, 120);
+      };
+      const btn = node.addWidget("button", "选择图片…", null, doPick);
       btn._noSave = true;            // 按钮不是参数，保存时跳过（collect 按 _key 取值）
     }
   }

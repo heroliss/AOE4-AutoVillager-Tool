@@ -188,35 +188,17 @@ class Api:
     def pick_templates(self, multiple=True):
         """选择一个或多个模板图片，返回路径列表（供 template/templates 参数填入）。
 
-        关键：pywebview 的 js_api 方法运行在【工作线程】（util.js_bridge_call 起 Python 线程跑），
-        而 WinForms 文件对话框要求调用线程是 STA——在这个 MTA 工作线程直接 ShowDialog 会抛
-        "must be STA" 并被 pywebview 内部吞掉，表现就是"点了没反应/只闪一下"。这里像 pywebview
-        开主窗口那样，专门起一个 STA 线程来弹对话框；线程内异常如实抛出，让前端能看到原因。
+        与可正常工作的 open_dialog 用同一条路（pywebview 自带 create_file_dialog）。
+        注意：file_types 只用【一项】——之前加了 "所有文件 (*.*)" 这第二项时点击没反应，
+        改回单项即恢复正常。
         """
-        import System.Windows.Forms as WinForms
-        from System.Threading import Thread, ThreadStart, ApartmentState
-
-        box = {"paths": [], "err": None}
-
-        def run():
-            try:
-                dlg = WinForms.OpenFileDialog()
-                dlg.Multiselect = bool(multiple)
-                dlg.Title = "选择模板图片"
-                dlg.Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.gif|所有文件|*.*"
-                dlg.RestoreDirectory = True
-                if dlg.ShowDialog() == WinForms.DialogResult.OK:
-                    box["paths"] = [str(f) for f in dlg.FileNames]
-            except Exception as e:  # 记录线程内异常，回到主调用处再抛
-                box["err"] = repr(e)
-
-        t = Thread(ThreadStart(run))
-        t.SetApartmentState(ApartmentState.STA)
-        t.Start()
-        t.Join()
-        if box["err"]:
-            raise RuntimeError("文件对话框失败：" + box["err"])
-        return box["paths"]
+        import webview
+        res = self._window.create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=bool(multiple),
+            file_types=("图片 (*.png;*.jpg;*.jpeg;*.bmp;*.gif)",))
+        if not res:
+            return []
+        return list(res) if isinstance(res, (list, tuple)) else [res]
 
     def autolayout(self, payload):
         from ..layout import mainline_layout
