@@ -1,10 +1,10 @@
 """
 启动节点编辑器。
 
-用 3.13 venv 运行（DearPyGui 在此环境验证可用）：
-    .venv\\Scripts\\python run_editor.py [flows\\villager.flow.json]
+    python run_editor.py [flows\\villager.flow.json]
 
 可选参数：要打开的流程图 JSON 路径；不给则新建空白流程。
+（DearPyGui 在 Python 3.14 上验证可用，直接用系统 python 即可。）
 """
 from __future__ import annotations
 

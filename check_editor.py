@@ -1,6 +1,6 @@
 """
 编辑器无头冒烟测试：构建 UI、手动渲染若干帧、模拟连线/增删、存读往返，全程不需人工交互。
-需在 3.13 venv 运行：.venv\\Scripts\\python check_editor.py
+运行：python check_editor.py
 """
 from __future__ import annotations
 
