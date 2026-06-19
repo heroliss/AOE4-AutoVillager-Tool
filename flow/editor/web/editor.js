@@ -87,9 +87,12 @@ const ED = (function () {
       dialog.innerHTML = multiline
         ? "<span class='name'></span><textarea autofocus class='value'></textarea>"
         : "<span class='name'></span><input autofocus type='text' class='value'/>";
+      let closed = false;
       dialog.close = function () {
-        that.prompt_box = null;
-        if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+        if (closed) return;             // 失焦/点外部/回车可能重复触发，幂等避免 removeChild 抛错
+        closed = true;
+        if (that.prompt_box === dialog) that.prompt_box = null;
+        dialog.remove();                // 安全：已移除时为 no-op
       };
       const canvasEl = this.canvas;
       canvasEl.parentNode.appendChild(dialog);
@@ -137,6 +140,14 @@ const ED = (function () {
       try { _origDrawWidgets.call(this, node, posY, ctx, active_widget); }
       finally { for (const s of saved) s[0].value = s[1]; }
     };
+
+    // 右键菜单过高时内部滚动（而不是整体上下移动）
+    if (!document.getElementById("aoe4-style")) {
+      const st = document.createElement("style");
+      st.id = "aoe4-style";
+      st.textContent = ".litecontextmenu{max-height:84vh!important;overflow-y:auto!important;overflow-x:hidden;}";
+      document.head.appendChild(st);
+    }
 
     // 编辑值的浮动输入框：点击其外部即关闭（符合"所有弹窗点外部关闭"的预期）
     if (!window.__dlgCloseHooked) {
@@ -412,7 +423,11 @@ const ED = (function () {
   function applySnapshot(s) {
     suppressSnap = true;
     const cam = [canvas.ds.scale, canvas.ds.offset[0], canvas.ds.offset[1]];  // 保持视角不变
+    // 折叠状态不进撤销：重建后沿用当前折叠状态，避免撤销把折叠的节点又展开
+    const collapsed = new Set();
+    for (const n of graph._nodes) if (n.flags && n.flags.collapsed) collapsed.add(n._id);
     buildGraph(JSON.parse(s));
+    for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
     canvas.setDirty(true, true);
     suppressSnap = false;
@@ -434,7 +449,7 @@ const ED = (function () {
   // ---- 右键连线任意位置：找出离光标最近的连线（采样贝塞尔曲线）----
   function linkNear(gx, gy) {
     if (!graph) return null;
-    const thr = 12 / (canvas.ds.scale || 1);   // 命中阈值（图坐标）
+    const thr = 14 / (canvas.ds.scale || 1);   // 命中阈值（图坐标）
     let best = null, bestD = thr;
     for (const k in graph.links) {
       const l = graph.links[k]; if (!l) continue;
@@ -443,13 +458,9 @@ const ED = (function () {
       let p0, p3;
       try { p0 = a.getConnectionPos(false, l.origin_slot); p3 = b.getConnectionPos(true, l.target_slot); }
       catch (e) { continue; }
-      const L = Math.max(40, Math.abs(p3[0] - p0[0]) * 0.5);  // 近似 LiteGraph 的水平切线控制点
-      const p1 = [p0[0] + L, p0[1]], p2 = [p3[0] - L, p3[1]];
       for (let t = 0; t <= 1.0001; t += 0.04) {
-        const it = 1 - t;
-        const x = it*it*it*p0[0] + 3*it*it*t*p1[0] + 3*it*t*t*p2[0] + t*t*t*p3[0];
-        const y = it*it*it*p0[1] + 3*it*it*t*p1[1] + 3*it*t*t*p2[1] + t*t*t*p3[1];
-        const d = Math.hypot(x - gx, y - gy);
+        const pt = canvas.computeConnectionPoint(p0, p3, t);  // 与渲染所用样条完全一致，命中更准
+        const d = Math.hypot(pt[0] - gx, pt[1] - gy);
         if (d < bestD) { bestD = d; best = l; }
       }
     }
