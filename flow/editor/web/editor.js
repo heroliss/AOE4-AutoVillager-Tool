@@ -10,6 +10,8 @@ const ED = (function () {
   let helpEl = null;
   let seq = 1;
   let booted = false;
+  // 撤销/重做（快照式）
+  let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
   // ---- 错误可视化（界面里看不到控制台，所以把错误显示出来）----
   function showError(msg) {
@@ -77,6 +79,65 @@ const ED = (function () {
       });
       return opts;
     };
+    // 值编辑浮框：去掉 OK 按钮，输入即"实时生效"；回车/失焦/点外部即关闭。
+    LGraphCanvas.prototype.prompt = function (title, value, callback, event, multiline) {
+      const that = this;
+      const dialog = document.createElement("div");
+      dialog.className = "graphdialog rounded";
+      dialog.innerHTML = multiline
+        ? "<span class='name'></span><textarea autofocus class='value'></textarea>"
+        : "<span class='name'></span><input autofocus type='text' class='value'/>";
+      dialog.close = function () {
+        that.prompt_box = null;
+        if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+      };
+      const canvasEl = this.canvas;
+      canvasEl.parentNode.appendChild(dialog);
+      if (this.ds.scale > 1) dialog.style.transform = "scale(" + this.ds.scale + ")";
+      if (that.prompt_box) that.prompt_box.close();
+      that.prompt_box = dialog;
+
+      dialog.querySelector(".name").innerText = title || "";
+      const input = dialog.querySelector(".value");
+      input.value = value == null ? "" : value;
+
+      const commit = () => { try { if (callback) callback(input.value); } catch (e) {} that.dirty_canvas = true; };
+      input.addEventListener("input", commit);          // 实时生效
+      input.addEventListener("keydown", (e) => {
+        e.stopPropagation();                            // 不触发画布快捷键/撤销
+        if (e.keyCode === 27) dialog.close();           // Esc 关闭
+        else if (e.keyCode === 13 && !multiline) { commit(); dialog.close(); e.preventDefault(); }  // 回车提交并关闭
+      });
+      input.addEventListener("focusout", () => { commit(); dialog.close(); });  // 失焦提交并关闭
+
+      const rect = canvasEl.getBoundingClientRect();
+      if (event) {
+        dialog.style.left = (event.clientX - rect.left - 20) + "px";
+        dialog.style.top = (event.clientY - rect.top) + "px";
+      } else {
+        dialog.style.left = (canvasEl.width * 0.5 - 40) + "px";
+        dialog.style.top = (canvasEl.height * 0.5) + "px";
+      }
+      setTimeout(() => { input.focus(); if (!multiline) input.select(); }, 10);
+      return dialog;
+    };
+
+    // 超长文本参数在节点上"截断显示"（带省略号），不改变真实值（编辑/保存仍是完整值）。
+    const _origDrawWidgets = LGraphCanvas.prototype.drawNodeWidgets;
+    LGraphCanvas.prototype.drawNodeWidgets = function (node, posY, ctx, active_widget) {
+      const saved = [];
+      const maxChars = Math.max(4, Math.floor((node.size[0] - 90) / 9));
+      for (const w of (node.widgets || [])) {
+        if ((w.type === "text" || w.type === "string") &&
+            w.value != null && String(w.value).length > maxChars) {
+          saved.push([w, w.value]);
+          w.value = String(w.value).slice(0, maxChars) + "…";
+        }
+      }
+      try { _origDrawWidgets.call(this, node, posY, ctx, active_widget); }
+      finally { for (const s of saved) s[0].value = s[1]; }
+    };
+
     // 编辑值的浮动输入框：点击其外部即关闭（符合"所有弹窗点外部关闭"的预期）
     if (!window.__dlgCloseHooked) {
       window.__dlgCloseHooked = true;
@@ -92,7 +153,7 @@ const ED = (function () {
     // 构造期（new base_class）createNode 尚未给 node.properties 赋初值，需自行兜底，
     // 否则末尾 node.properties[key]=... 会抛 TypeError，导致带参数的节点整体创建失败。
     if (!node.properties) node.properties = {};
-    const cb = (v) => { if (!node.properties) node.properties = {}; node.properties[p.key] = v; };
+    const cb = (v) => { if (!node.properties) node.properties = {}; node.properties[p.key] = v; scheduleSnap(); };
     let w;
     if (p.ptype === "int")
       w = node.addWidget("number", p.label, Number(p.default ?? 0), cb, { step: 10, precision: 0 });
@@ -142,6 +203,7 @@ const ED = (function () {
 
   function buildGraph(flow) {
     if (!graph) return 0;
+    building = true;   // 建图期间抑制撤销快照
     graph.clear();
     const idMap = {};
     const missing = {};
@@ -183,6 +245,7 @@ const ED = (function () {
     if (miss.length)
       showError("未注册的节点类型（未渲染）：" + miss.map((t) => t + "×" + missing[t]).join(", "));
     if (lastErr) showError("建图时有节点失败，最后一个：\n" + lastErr);
+    building = false;
     return added;
   }
 
@@ -235,10 +298,12 @@ const ED = (function () {
 
   function load(flow) {
     graph._aoe4_name = flow.name;
+    undoStack = []; redoStack = [];   // 新流程：清空撤销历史
     const added = buildGraph(flow);
     const total = (flow.nodes || []).length;
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
     setStatus(`流程：${flow.name} ｜ 节点 ${added}/${total}`);
+    snapshotNow();   // 记录初始快照，作为撤销的基线
   }
 
   // ---- 启动：优先用 Python push 进来的数据 ----
@@ -334,6 +399,71 @@ const ED = (function () {
     helpEl.style.display = "block";
   }
 
+  // ---- 撤销/重做（对整图做 JSON 快照；buildGraph/applySnapshot 期间抑制）----
+  function snapshotNow() {
+    if (suppressSnap || building || !graph) return;
+    const s = JSON.stringify(collect());
+    if (undoStack.length && undoStack[undoStack.length - 1] === s) return;
+    undoStack.push(s);
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack = [];
+  }
+  function scheduleSnap() { clearTimeout(snapTimer); snapTimer = setTimeout(snapshotNow, 250); }
+  function applySnapshot(s) {
+    suppressSnap = true;
+    const cam = [canvas.ds.scale, canvas.ds.offset[0], canvas.ds.offset[1]];  // 保持视角不变
+    buildGraph(JSON.parse(s));
+    canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
+    canvas.setDirty(true, true);
+    suppressSnap = false;
+  }
+  function undo() {
+    if (undoStack.length < 2) return;
+    redoStack.push(undoStack.pop());
+    applySnapshot(undoStack[undoStack.length - 1]);
+    setStatus("已撤销");
+  }
+  function redo() {
+    if (!redoStack.length) return;
+    const s = redoStack.pop();
+    undoStack.push(s);
+    applySnapshot(s);
+    setStatus("已重做");
+  }
+
+  // ---- 右键连线任意位置：找出离光标最近的连线（采样贝塞尔曲线）----
+  function linkNear(gx, gy) {
+    if (!graph) return null;
+    const thr = 12 / (canvas.ds.scale || 1);   // 命中阈值（图坐标）
+    let best = null, bestD = thr;
+    for (const k in graph.links) {
+      const l = graph.links[k]; if (!l) continue;
+      const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
+      if (!a || !b) continue;
+      let p0, p3;
+      try { p0 = a.getConnectionPos(false, l.origin_slot); p3 = b.getConnectionPos(true, l.target_slot); }
+      catch (e) { continue; }
+      const L = Math.max(40, Math.abs(p3[0] - p0[0]) * 0.5);  // 近似 LiteGraph 的水平切线控制点
+      const p1 = [p0[0] + L, p0[1]], p2 = [p3[0] - L, p3[1]];
+      for (let t = 0; t <= 1.0001; t += 0.04) {
+        const it = 1 - t;
+        const x = it*it*it*p0[0] + 3*it*it*t*p1[0] + 3*it*t*t*p2[0] + t*t*t*p3[0];
+        const y = it*it*it*p0[1] + 3*it*it*t*p1[1] + 3*it*t*t*p2[1] + t*t*t*p3[1];
+        const d = Math.hypot(x - gx, y - gy);
+        if (d < bestD) { bestD = d; best = l; }
+      }
+    }
+    return best;
+  }
+  function onRightDown(e) {
+    if (e.button !== 2 || !graph || !canvas) return;
+    let off;
+    try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
+    if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;  // 节点上交给 LiteGraph
+    const link = linkNear(off[0], off[1]);
+    if (link) { e.preventDefault(); e.stopImmediatePropagation(); canvas.showLinkMenu(link, e); }
+  }
+
   function start() {
     try {
       setupColors();
@@ -342,6 +472,22 @@ const ED = (function () {
       canvas = new LGraphCanvas("#graph", graph);
       canvas.allow_searchbox = false;   // 关闭双击/Shift 弹出的搜索框（易误触；加节点统一走右键空白处"添加节点"）
       setupHelpPanel();
+      // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
+      graph.onConnectionChange = scheduleSnap;
+      graph.onNodeAdded = scheduleSnap;
+      graph.onNodeRemoved = scheduleSnap;
+      canvas.onNodeMoved = scheduleSnap;
+      // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
+      canvas.canvas.addEventListener("pointerdown", onRightDown, true);
+      // 兜底：任何鼠标交互结束后尝试快照（snapshotNow 用 JSON 比对去重，无变化不入栈）
+      canvas.canvas.addEventListener("pointerup", scheduleSnap);
+      // Ctrl+Z 撤销 / Ctrl+Y 或 Ctrl+Shift+Z 重做（编辑输入框内已 stopPropagation，不会误触）
+      document.addEventListener("keydown", (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        const k = e.key.toLowerCase();
+        if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+        else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+      });
       resize();
       window.addEventListener("resize", resize);
       // 用 ResizeObserver 让窗口拖拽改变大小时内容实时刷新（window resize 在部分情况下不够即时）
