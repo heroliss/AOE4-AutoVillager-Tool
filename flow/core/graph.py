@@ -46,6 +46,8 @@ class Graph:
         self.positions: dict[str, tuple[float, float]] = {}
         self.exec_edges: list[Edge] = []
         self.data_edges: list[Edge] = []
+        # 用户给节点写的说明（仅编辑器展示，不参与执行）。node_id -> 文本。
+        self.notes: dict[str, str] = {}
 
     # ==================== 构建 ====================
     def add(self, node_id: str, node: Node, pos: tuple[float, float] = (0.0, 0.0)) -> Node:
@@ -97,6 +99,8 @@ class Graph:
                     "type": node.type_id,
                     "pos": list(self.positions.get(node_id, (0.0, 0.0))),
                     "params": dict(node.values),
+                    # 仅在有说明时写出 note 键，避免改动既有流程文件/破坏往返一致性
+                    **({"note": self.notes[node_id]} if self.notes.get(node_id) else {}),
                 }
                 for node_id, node in self.nodes.items()
             ],
@@ -115,6 +119,8 @@ class Graph:
                     node.values[k] = v
             pos = nd.get("pos", [0.0, 0.0])
             g.add(nd["id"], node, (pos[0], pos[1]))
+            if nd.get("note"):
+                g.notes[nd["id"]] = nd["note"]
         for e in data.get("exec_edges", []):
             g.connect_exec(e[0], e[1], e[2], e[3])
         for e in data.get("data_edges", []):

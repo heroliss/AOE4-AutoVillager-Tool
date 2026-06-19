@@ -38,6 +38,14 @@ _HINT_FG = "#cca700"
 _HINT_FONT = ("Microsoft YaHei UI", 11, "bold")
 
 
+def _safe_destroy(root):
+    """幂等销毁：若窗口已被（点 X / Alt+F4）销毁，再 destroy 会抛 TclError，这里吞掉。"""
+    try:
+        root.destroy()
+    except Exception:
+        pass
+
+
 def _grab_screen():
     """抓取主显示器全屏，返回 (PIL.Image, w, h)。失败抛异常由调用方处理。"""
     from PIL import ImageGrab
@@ -76,6 +84,8 @@ def _make_overlay(hint: str):
     tk.Label(bar, text=hint, bg=_HINT_BG, fg=_HINT_FG, font=_HINT_FONT,
              padx=14, pady=6).pack()
 
+    # 关闭窗口（万一有 X / Alt+F4）只退出 mainloop，统一由调用方做唯一一次销毁。
+    root.protocol("WM_DELETE_WINDOW", root.quit)
     root.geometry(f"{w}x{h}+0+0")
     root.focus_force()
     return root, canvas, shot, w, h
@@ -132,7 +142,7 @@ def _pick_pixel(want_color: bool):
     canvas.bind("<ButtonPress-1>", on_click)
     root.bind("<Escape>", on_esc)
     root.mainloop()
-    root.destroy()
+    _safe_destroy(root)
     return state["result"]
 
 
@@ -212,7 +222,7 @@ def _drag_rect(on_confirm_label: str):
 def pick_region():
     """框选区域，返回 [left, top, right, bottom]（取消返回 None）。"""
     root, box = _drag_rect("确认")
-    root.destroy()
+    _safe_destroy(root)
     return box
 
 
@@ -221,10 +231,10 @@ def capture_template(save_dir: str):
     root, box = _drag_rect("截图保存")
     shot = getattr(root, "_shot", None)
     if box is None or shot is None:
-        root.destroy()
+        _safe_destroy(root)
         return None
     crop = shot.crop(tuple(box))
-    root.destroy()
+    _safe_destroy(root)
     os.makedirs(save_dir, exist_ok=True)
     name = f"cap_{time.strftime('%Y%m%d_%H%M%S')}.png"
     path = os.path.join(save_dir, name)
@@ -263,6 +273,7 @@ def capture_key():
         return "break"
 
     root.bind("<KeyPress>", on_key)
+    root.protocol("WM_DELETE_WINDOW", root.quit)  # 点 X 关闭＝取消（只退 mainloop，不重复销毁）
     # 居中
     root.update_idletasks()
     w, h = root.winfo_width(), root.winfo_height()
@@ -270,5 +281,5 @@ def capture_key():
     root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 3}")
     root.focus_force()
     root.mainloop()
-    root.destroy()
+    _safe_destroy(root)
     return state["key"]

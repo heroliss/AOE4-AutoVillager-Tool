@@ -118,8 +118,11 @@ def graph_to_payload(graph: Graph) -> dict:
         params = {}
         for s in node.params:
             params[s.key] = _param_to_js_raw(s, node.values.get(s.key))
-        nodes.append({"id": nid, "type": node.type_id,
-                      "pos": list(graph.positions.get(nid, (0, 0))), "params": params})
+        nd = {"id": nid, "type": node.type_id,
+              "pos": list(graph.positions.get(nid, (0, 0))), "params": params}
+        if graph.notes.get(nid):
+            nd["note"] = graph.notes[nid]
+        nodes.append(nd)
     edges = [{"src": e.src_id, "src_port": e.src_port, "dst": e.dst_id, "dst_port": e.dst_port,
               "kind": "exec"} for e in graph.exec_edges]
     edges += [{"src": e.src_id, "src_port": e.src_port, "dst": e.dst_id, "dst_port": e.dst_port,
@@ -141,6 +144,8 @@ def payload_to_graph(payload: dict) -> Graph:
                 node.values[k] = _param_from_js(specs[k], v)
         pos = nd.get("pos", [0, 0])
         g.add(nd["id"], node, (pos[0], pos[1]))
+        if nd.get("note"):
+            g.notes[nd["id"]] = nd["note"]
     kinds = _port_kind_map()
     for e in payload.get("edges", []):
         src_type = next((n["type"] for n in payload["nodes"] if n["id"] == e["src"]), None)
@@ -208,12 +213,33 @@ class Api:
         改回单项即恢复正常。
         """
         import webview
+        os.makedirs(TEMPLATES_DIR, exist_ok=True)
         res = self._window.create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=bool(multiple),
+            directory=TEMPLATES_DIR,   # 默认定位到模板目录（模板大多放这里）
             file_types=("图片 (*.png;*.jpg;*.jpeg;*.bmp;*.gif)",))
         if not res:
             return []
         return list(res) if isinstance(res, (list, tuple)) else [res]
+
+    def image_data_url(self, path):
+        """把模板图片读成 data URL（base64），供前端在节点上画缩略图预览。
+
+        WebView2 出于安全不让页面随意读本地任意文件，所以由 Python 读字节再回传。
+        找不到/读失败返回空串（前端据此不画预览）。
+        """
+        import base64
+        try:
+            p = path if os.path.isabs(path) else os.path.abspath(path)
+            if not os.path.isfile(p):
+                return ""
+            ext = os.path.splitext(p)[1].lower().lstrip(".") or "png"
+            mime = {"jpg": "jpeg"}.get(ext, ext)
+            with open(p, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            return f"data:image/{mime};base64,{b64}"
+        except Exception:
+            return ""
 
     # ---------- 采集工具（框选/取点/吸色/截模板/捕获按键）----------
     def _capture(self, fn):
