@@ -193,17 +193,14 @@ def main() -> None:
     ok &= check("往返结构一致", g2.to_dict() == data)
     ok &= check(f"节点数 {len(g.nodes)} / 执行连线 {len(g.exec_edges)} / 数据连线 {len(g.data_edges)}", True)
 
-    # 落盘三个默认流程（含自动排版坐标），供编辑器/headless 使用
+    # 只落盘一个内置流程：统一生产（村民/乡骑/商队三段，用内部开关启停各段）。
+    # 其余 villager/trade_cart/jin 仅作为上面的引擎逻辑单元测试用例，不再作为内置流程分发。
     from flow.layout import mainline_layout
     os.makedirs("flows", exist_ok=True)
-    for fname, build in (("villager", build_villager_graph),
-                         ("trade_cart", build_trade_cart_graph),
-                         ("jin", build_jin_graph),
-                         ("combined", build_combined_graph)):
-        gg = build()
-        mainline_layout(gg)
-        gg.save(f"flows/{fname}.flow.json")
-        print(f"已写出 flows/{fname}.flow.json")
+    gg = build_combined_graph()
+    mainline_layout(gg)
+    gg.save("flows/combined.flow.json")
+    print("已写出 flows/combined.flow.json")
 
     print("\n" + ("全部通过 OK" if ok else "存在失败 FAIL"))
     raise SystemExit(0 if ok else 1)

@@ -785,6 +785,7 @@ const ED = (function () {
     el.innerHTML = "📄 " + esc(flowMeta.name) + tag;
     el.title = (flowMeta.readonly ? "内置流程（只读）：保存会另存到「我的流程」。\n\n" : "") +
                (flowMeta.desc || "（暂无流程说明，点顶部「流程信息…」添加）");
+    selectCurrentInList();   // 下拉同步显示当前流程
   }
 
   // 顶部下拉：列出内置/我的流程，按【中文流程名】显示（值仍是完整相对路径，供 openBuiltin 打开）。
@@ -792,8 +793,7 @@ const ED = (function () {
   function fillFlowList(list) {
     const sel = document.getElementById("builtin");
     if (!sel) return;
-    // 首项是"提示标签"：disabled 故不可被选中，仅作为下拉收起时的按钮文案（选完会重置回它）。
-    sel.innerHTML = "<option value='' disabled selected>打开内置流程…</option>";
+    sel.innerHTML = "";   // 无提示项：下拉直接“显示当前打开的流程”，切换即载入
     const groups = { "flows": [], "user_flows": [] };
     for (const it of (list || [])) {
       const item = (typeof it === "string") ? { path: it, name: it } : it;   // 兼容旧的纯字符串
@@ -814,6 +814,21 @@ const ED = (function () {
     };
     mk("内置流程（只读）", groups["flows"]);
     mk("我的流程", groups["user_flows"]);
+    selectCurrentInList();
+  }
+
+  // 让下拉显示“当前打开的流程”：按路径精确匹配，匹配不到再按文件名，仍不到则置空(-1)。
+  function selectCurrentInList() {
+    const sel = document.getElementById("builtin");
+    if (!sel) return;
+    const key = String(flowMeta.path || "").replace(/\\/g, "/");
+    const base = key.split("/").pop();
+    let idx = -1;
+    for (let i = 0; i < sel.options.length; i++) {
+      const v = sel.options[i].value;
+      if (v && (v === key || (base && v.split("/").pop() === base))) { idx = i; break; }
+    }
+    sel.selectedIndex = idx;
   }
 
   // ---- 启动：优先用 Python push 进来的数据 ----
@@ -837,8 +852,8 @@ const ED = (function () {
     flowMeta.path = p;
     flowMeta.readonly = false;
     markSaved();
+    try { fillFlowList(await api().list_builtin()); } catch (e) {}   // 新另存的流程进入列表
     updateFlowMeta();
-    try { fillFlowList(await api().list_builtin()); } catch (e) {}
   }
 
   const self = {
@@ -864,13 +879,11 @@ const ED = (function () {
       } catch (err) { showError("打开失败：" + (err.stack || err)); }
     },
     async openBuiltin(path) {
-      const sel = document.getElementById("builtin");
       if (!path) return;
       try {
         const flow = await api().open_path(path);
-        if (flow) load(flow);
-      } catch (err) { showError("打开流程失败：" + (err.stack || err)); }
-      finally { if (sel) sel.selectedIndex = 0; }   // 重置回提示项，下拉像按钮一样可重复选同一项
+        if (flow) load(flow);   // load -> updateFlowMeta -> 下拉自动选中该项
+      } catch (err) { showError("打开流程失败：" + (err.stack || err)); selectCurrentInList(); }
     },
     async autolayout() {
       try {

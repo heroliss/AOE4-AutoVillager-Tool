@@ -1,6 +1,7 @@
 {
   "version": 1,
   "name": "统一生产(村民/乡骑/商队)",
+  "description": "同一帧内依次生产 村民/乡骑/商队，每段由一个开关节点单独启停（默认只开村民）。\n前段做一次共享判断（暂停/窗口/遮挡）与整屏预取，三段复用人口/资源/TC 等识别结果。\n区域/模板/按键/成本均为占位默认值，请按你的分辨率与实际界面在节点上调整。",
   "nodes": [
     {
       "id": "tick",
@@ -11,18 +12,20 @@
       ],
       "params": {
         "interval": 0.1
-      }
+      },
+      "note": "每帧触发：整个流程的循环入口，按「循环间隔」决定多久跑一轮。"
     },
     {
       "id": "mod",
       "type": "sense.modifier_down",
       "pos": [
         49.0,
-        156.0
+        208.0
       ],
       "params": {
         "keys": "shift,ctrl,alt"
-      }
+      },
+      "note": "检测是否按住 Shift/Ctrl/Alt——用于“人在手动操作时自动暂停”。"
     },
     {
       "id": "if_mod",
@@ -31,14 +34,15 @@
         494.5,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "按住修饰键则本帧到此结束（走 false 才继续），相当于手动接管时让路。"
     },
     {
       "id": "win",
       "type": "sense.window_check",
       "pos": [
         403.0,
-        144.0
+        244.0
       ],
       "params": {
         "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
@@ -62,7 +66,8 @@
           105
         ],
         "tolerance": 0
-      }
+      },
+      "note": "检测当前是否在游戏内（窗口标题 + 一个特征像素颜色）。"
     },
     {
       "id": "if_win",
@@ -71,14 +76,15 @@
         887.5,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "不在游戏中（或没激活）就本帧结束，避免对着别的窗口乱按。"
     },
     {
       "id": "occ",
       "type": "game.occlusion",
       "pos": [
         810.0,
-        144.0
+        228.0
       ],
       "params": {
         "region": [
@@ -93,7 +99,8 @@
         "stable_threshold": 2,
         "transition_repeat": 3,
         "change_threshold": 0.05
-      }
+      },
+      "note": "三态遮挡检测：生产相关区域是否被 UI 盖住 / 正在渐变。"
     },
     {
       "id": "if_blocked",
@@ -102,7 +109,8 @@
         1189.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "被遮挡则本帧结束（这时识别/点击都不可靠）。"
     },
     {
       "id": "if_trans",
@@ -111,7 +119,8 @@
         1413.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "UI 正在渐入渐出动画时本帧结束，避免误判。"
     },
     {
       "id": "prefetch",
@@ -120,14 +129,15 @@
         1637.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "整屏截图一次并缓存，后面所有识别都复用它，省去多次截图。"
     },
     {
       "id": "pop",
       "type": "sense.ocr_number",
       "pos": [
         3114.5,
-        1170.0
+        1366.0
       ],
       "params": {
         "region": [
@@ -140,25 +150,27 @@
         "allowlist": "0123456789/\\|OolIsS ",
         "regex": "(\\d+)[/\\\\|](\\d+)",
         "aggregate": "first"
-      }
+      },
+      "note": "识别人口「当前/上限」：数值=当前，数值2=上限。"
     },
     {
       "id": "slots",
       "type": "math.arith",
       "pos": [
         3494.0,
-        272.0
+        376.0
       ],
       "params": {
         "op": "-"
-      }
+      },
+      "note": "人口空位 = 上限 - 当前，作为可生产数量的上限之一。"
     },
     {
       "id": "food",
       "type": "sense.ocr_number",
       "pos": [
         3477.0,
-        400.0
+        556.0
       ],
       "params": {
         "region": [
@@ -171,14 +183,15 @@
         "allowlist": "0123456789/\\|OolIsS ",
         "regex": "(\\d+)",
         "aggregate": "first"
-      }
+      },
+      "note": "识别当前食物存量（约束村民产量）。"
     },
     {
       "id": "gold",
       "type": "sense.ocr_number",
       "pos": [
         4902.0,
-        272.0
+        376.0
       ],
       "params": {
         "region": [
@@ -191,14 +204,15 @@
         "allowlist": "0123456789/\\|OolIsS ",
         "regex": "(\\d+)",
         "aggregate": "first"
-      }
+      },
+      "note": "识别当前黄金存量（约束乡骑/商队产量）。"
     },
     {
       "id": "tc",
       "type": "game.tc_count",
       "pos": [
         3097.0,
-        634.0
+        792.0
       ],
       "params": {
         "icon_region": [
@@ -225,18 +239,20 @@
         "threshold": 0.7,
         "crop_size": 20,
         "early_exit": 0.95
-      }
+      },
+      "note": "统计当前有几个城镇中心(TC)，用于“每个TC各排一批”。"
     },
     {
       "id": "c_one",
       "type": "data.const_number",
       "pos": [
         5998.5,
-        634.0
+        776.0
       ],
       "params": {
         "value": 1
-      }
+      },
+      "note": "常量 1：商队按“市场数=1”计划（一般只一个市场）。"
     },
     {
       "id": "lock",
@@ -245,7 +261,8 @@
         1861.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "抢占操作锁：多开/多脚本时避免同时抢操作。占用中则本帧结束。"
     },
     {
       "id": "block_begin",
@@ -256,7 +273,8 @@
       ],
       "params": {
         "max_duration": 3.0
-      }
+      },
+      "note": "开始屏蔽鼠标键盘：操作期间防止人为误触打断。"
     },
     {
       "id": "save_sel",
@@ -270,7 +288,8 @@
         "modifiers": "ctrl",
         "repeat": 1,
         "post_escape": false
-      }
+      },
+      "note": "Ctrl+0：把当前选中的单位暂存为编组 0，操作完再恢复。"
     },
     {
       "id": "relmod1",
@@ -279,18 +298,20 @@
         2838.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "松开 Shift/Ctrl/Alt，避免修饰键粘连影响后续按键。"
     },
     {
       "id": "sw_vill",
       "type": "data.switch",
       "pos": [
         2803.0,
-        124.0
+        208.0
       ],
       "params": {
         "on": true
-      }
+      },
+      "note": "【开关】是否生产村民。关掉则整段跳过。"
     },
     {
       "id": "if_sw_vill",
@@ -299,14 +320,15 @@
         3175.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "村民开关：开→进入村民段；关→直接跳到乡骑段。"
     },
     {
       "id": "q_vill",
       "type": "sense.template_match",
       "pos": [
         3105.5,
-        144.0
+        212.0
       ],
       "params": {
         "region": [
@@ -320,7 +342,8 @@
         ],
         "threshold": 0.6,
         "transition_guard": true
-      }
+      },
+      "note": "检测生产队列里是否已经有村民（避免重复排队）。"
     },
     {
       "id": "if_qvill",
@@ -329,7 +352,8 @@
         3537.5,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "队列已有村民则跳过本段。"
     },
     {
       "id": "sel_tc_v",
@@ -343,41 +367,45 @@
         "modifiers": "",
         "repeat": 1,
         "post_escape": false
-      }
+      },
+      "note": "按 H 选中所有城镇中心。"
     },
     {
       "id": "c_per_v",
       "type": "data.const_number",
       "pos": [
         3140.0,
-        526.0
+        632.0
       ],
       "params": {
         "value": 3
-      }
+      },
+      "note": "每个城镇中心一次排几个村民。"
     },
     {
       "id": "plan_v",
       "type": "math.arith",
       "pos": [
         3494.0,
-        144.0
+        196.0
       ],
       "params": {
         "op": "*"
-      }
+      },
+      "note": "计划数 = 每TC数量 × TC个数。"
     },
     {
       "id": "prod_v",
       "type": "game.produce_count",
       "pos": [
         3822.0,
-        296.0
+        332.0
       ],
       "params": {
         "cost_per_unit": 50,
         "cap": -1
-      }
+      },
+      "note": "实际产量 = min(计划, 人口空位, 食物÷单价)。"
     },
     {
       "id": "queue_v",
@@ -391,18 +419,20 @@
         "modifiers": "",
         "repeat": 1,
         "post_escape": true
-      }
+      },
+      "note": "按 Q 排队生产村民（按实际产量次数），完事按 ESC。"
     },
     {
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
         4214.5,
-        296.0
+        348.0
       ],
       "params": {
         "on": false
-      }
+      },
+      "note": "【开关】是否生产乡骑（金朝特色）。默认关。"
     },
     {
       "id": "if_sw_xq",
@@ -411,14 +441,15 @@
         4608.5,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "乡骑开关：开→进入乡骑段；关→跳到商队段。"
     },
     {
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
         4539.0,
-        144.0
+        212.0
       ],
       "params": {
         "region": [
@@ -432,7 +463,8 @@
         ],
         "threshold": 0.6,
         "transition_guard": true
-      }
+      },
+      "note": "检测队列里是否已有乡骑。"
     },
     {
       "id": "if_qxq",
@@ -441,7 +473,8 @@
         4962.5,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "队列已有乡骑则跳过本段。"
     },
     {
       "id": "sel_tc_x",
@@ -455,41 +488,45 @@
         "modifiers": "",
         "repeat": 1,
         "post_escape": false
-      }
+      },
+      "note": "按 H 选中所有城镇中心。"
     },
     {
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
         4573.5,
-        526.0
+        616.0
       ],
       "params": {
         "value": 2
-      }
+      },
+      "note": "每个城镇中心一次排几个乡骑。"
     },
     {
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
         4919.0,
-        144.0
+        196.0
       ],
       "params": {
         "op": "*"
-      }
+      },
+      "note": "计划数 = 每TC数量 × TC个数。"
     },
     {
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
         5247.0,
-        296.0
+        332.0
       ],
       "params": {
         "cost_per_unit": 80,
         "cap": -1
-      }
+      },
+      "note": "实际产量 = min(计划, 人口空位, 黄金÷单价)。"
     },
     {
       "id": "queue_x",
@@ -503,18 +540,20 @@
         "modifiers": "",
         "repeat": 1,
         "post_escape": true
-      }
+      },
+      "note": "按 W 排队生产乡骑，完事按 ESC。"
     },
     {
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
         5639.5,
-        296.0
+        348.0
       ],
       "params": {
         "on": false
-      }
+      },
+      "note": "【开关】是否生产商队（市场出商队）。默认关。"
     },
     {
       "id": "if_sw_cart",
@@ -523,14 +562,15 @@
         6033.5,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "商队开关：开→进入商队段；关→进入收尾。"
     },
     {
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
         5964.0,
-        144.0
+        212.0
       ],
       "params": {
         "region": [
@@ -544,7 +584,8 @@
         ],
         "threshold": 0.6,
         "transition_guard": true
-      }
+      },
+      "note": "检测队列里是否已有商队。"
     },
     {
       "id": "if_qcart",
@@ -553,7 +594,8 @@
         6370.5,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "队列已有商队则跳过本段。"
     },
     {
       "id": "sel_market",
@@ -567,41 +609,45 @@
         "modifiers": "",
         "repeat": 1,
         "post_escape": false
-      }
+      },
+      "note": "按 G 选中市场。"
     },
     {
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
         5998.5,
-        526.0
+        616.0
       ],
       "params": {
         "value": 5
-      }
+      },
+      "note": "每个市场一次排几个商队。"
     },
     {
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
         6327.0,
-        144.0
+        196.0
       ],
       "params": {
         "op": "*"
-      }
+      },
+      "note": "计划数 = 每市场数量 × 市场个数(此处常量1)。"
     },
     {
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
         6638.0,
-        296.0
+        332.0
       ],
       "params": {
         "cost_per_unit": 100,
         "cap": -1
-      }
+      },
+      "note": "实际产量 = min(计划, 人口空位, 黄金÷单价)。"
     },
     {
       "id": "queue_cart",
@@ -615,7 +661,8 @@
         "modifiers": "",
         "repeat": 1,
         "post_escape": true
-      }
+      },
+      "note": "按 Q 排队生产商队，完事按 ESC。"
     },
     {
       "id": "restore",
@@ -629,7 +676,8 @@
         "modifiers": "",
         "repeat": 1,
         "post_escape": false
-      }
+      },
+      "note": "按 0 恢复操作前暂存的编组选择。"
     },
     {
       "id": "disband",
@@ -643,7 +691,8 @@
         "modifiers": "ctrl,alt",
         "repeat": 1,
         "post_escape": false
-      }
+      },
+      "note": "Ctrl+Alt+0：解散临时编组，避免污染玩家的编组。"
     },
     {
       "id": "relmod2",
@@ -652,7 +701,8 @@
         8065.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "再次松开修饰键，确保收尾干净。"
     },
     {
       "id": "block_end",
@@ -661,7 +711,8 @@
         8289.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "结束输入屏蔽，把鼠标键盘还给玩家。"
     },
     {
       "id": "delay",
@@ -672,7 +723,8 @@
       ],
       "params": {
         "seconds": 3.0
-      }
+      },
+      "note": "等待若干秒再进入下一轮，避免空转太频繁。"
     },
     {
       "id": "unlock",
@@ -681,7 +733,8 @@
         8790.0,
         40.0
       ],
-      "params": {}
+      "params": {},
+      "note": "释放操作锁。"
     }
   ],
   "exec_edges": [
