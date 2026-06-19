@@ -56,8 +56,30 @@ class EditorApp:
         dpg.start_dearpygui()
         dpg.destroy_context()
 
+    # ==================== 中文字体 ====================
+    def _setup_fonts(self, size: int = 18):
+        """加载含中文字形的系统字体并全局绑定，否则中文显示为问号。"""
+        import glob
+        fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+        # 优先 .ttf（DearPyGui 的 stb 字体后端对 .ttc 集合支持不稳），再退回 .ttc
+        candidates = ["simhei.ttf", "Deng.ttf", "msyh.ttc", "msyh.ttf", "simsun.ttc", "msyhl.ttc"]
+        path = next((os.path.join(fonts_dir, c) for c in candidates
+                     if os.path.exists(os.path.join(fonts_dir, c))), None)
+        if path is None:  # 兜底：目录里任意一个中文常见字体
+            hits = glob.glob(os.path.join(fonts_dir, "msyh*.tt*")) or glob.glob(os.path.join(fonts_dir, "sim*.tt*"))
+            path = hits[0] if hits else None
+        if path is None:
+            self._set_status("未找到中文字体，界面中文可能显示为问号")
+            return
+        with dpg.font_registry():
+            with dpg.font(path, size) as f:
+                dpg.add_font_range_hint(dpg.mvFontRangeHint_Chinese_Simplified_Common)
+                dpg.add_font_range_hint(dpg.mvFontRangeHint_Default)
+        dpg.bind_font(f)
+
     # ==================== UI 构建 ====================
     def build_ui(self):
+        self._setup_fonts()
         with dpg.window(tag="main_window"):
             with dpg.menu_bar():
                 with dpg.menu(label="文件"):
