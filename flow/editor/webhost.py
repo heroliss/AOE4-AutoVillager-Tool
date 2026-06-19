@@ -21,6 +21,9 @@ from ..core import Graph, create_node, registry
 from ..core.types import PortKind
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+# 内置流程目录（只读模板，随程序分发）与 用户自定义流程目录（用户的另存到这里）。
+BUILTIN_FLOWS_DIR = os.path.abspath("flows")
+USER_FLOWS_DIR = os.path.abspath("user_flows")
 
 
 # ==================== 注册表 -> 前端类型定义 ====================
@@ -165,10 +168,19 @@ class Api:
         return graph_to_payload(self._graph) if self._graph else {"name": "未命名流程", "nodes": [], "edges": []}
 
     def list_builtin(self):
-        d = "flows"
-        if not os.path.isdir(d):
-            return []
-        return [f"flows/{f}" for f in sorted(os.listdir(d)) if f.endswith(".flow.json")]
+        # 同时列出内置流程(flows/)与用户另存的流程(user_flows/)，路径前缀即可区分。
+        out = []
+        for d in ("flows", "user_flows"):
+            if os.path.isdir(d):
+                out += [f"{d}/{f}" for f in sorted(os.listdir(d)) if f.endswith(".flow.json")]
+        return out
+
+    def _is_builtin(self, path):
+        """该路径是否在内置流程目录下（内置=只读，保存时改为另存，避免被覆盖）。"""
+        try:
+            return os.path.abspath(path).startswith(BUILTIN_FLOWS_DIR + os.sep)
+        except Exception:
+            return False
 
     def open_path(self, path):
         if path and os.path.exists(path):
@@ -209,7 +221,8 @@ class Api:
 
     def save(self, payload):
         self._graph = payload_to_graph(payload)
-        if not self._path:
+        # 没有路径，或当前是内置流程 -> 一律走"另存为"（内置只读，避免覆盖随程序分发的模板）。
+        if not self._path or self._is_builtin(self._path):
             return self.save_as(payload)
         self._graph.save(self._path)
         return self._path
@@ -217,8 +230,11 @@ class Api:
     def save_as(self, payload):
         import webview
         self._graph = payload_to_graph(payload)
-        res = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename="flow.flow.json",
-                                              file_types=("Flow (*.json)",))
+        os.makedirs(USER_FLOWS_DIR, exist_ok=True)
+        # 默认存到用户目录、用原文件名（内置改名另存就不会动到内置）。
+        default_name = os.path.basename(self._path) if self._path else "我的流程.flow.json"
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, directory=USER_FLOWS_DIR,
+                                              save_filename=default_name, file_types=("Flow (*.json)",))
         if res:
             path = res if isinstance(res, str) else res[0]
             self._graph.save(path)
