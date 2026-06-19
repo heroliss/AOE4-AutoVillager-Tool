@@ -92,18 +92,9 @@ const ED = (function () {
       });
       return false;
     };
-    // 画布空白右键：添加节点 + 分组管理（去掉 Add Group / Align / 子图等原生项）
+    // 画布空白右键：只留"添加节点"（分组操作改到“节点右键”里，更符合直觉）
     LGraphCanvas.prototype.getCanvasMenuOptions = function () {
-      const sel = Object.values(this.selected_nodes || {});
-      const opts = [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
-      opts.push({
-        content: "▦ 把选中节点编为一组…（" + sel.length + "）",
-        disabled: sel.length === 0,
-        callback: () => createGroupFromSelection(sel),
-      });
-      if (groupDefs.length)
-        opts.push({ content: "管理分组…", callback: () => manageGroups() });
-      return opts;
+      return [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
     };
     // 节点右键：精简到 克隆 / 删除 + 节点自定义项（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/
     // Collapse/Pin/Colors/Shapes 等堆叠项）。务必调用 node.getExtraMenuOptions，否则“添加/编辑描述”不出现。
@@ -511,54 +502,87 @@ const ED = (function () {
     });
   }
 
-  async function createGroupFromSelection(nodes) {
-    const name = await askText("新建分组（把选中的节点框成一组）", "分组" + (groupDefs.length + 1));
-    if (name == null) return;
-    groupDefs.push({ title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length],
-                     members: nodes.map((n) => n._id) });
+  // 一个节点最多属于一个分组（便于在节点上用单一颜色标记）。返回所属分组下标，无则 -1。
+  function nodeGroupIndex(ourId) {
+    return groupDefs.findIndex((g) => (g.members || []).includes(ourId));
+  }
+  function groupColorOf(ourId) {
+    const i = nodeGroupIndex(ourId);
+    return i >= 0 ? groupColor(groupDefs[i], i) : null;
+  }
+  // 把若干节点设为某分组（gi=null 表示移出所有分组）：先从所有组移除，再加入目标；清掉空组。
+  function setNodesGroup(ourIds, gi) {
+    for (const g of groupDefs) g.members = (g.members || []).filter((m) => !ourIds.includes(m));
+    if (gi != null && groupDefs[gi]) {
+      for (const id of ourIds) if (!groupDefs[gi].members.includes(id)) groupDefs[gi].members.push(id);
+    }
+    groupDefs = groupDefs.filter((g) => (g.members || []).length);
+    refreshGroups();
+  }
+  // 分组变化后：把每个节点的标题栏染成所属分组色 + 重绘 + 计脏。
+  function refreshGroups() {
+    applyGroupColors();
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
-    setStatus("已新建分组：" + (name.trim() || "分组"));
+  }
+  function applyGroupColors() {
+    for (const n of (graph && graph._nodes) || []) {
+      const c = groupColorOf(n._id);
+      if (c) { n.color = c; n.bgcolor = c + "1f"; } else { delete n.color; delete n.bgcolor; }
+    }
   }
 
-  // 管理分组：改名 / 改色 / 解散（解散只去掉框，不删节点）。改动实时生效。
-  function manageGroups() {
+  // 节点右键“分组…”：把当前(或选中的多个)节点指派到某分组 / 新建 / 移出；并可管理分组。
+  async function assignGroupDialog(nodes) {
+    const ids = nodes.map((n) => n._id);
     document.getElementById("grpdlg")?.remove();
     const box = document.createElement("div");
     box.id = "grpdlg";
-    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(440px,92vw);" +
+    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(460px,92vw);" +
       "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
       "padding:14px 16px;z-index:150;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
     document.body.appendChild(box);
+    // 当前节点们所属的分组（多选时若不一致则不预选）
+    const curIdx = ids.map(nodeGroupIndex);
+    const same = curIdx.every((x) => x === curIdx[0]) ? curIdx[0] : -2;
     const render = () => {
-      let h = "<b style='color:#e6c07b'>管理分组</b>（解散只去掉框，不删节点）";
-      if (!groupDefs.length) h += "<div style='color:#7f8895;margin-top:8px'>暂无分组。框选若干节点后右键“把选中节点编为一组”。</div>";
+      let h = `<b style='color:#e6c07b'>分组</b>（已选 ${ids.length} 个节点）` +
+              "<div style='color:#7f8895;margin:2px 0 8px'>一个节点只属于一个分组；选择即生效。</div>";
+      h += `<label style="display:block;cursor:pointer;padding:4px 0"><input type="radio" name="grp" value="-1" ${same === -1 ? "checked" : ""}> 不分组</label>`;
       groupDefs.forEach((g, i) => {
         const col = groupColor(g, i);
-        h += `<div data-i="${i}" style="display:flex;align-items:center;gap:6px;margin-top:8px">` +
+        h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0">` +
+             `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` +
              `<span style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
-             `<input data-act="title" value="${esc(g.title || "")}" style="flex:1;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;padding:3px 6px;font:13px 'Microsoft YaHei',sans-serif">` +
+             `<span style="flex:1">${esc(g.title || "分组")}</span>` +
              `<span style="color:#7f8895">${(g.members || []).length}个</span>` +
-             `<button data-act="color" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:2px 8px;cursor:pointer">换色</button>` +
-             `<button data-act="del" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:2px 8px;cursor:pointer">解散</button></div>`;
+             `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
+             `<button data-ren="${i}" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">改名</button>` +
+             `<button data-del="${i}" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:1px 7px;cursor:pointer">解散</button></label>`;
       });
-      h += "<div style='margin-top:12px;text-align:right'><button id='grp_close' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>关闭</button></div>";
+      h += "<div style='margin-top:10px'><button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ 新建分组（含选中节点）</button>" +
+        "<button id='grp_close' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer;float:right'>关闭</button></div>";
       box.innerHTML = h;
-      box.querySelectorAll("[data-i]").forEach((row) => {
-        const i = +row.getAttribute("data-i");
-        row.querySelector("[data-act='title']").onkeydown = (e) => e.stopPropagation();
-        row.querySelector("[data-act='title']").onchange = (e) => {
-          groupDefs[i].title = e.target.value.trim() || "分组"; apply();
-        };
-        row.querySelector("[data-act='color']").onclick = () => {
-          const cur = GROUP_COLORS.indexOf(groupDefs[i].color);
-          groupDefs[i].color = GROUP_COLORS[(cur + 1) % GROUP_COLORS.length]; apply(); render();
-        };
-        row.querySelector("[data-act='del']").onclick = () => { groupDefs.splice(i, 1); apply(); render(); };
+      box.querySelectorAll("input[name='grp']").forEach((r) =>
+        r.onchange = () => { const v = +r.value; setNodesGroup(ids, v < 0 ? null : v); render(); });
+      box.querySelectorAll("[data-color]").forEach((c) =>
+        c.oninput = () => { groupDefs[+c.getAttribute("data-color")].color = c.value; refreshGroups(); });
+      box.querySelectorAll("[data-ren]").forEach((b) => b.onclick = async () => {
+        const i = +b.getAttribute("data-ren");
+        const name = await askText("分组改名", groupDefs[i].title || "");
+        if (name != null) { groupDefs[i].title = name.trim() || "分组"; refreshGroups(); render(); }
       });
+      box.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+        groupDefs.splice(+b.getAttribute("data-del"), 1); refreshGroups(); render();
+      });
+      box.querySelector("#grp_new").onclick = async () => {
+        const name = await askText("新建分组", "分组" + (groupDefs.length + 1));
+        if (name == null) return;
+        groupDefs.push({ title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], members: [] });
+        setNodesGroup(ids, groupDefs.length - 1); render();
+      };
       box.querySelector("#grp_close").onclick = () => box.remove();
     };
-    const apply = () => { if (canvas) canvas.setDirty(true, true); scheduleSnap(); refreshDirty(); };
     render();
   }
 
@@ -576,7 +600,21 @@ const ED = (function () {
         ctx.restore();
       }
     }
-    // ② 附属卡片
+    // ②所属分组标记：标题栏左上方画一个小色块+组名（标题栏底色已是分组色，这里补“名称”，一眼可辨）。
+    const gi = nodeGroupIndex(this._id);
+    if (gi >= 0) {
+      const g = groupDefs[gi], col = groupColor(g, gi), name = g.title || "分组";
+      ctx.save();
+      ctx.font = "10px 'Microsoft YaHei',sans-serif";
+      const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
+      const tw = ctx.measureText(name).width, cy = -th - 15;
+      roundRect(ctx, 0, cy, tw + 12, 14, 3);
+      ctx.fillStyle = col; ctx.globalAlpha = 0.9; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = "#fff"; ctx.textBaseline = "alphabetic";
+      ctx.fillText(name, 6, cy + 10.5);
+      ctx.restore();
+    }
+    // ③ 附属卡片
     const note = this._note || "";
     const paths = nodePreviewPaths(this);
     if (!note && !paths.length) return;
@@ -637,12 +675,16 @@ const ED = (function () {
   function nodeExtraMenu(_canvas, options) {
     const node = this;
     options.push(null, {
-      content: node._note ? "编辑描述…" : "添加描述…",
+      content: node._note ? "编辑描述…" : "添加描述…",   // 清空描述在编辑框里删文字即可，不再单列“清除描述”
       callback: () => editNote(node),
     });
-    if (node._note) options.push({
-      content: "清除描述",
-      callback: () => { node._note = ""; if (canvas) canvas.setDirty(true, true); scheduleSnap(); },
+    // 分组：作用于“当前选中的多个节点”（若本节点在选区内），否则就本节点。
+    const sel = Object.values((canvas && canvas.selected_nodes) || {});
+    const targets = (sel.length > 1 && sel.includes(node)) ? sel : [node];
+    const gi = nodeGroupIndex(node._id);
+    options.push({
+      content: gi >= 0 ? `分组：${groupDefs[gi].title}…` : "分组…",
+      callback: () => assignGroupDialog(targets),
     });
   }
   function editNote(node) {
@@ -1047,6 +1089,7 @@ const ED = (function () {
       ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
       : [];
     const added = buildGraph(flow);
+    applyGroupColors();   // 按分组给节点标题栏染色
     const total = (flow.nodes || []).length;
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
     setStatus(`流程：${flowMeta.name} ｜ 节点 ${added}/${total}`);
@@ -1142,6 +1185,46 @@ const ED = (function () {
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
   }
+  // 面板上的“采集型”参数控件：显示当前值 + 用游戏内采集按钮设置（按键用“捕获”，区域/坐标/颜色用“采集”）。
+  function captureControl(node, key, pt) {
+    const wrap = document.createElement("span");
+    wrap.style.cssText = "display:inline-flex;align-items:center;gap:4px";
+    const val = document.createElement("span");
+    val.style.cssText = "color:#cfd3da;font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    const refresh = () => {
+      const w = (node.widgets || []).find((x) => x._key === key);
+      const v = w && w.value;
+      val.textContent = (v == null || String(v) === "") ? "（未设置）" : String(v);
+    };
+    refresh();
+    wrap.appendChild(val);
+    const mkb = (label, fn) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.cssText = "background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:1px 8px;cursor:pointer;font-size:12px";
+      b.onclick = fn; wrap.appendChild(b);
+    };
+    const apply = (v) => { setPanelValue(node, key, v); refresh(); };
+    if (pt === "key") {
+      mkb("捕获", () => { setStatus("请按下按键…（Esc 取消）"); Promise.resolve(api().pick_key()).then((k) => { if (k) apply(k); }).catch((e) => showError("捕获失败：" + e)); });
+      mkb("特殊键", () => specialKeyMenu((name) => apply(name)));
+    } else if (pt === "region") {
+      mkb("框选", () => { setStatus("框选区域…（Enter 确认 / Esc 取消）"); Promise.resolve(api().pick_region()).then((b) => { if (b) apply(b.join(",")); }).catch((e) => showError("采集失败：" + e)); });
+    } else if (pt === "point") {
+      mkb("取点", () => { setStatus("点击取点…（Esc 取消）"); Promise.resolve(api().pick_point()).then((p) => { if (p) apply(p.join(",")); }).catch((e) => showError("采集失败：" + e)); });
+    } else if (pt === "color") {
+      mkb("吸色", () => {
+        setStatus("点击取色…（Esc 取消）");
+        Promise.resolve(api().pick_color()).then((r) => {
+          if (!r) return;
+          apply(r.color.join(","));
+          if (r.point) setPanelValue(node, key.replace("color", "pixel"), r.point.join(","));   // 顺带回填配套坐标
+        }).catch((e) => showError("采集失败：" + e));
+      });
+    }
+    return wrap;
+  }
+
   function renderPanel() {
     const el = document.getElementById("panel");
     if (!el) return;
@@ -1162,8 +1245,13 @@ const ED = (function () {
       // 悬停才显示节点描述（描述可能很长，平时不占地方）
       lab.title = (node._note || "").trim() || panelLabel(node, key);
       item.appendChild(lab);
+      const def = defByType[node._typeId];
+      const pspec = def && (def.params || []).find((q) => q.key === key);
+      const pt = pspec && pspec.ptype;
       let ctrl;
-      if (w.type === "toggle") {
+      if (pt === "key" || pt === "region" || pt === "point" || pt === "color") {
+        ctrl = captureControl(node, key, pt);   // 用“捕获/采集”按钮，并显示当前值（最易用）
+      } else if (w.type === "toggle") {
         ctrl = document.createElement("input"); ctrl.type = "checkbox"; ctrl.checked = !!w.value;
         ctrl.onchange = () => setPanelValue(node, key, ctrl.checked);
       } else if (w.type === "combo") {
@@ -1352,6 +1440,17 @@ const ED = (function () {
     let html = `<div style="font-weight:bold;color:#e6e9ee;margin-bottom:2px">${esc(d.title)}</div>`;
     const doc = d.doc || d.help || "";
     if (doc) html += `<div style="color:#9aa3af;white-space:pre-line">${esc(doc)}</div>`;
+    // 所属分组（带色块），并提供“分组…”入口
+    const gidx = node ? nodeGroupIndex(node._id) : -1;
+    if (gidx >= 0) {
+      const g = groupDefs[gidx], col = groupColor(g, gidx);
+      html += `<div style="margin-top:4px;color:#9aa3af">所属分组：` +
+              `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${col};vertical-align:middle"></span> ` +
+              `<b style="color:#bcd">${esc(g.title || "分组")}</b> ` +
+              `<a href="#" data-grp="1" style="color:#7fb0ee;text-decoration:none">[更改]</a></div>`;
+    } else {
+      html += `<div style="margin-top:4px;color:#7f8895">未分组 <a href="#" data-grp="1" style="color:#7fb0ee;text-decoration:none">[加入分组]</a></div>`;
+    }
 
     const allPorts = (d.inputs || []).concat(d.outputs || []);
     // 主要参数说明（默认展开）；进阶参数/端口折到“进阶”区，避免误导用户以为都得用。
@@ -1402,6 +1501,8 @@ const ED = (function () {
       inp.onchange = () => setPinLabel(node._id, inp.getAttribute("data-pinlabel"), inp.value);
       inp.onkeydown = (e) => e.stopPropagation();   // 输入框内按键不触发画布快捷键
     });
+    const grpLink = helpEl.querySelector("[data-grp]");
+    if (grpLink) grpLink.onclick = (e) => { e.preventDefault(); assignGroupDialog([node]); };
     // 已修改（未保存）的参数：列出 旧→新 并给“恢复”链接（每项 + 全部）
     const changed = (node.widgets || []).filter(paramChanged);
     if (changed.length) {
@@ -1426,37 +1527,77 @@ const ED = (function () {
     helpEl.style.display = "block";
   }
 
-  // 编辑流程名称 + 说明（内置流程也可改，保存时会另存）。
+  // 流程统计：节点数 / 执行·数据连线数 / 分组数 / 面板项数 / 各类节点数（按分类）。
+  function graphStats() {
+    const ns = (graph && graph._nodes) || [];
+    let execE = 0, dataE = 0;
+    for (const k in (graph && graph.links || {})) {
+      const l = graph.links[k]; if (!l) continue;
+      const a = graph.getNodeById(l.origin_id);
+      const t = a && a.outputs && a.outputs[l.origin_slot] && a.outputs[l.origin_slot].type;
+      if (t === "exec") execE++; else dataE++;
+    }
+    const cats = {};
+    for (const n of ns) { const d = defByType[n._typeId]; const c = (d && d.category) || "其它"; cats[c] = (cats[c] || 0) + 1; }
+    return { nodes: ns.length, execE, dataE, groups: groupDefs.length, pins: panelPins.length, cats };
+  }
+
+  // 流程信息：默认【只读】展示（名称/来源/说明/统计），点“编辑”才能改名称与说明。
   function editFlowInfo() {
     document.getElementById("flowdlg")?.remove();
     const box = document.createElement("div");
     box.id = "flowdlg";
-    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(460px,92vw);" +
-      "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:130;" +
-      "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(480px,92vw);" +
+      "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
+      "padding:14px 16px;z-index:130;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+    document.body.appendChild(box);
     const inputCss = "width:100%;margin:4px 0 10px;background:#15171c;color:#cfd3da;border:1px solid #444;" +
       "border-radius:4px;padding:6px;font:13px/1.5 \"Microsoft YaHei\",sans-serif;box-sizing:border-box";
-    box.innerHTML = "<b style='color:#e6c07b'>流程信息</b>（名称与整体说明，仅展示、不影响运行）<br>" +
-      "<div style='margin-top:8px;color:#9aa3af'>名称</div>" +
-      `<input id='flowname_in' style='${inputCss}'/>` +
-      "<div style='color:#9aa3af'>说明</div>" +
-      `<textarea id='flowdesc_in' style='${inputCss};height:96px'></textarea>` +
-      "<div style='text-align:right'>" +
-      "<button id='flowok' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>确定</button> " +
-      "<button id='flowcancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>取消</button></div>";
-    document.body.appendChild(box);
-    const nameIn = box.querySelector("#flowname_in"), descIn = box.querySelector("#flowdesc_in");
-    nameIn.value = flowMeta.name || ""; descIn.value = flowMeta.desc || "";
-    nameIn.focus();
-    box.querySelector("#flowok").onclick = () => {
-      flowMeta.name = nameIn.value.trim() || "未命名流程";
-      flowMeta.desc = descIn.value.trim();
-      box.remove();
-      updateFlowMeta();
-      setStatus(`流程：${flowMeta.name}`);
-      scheduleSnap(); refreshDirty();   // 名称/说明计入“未保存”
+    const btn = "background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer";
+    let editing = false;
+    const renderView = () => {
+      const s = graphStats();
+      const src = flowMeta.readonly ? "<span style='color:#e6a23c'>内置流程（只读，保存会另存到「我的流程」）</span>"
+                : (flowMeta.path ? "我的流程" : "未保存的新流程");
+      const cats = Object.keys(s.cats).sort().map((c) => `${c} ${s.cats[c]}`).join(" · ") || "（空）";
+      box.innerHTML =
+        "<div style='display:flex;align-items:center'><b style='color:#e6c07b;flex:1;font-size:14px'>流程信息</b>" +
+        "<span id='fi_close' style='cursor:pointer;color:#8b909a;font-size:18px;padding:0 4px'>✕</span></div>" +
+        `<div style='margin-top:8px'><span style='color:#9aa3af'>名称：</span><b>${esc(flowMeta.name || "未命名流程")}</b></div>` +
+        `<div><span style='color:#9aa3af'>来源：</span>${src}</div>` +
+        `<div style='margin-top:6px;color:#9aa3af'>说明：</div>` +
+        `<div style='white-space:pre-wrap;color:#cdd3db;background:#1b1f27;border:1px solid #2c323c;border-radius:6px;padding:8px 10px;margin-top:2px'>${esc(flowMeta.desc || "（暂无说明，点“编辑”添加）")}</div>` +
+        "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'><b style='color:#e6c07b'>统计</b>" +
+        `<div style='margin-top:4px;color:#cdd3db'>节点 ${s.nodes} · 连线 执行${s.execE}/数据${s.dataE} · 分组 ${s.groups} · 控制面板项 ${s.pins}</div>` +
+        `<div style='margin-top:4px'><span style='color:#9aa3af'>节点构成：</span>${esc(cats)}</div></div>` +
+        "<div style='margin-top:12px;text-align:right'>" +
+        `<button id='fi_edit' style='${btn}'>编辑</button> <button id='fi_ok' style='${btn}'>关闭</button></div>`;
+      box.querySelector("#fi_close").onclick = () => box.remove();
+      box.querySelector("#fi_ok").onclick = () => box.remove();
+      box.querySelector("#fi_edit").onclick = () => { editing = true; renderEdit(); };
     };
-    box.querySelector("#flowcancel").onclick = () => box.remove();
+    const renderEdit = () => {
+      box.innerHTML = "<b style='color:#e6c07b'>编辑流程信息</b>（仅展示，不影响运行）" +
+        "<div style='margin-top:8px;color:#9aa3af'>名称</div>" +
+        `<input id='flowname_in' style='${inputCss}'/>` +
+        "<div style='color:#9aa3af'>说明</div>" +
+        `<textarea id='flowdesc_in' style='${inputCss};height:120px'></textarea>` +
+        "<div style='text-align:right'>" +
+        `<button id='flowok' style='${btn}'>保存</button> <button id='flowback' style='${btn}'>取消</button></div>`;
+      const nameIn = box.querySelector("#flowname_in"), descIn = box.querySelector("#flowdesc_in");
+      nameIn.value = flowMeta.name || ""; descIn.value = flowMeta.desc || "";
+      nameIn.onkeydown = (e) => e.stopPropagation(); descIn.onkeydown = (e) => e.stopPropagation();
+      nameIn.focus();
+      box.querySelector("#flowok").onclick = () => {
+        flowMeta.name = nameIn.value.trim() || "未命名流程";
+        flowMeta.desc = descIn.value.trim();
+        updateFlowMeta(); setStatus(`流程：${flowMeta.name}`);
+        scheduleSnap(); refreshDirty();   // 名称/说明计入“未保存”
+        editing = false; renderView();
+      };
+      box.querySelector("#flowback").onclick = () => { editing = false; renderView(); };
+    };
+    renderView();
   }
 
   // 顶部“帮助”：集中放连线模型图例 + 常用操作（避免在每个节点面板里重复）
@@ -1497,7 +1638,10 @@ const ED = (function () {
       "· Ctrl+Z 撤销　· Ctrl+Y 或 Ctrl+Shift+Z 重做<br>" +
       "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存<br>" +
       "· 选中节点→右下角说明里勾选「显示到控制面板」，把常用开关/数值置顶到顶部面板，" +
-      "普通使用时不必进节点图也能调（✕ 可从面板移除）</div>" +
+      "普通使用时不必进节点图也能调（🎯 定位到节点）<br>" +
+      "· <b>分组</b>：右键节点→「分组…」把它(或多选的若干节点)归入一个彩色分组；节点标题栏会染成分组色、" +
+      "上方标出组名，框也会自动包住它们。一个节点只属于一个组。<br>" +
+      "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>在游戏画面上直接采集</b>（节点里相应参数下方的按钮）<br>" +
       "· <b>框选区域…</b>：按住左键拖出矩形，Enter 确认（区域参数）<br>" +
@@ -1536,6 +1680,7 @@ const ED = (function () {
     groupDefs = Array.isArray(data.groups)
       ? data.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
       : [];   // 分组随撤销/重做恢复
+    applyGroupColors();
     attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
     canvas.setDirty(true, true);
