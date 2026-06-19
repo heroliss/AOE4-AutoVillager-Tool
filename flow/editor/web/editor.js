@@ -238,12 +238,19 @@ const ED = (function () {
       const multi = p.ptype === "templates";
       const btn = node.addWidget("button", "选择图片…", null, async () => {
         try {
-          const paths = await api().pick_templates(multi);
-          if (!paths || !paths.length) return;
+          setStatus("正在打开图片选择框…");
+          const a = api();
+          if (typeof a.pick_templates !== "function") {
+            showError("后端没有 pick_templates 方法，请重启编辑器（python run_editor.py …）。");
+            return;
+          }
+          const paths = await a.pick_templates(multi);
+          if (!paths || !paths.length) { setStatus("已取消选择图片"); return; }
           const picked = paths.join(",");
           w.value = (multi && w.value) ? (w.value + "," + picked) : picked;  // 多模板追加，单模板替换
           cb(w.value);
           if (canvas) canvas.setDirty(true, true);
+          setStatus("已选择 " + paths.length + " 张图片");
         } catch (e) { showError("选择图片失败：" + (e && (e.stack || e.message) || e)); }
       });
       btn._noSave = true;            // 按钮不是参数，保存时跳过（collect 按 _key 取值）

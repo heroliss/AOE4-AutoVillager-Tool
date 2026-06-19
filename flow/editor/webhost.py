@@ -186,14 +186,43 @@ class Api:
         return None
 
     def pick_templates(self, multiple=True):
-        """选择一个或多个模板图片，返回路径列表（供 template/templates 参数填入）。"""
-        import webview
-        res = self._window.create_file_dialog(
-            webview.OPEN_DIALOG, allow_multiple=bool(multiple),
-            file_types=("图片 (*.png;*.jpg;*.jpeg;*.bmp)", "所有文件 (*.*)"))
-        if not res:
-            return []
-        return list(res) if isinstance(res, (list, tuple)) else [res]
+        """选择一个或多个模板图片，返回路径列表（供 template/templates 参数填入）。
+
+        关键：pywebview 的 js_api 方法运行在【工作线程】（util.js_bridge_call 起独立线程），
+        而 winforms 后端的 create_file_dialog 偏偏没做 UI 线程封送——直接在工作线程
+        ShowDialog(owner) 会跨线程抛错且被内部吞掉，表现就是"点了没反应"。这里显式把对话框
+        Invoke 到 UI 线程执行；失败再退回 pywebview 自带对话框。
+        """
+        paths: list[str] = []
+        try:
+            from webview.platforms.winforms import BrowserView
+            from System import Func, Type
+            import System.Windows.Forms as WinForms
+
+            i = BrowserView.instances.get(self._window.uid)
+
+            def _show():
+                dlg = WinForms.OpenFileDialog()
+                dlg.Multiselect = bool(multiple)
+                dlg.Title = "选择模板图片"
+                dlg.Filter = ("图片 (*.png;*.jpg;*.jpeg;*.bmp;*.gif)|*.png;*.jpg;*.jpeg;*.bmp;*.gif"
+                              "|所有文件 (*.*)|*.*")
+                dlg.RestoreDirectory = True
+                if dlg.ShowDialog(i) == WinForms.DialogResult.OK:
+                    paths.extend(list(dlg.FileNames))
+                return None
+
+            if i is not None and i.InvokeRequired:
+                i.Invoke(Func[Type](_show))   # 封送到 UI 线程，模态于主窗口
+            else:
+                _show()
+            return paths
+        except Exception:
+            import webview
+            res = self._window.create_file_dialog(
+                webview.OPEN_DIALOG, allow_multiple=bool(multiple),
+                file_types=("图片 (*.png;*.jpg;*.jpeg;*.bmp;*.gif)",))
+            return list(res) if res else []
 
     def autolayout(self, payload):
         from ..layout import mainline_layout
