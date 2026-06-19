@@ -6,3 +6,4 @@ pydirectinput
 psutil
 mss
 pyinstaller
+dearpygui  # 节点编辑器（Phase 1+）；需 Python<=3.13 运行
