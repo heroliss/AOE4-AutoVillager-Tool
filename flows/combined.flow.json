@@ -1,0 +1,1087 @@
+{
+  "version": 1,
+  "name": "统一生产(村民/乡骑/商队)",
+  "nodes": [
+    {
+      "id": "tick",
+      "type": "event.on_tick",
+      "pos": [
+        40.0,
+        40.0
+      ],
+      "params": {
+        "interval": 0.1
+      }
+    },
+    {
+      "id": "mod",
+      "type": "sense.modifier_down",
+      "pos": [
+        49.0,
+        180.0
+      ],
+      "params": {
+        "keys": "shift,ctrl,alt"
+      }
+    },
+    {
+      "id": "if_mod",
+      "type": "control.if",
+      "pos": [
+        494.5,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "win",
+      "type": "sense.window_check",
+      "pos": [
+        403.0,
+        222.0
+      ],
+      "params": {
+        "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
+        "hdr": false,
+        "pixel": [
+          2526,
+          1405
+        ],
+        "color": [
+          26,
+          32,
+          46
+        ],
+        "pixel_hdr": [
+          2526,
+          1405
+        ],
+        "color_hdr": [
+          65,
+          78,
+          105
+        ],
+        "tolerance": 0
+      }
+    },
+    {
+      "id": "if_win",
+      "type": "control.if",
+      "pos": [
+        887.5,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "occ",
+      "type": "game.occlusion",
+      "pos": [
+        810.0,
+        222.0
+      ],
+      "params": {
+        "region": [
+          265,
+          950,
+          280,
+          970
+        ],
+        "template": "templates/blocked.png",
+        "match_threshold": 0.7,
+        "transition_threshold": 0.1,
+        "stable_threshold": 2,
+        "transition_repeat": 3,
+        "change_threshold": 0.05
+      }
+    },
+    {
+      "id": "if_blocked",
+      "type": "control.if",
+      "pos": [
+        1189.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "if_trans",
+      "type": "control.if",
+      "pos": [
+        1413.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "prefetch",
+      "type": "control.prefetch_full",
+      "pos": [
+        1637.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "pop",
+      "type": "sense.ocr_number",
+      "pos": [
+        3114.5,
+        1008.0
+      ],
+      "params": {
+        "region": [
+          50,
+          1140,
+          150,
+          1170
+        ],
+        "scale": 1.0,
+        "allowlist": "0123456789/\\|OolIsS ",
+        "regex": "(\\d+)[/\\\\|](\\d+)",
+        "aggregate": "first"
+      }
+    },
+    {
+      "id": "slots",
+      "type": "math.arith",
+      "pos": [
+        3494.0,
+        402.0
+      ],
+      "params": {
+        "op": "-"
+      }
+    },
+    {
+      "id": "food",
+      "type": "sense.ocr_number",
+      "pos": [
+        3477.0,
+        582.0
+      ],
+      "params": {
+        "region": [
+          50,
+          1222,
+          140,
+          1248
+        ],
+        "scale": 1.0,
+        "allowlist": "0123456789/\\|OolIsS ",
+        "regex": "(\\d+)",
+        "aggregate": "first"
+      }
+    },
+    {
+      "id": "gold",
+      "type": "sense.ocr_number",
+      "pos": [
+        4902.0,
+        402.0
+      ],
+      "params": {
+        "region": [
+          50,
+          1180,
+          140,
+          1206
+        ],
+        "scale": 1.0,
+        "allowlist": "0123456789/\\|OolIsS ",
+        "regex": "(\\d+)",
+        "aggregate": "first"
+      }
+    },
+    {
+      "id": "tc",
+      "type": "game.tc_count",
+      "pos": [
+        3097.0,
+        672.0
+      ],
+      "params": {
+        "icon_region": [
+          444,
+          1212,
+          492,
+          1259
+        ],
+        "single_region": [
+          300,
+          1140,
+          354,
+          1194
+        ],
+        "single_template": "templates/tc_single.png",
+        "numbered_templates": [
+          "templates/tc_number_1.png",
+          "templates/tc_number_2.png",
+          "templates/tc_number_3.png",
+          "templates/tc_number_4.png",
+          "templates/tc_number_5.png",
+          "templates/tc_number_6.png"
+        ],
+        "threshold": 0.7,
+        "crop_size": 20,
+        "early_exit": 0.95
+      }
+    },
+    {
+      "id": "c_one",
+      "type": "data.const_number",
+      "pos": [
+        5998.5,
+        672.0
+      ],
+      "params": {
+        "value": 1
+      }
+    },
+    {
+      "id": "lock",
+      "type": "control.lock_acquire",
+      "pos": [
+        1861.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "block_begin",
+      "type": "control.input_block_begin",
+      "pos": [
+        2085.0,
+        40.0
+      ],
+      "params": {
+        "max_duration": 3.0
+      }
+    },
+    {
+      "id": "save_sel",
+      "type": "action.press_key",
+      "pos": [
+        2448.0,
+        40.0
+      ],
+      "params": {
+        "key": "0",
+        "modifiers": "ctrl",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "relmod1",
+      "type": "action.release_modifiers",
+      "pos": [
+        2838.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "sw_vill",
+      "type": "data.switch",
+      "pos": [
+        2803.0,
+        174.0
+      ],
+      "params": {
+        "on": true
+      }
+    },
+    {
+      "id": "if_sw_vill",
+      "type": "control.if",
+      "pos": [
+        3175.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "q_vill",
+      "type": "sense.template_match",
+      "pos": [
+        3105.5,
+        222.0
+      ],
+      "params": {
+        "region": [
+          10,
+          970,
+          500,
+          1025
+        ],
+        "templates": [
+          "templates/cunmin.png"
+        ],
+        "threshold": 0.6,
+        "transition_guard": true
+      }
+    },
+    {
+      "id": "if_qvill",
+      "type": "control.if",
+      "pos": [
+        3537.5,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "sel_tc_v",
+      "type": "action.press_key",
+      "pos": [
+        3825.5,
+        40.0
+      ],
+      "params": {
+        "key": "h",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "c_per_v",
+      "type": "data.const_number",
+      "pos": [
+        3140.0,
+        540.0
+      ],
+      "params": {
+        "value": 3
+      }
+    },
+    {
+      "id": "plan_v",
+      "type": "math.arith",
+      "pos": [
+        3494.0,
+        222.0
+      ],
+      "params": {
+        "op": "*"
+      }
+    },
+    {
+      "id": "prod_v",
+      "type": "game.produce_count",
+      "pos": [
+        3822.0,
+        378.0
+      ],
+      "params": {
+        "cost_per_unit": 50,
+        "cap": -1
+      }
+    },
+    {
+      "id": "queue_v",
+      "type": "action.press_key",
+      "pos": [
+        4184.0,
+        40.0
+      ],
+      "params": {
+        "key": "q",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": true,
+        "batch_size": 5,
+        "post_escape": true
+      }
+    },
+    {
+      "id": "sw_xq",
+      "type": "data.switch",
+      "pos": [
+        4214.5,
+        378.0
+      ],
+      "params": {
+        "on": false
+      }
+    },
+    {
+      "id": "if_sw_xq",
+      "type": "control.if",
+      "pos": [
+        4608.5,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "q_xq",
+      "type": "sense.template_match",
+      "pos": [
+        4539.0,
+        222.0
+      ],
+      "params": {
+        "region": [
+          10,
+          970,
+          500,
+          1025
+        ],
+        "templates": [
+          "templates/xiangqi.png"
+        ],
+        "threshold": 0.6,
+        "transition_guard": true
+      }
+    },
+    {
+      "id": "if_qxq",
+      "type": "control.if",
+      "pos": [
+        4962.5,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "sel_tc_x",
+      "type": "action.press_key",
+      "pos": [
+        5250.5,
+        40.0
+      ],
+      "params": {
+        "key": "h",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "c_per_x",
+      "type": "data.const_number",
+      "pos": [
+        4573.5,
+        540.0
+      ],
+      "params": {
+        "value": 2
+      }
+    },
+    {
+      "id": "plan_x",
+      "type": "math.arith",
+      "pos": [
+        4919.0,
+        222.0
+      ],
+      "params": {
+        "op": "*"
+      }
+    },
+    {
+      "id": "prod_x",
+      "type": "game.produce_count",
+      "pos": [
+        5247.0,
+        378.0
+      ],
+      "params": {
+        "cost_per_unit": 80,
+        "cap": -1
+      }
+    },
+    {
+      "id": "queue_x",
+      "type": "action.press_key",
+      "pos": [
+        5609.0,
+        40.0
+      ],
+      "params": {
+        "key": "w",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": true,
+        "batch_size": 5,
+        "post_escape": true
+      }
+    },
+    {
+      "id": "sw_cart",
+      "type": "data.switch",
+      "pos": [
+        5639.5,
+        378.0
+      ],
+      "params": {
+        "on": false
+      }
+    },
+    {
+      "id": "if_sw_cart",
+      "type": "control.if",
+      "pos": [
+        6033.5,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "q_cart",
+      "type": "sense.template_match",
+      "pos": [
+        5964.0,
+        222.0
+      ],
+      "params": {
+        "region": [
+          10,
+          970,
+          500,
+          1025
+        ],
+        "templates": [
+          "templates/trade_cart.png"
+        ],
+        "threshold": 0.6,
+        "transition_guard": true
+      }
+    },
+    {
+      "id": "if_qcart",
+      "type": "control.if",
+      "pos": [
+        6370.5,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "sel_market",
+      "type": "action.press_key",
+      "pos": [
+        6641.5,
+        40.0
+      ],
+      "params": {
+        "key": "g",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "c_per_cart",
+      "type": "data.const_number",
+      "pos": [
+        5998.5,
+        540.0
+      ],
+      "params": {
+        "value": 5
+      }
+    },
+    {
+      "id": "plan_cart",
+      "type": "math.arith",
+      "pos": [
+        6327.0,
+        222.0
+      ],
+      "params": {
+        "op": "*"
+      }
+    },
+    {
+      "id": "prod_cart",
+      "type": "game.produce_count",
+      "pos": [
+        6638.0,
+        378.0
+      ],
+      "params": {
+        "cost_per_unit": 100,
+        "cap": -1
+      }
+    },
+    {
+      "id": "queue_cart",
+      "type": "action.press_key",
+      "pos": [
+        7000.0,
+        40.0
+      ],
+      "params": {
+        "key": "q",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": true,
+        "batch_size": 5,
+        "post_escape": true
+      }
+    },
+    {
+      "id": "restore",
+      "type": "action.press_key",
+      "pos": [
+        7355.0,
+        40.0
+      ],
+      "params": {
+        "key": "0",
+        "modifiers": "",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "disband",
+      "type": "action.press_key",
+      "pos": [
+        7710.0,
+        40.0
+      ],
+      "params": {
+        "key": "0",
+        "modifiers": "ctrl,alt",
+        "repeat": 1,
+        "shift_batch": false,
+        "batch_size": 5,
+        "post_escape": false
+      }
+    },
+    {
+      "id": "relmod2",
+      "type": "action.release_modifiers",
+      "pos": [
+        8065.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "block_end",
+      "type": "control.input_block_end",
+      "pos": [
+        8289.0,
+        40.0
+      ],
+      "params": {}
+    },
+    {
+      "id": "delay",
+      "type": "control.delay",
+      "pos": [
+        8513.0,
+        40.0
+      ],
+      "params": {
+        "seconds": 3.0
+      }
+    },
+    {
+      "id": "unlock",
+      "type": "control.lock_release",
+      "pos": [
+        8790.0,
+        40.0
+      ],
+      "params": {}
+    }
+  ],
+  "exec_edges": [
+    [
+      "tick",
+      "out",
+      "if_mod",
+      "in"
+    ],
+    [
+      "if_mod",
+      "false",
+      "if_win",
+      "in"
+    ],
+    [
+      "if_win",
+      "true",
+      "if_blocked",
+      "in"
+    ],
+    [
+      "if_blocked",
+      "false",
+      "if_trans",
+      "in"
+    ],
+    [
+      "if_trans",
+      "false",
+      "prefetch",
+      "in"
+    ],
+    [
+      "prefetch",
+      "out",
+      "lock",
+      "in"
+    ],
+    [
+      "lock",
+      "ok",
+      "block_begin",
+      "in"
+    ],
+    [
+      "block_begin",
+      "out",
+      "save_sel",
+      "in"
+    ],
+    [
+      "save_sel",
+      "out",
+      "relmod1",
+      "in"
+    ],
+    [
+      "relmod1",
+      "out",
+      "if_sw_vill",
+      "in"
+    ],
+    [
+      "if_sw_vill",
+      "true",
+      "if_qvill",
+      "in"
+    ],
+    [
+      "if_sw_vill",
+      "false",
+      "if_sw_xq",
+      "in"
+    ],
+    [
+      "if_qvill",
+      "false",
+      "sel_tc_v",
+      "in"
+    ],
+    [
+      "if_qvill",
+      "true",
+      "if_sw_xq",
+      "in"
+    ],
+    [
+      "sel_tc_v",
+      "out",
+      "queue_v",
+      "in"
+    ],
+    [
+      "queue_v",
+      "out",
+      "if_sw_xq",
+      "in"
+    ],
+    [
+      "if_sw_xq",
+      "true",
+      "if_qxq",
+      "in"
+    ],
+    [
+      "if_sw_xq",
+      "false",
+      "if_sw_cart",
+      "in"
+    ],
+    [
+      "if_qxq",
+      "false",
+      "sel_tc_x",
+      "in"
+    ],
+    [
+      "if_qxq",
+      "true",
+      "if_sw_cart",
+      "in"
+    ],
+    [
+      "sel_tc_x",
+      "out",
+      "queue_x",
+      "in"
+    ],
+    [
+      "queue_x",
+      "out",
+      "if_sw_cart",
+      "in"
+    ],
+    [
+      "if_sw_cart",
+      "true",
+      "if_qcart",
+      "in"
+    ],
+    [
+      "if_sw_cart",
+      "false",
+      "restore",
+      "in"
+    ],
+    [
+      "if_qcart",
+      "false",
+      "sel_market",
+      "in"
+    ],
+    [
+      "if_qcart",
+      "true",
+      "restore",
+      "in"
+    ],
+    [
+      "sel_market",
+      "out",
+      "queue_cart",
+      "in"
+    ],
+    [
+      "queue_cart",
+      "out",
+      "restore",
+      "in"
+    ],
+    [
+      "restore",
+      "out",
+      "disband",
+      "in"
+    ],
+    [
+      "disband",
+      "out",
+      "relmod2",
+      "in"
+    ],
+    [
+      "relmod2",
+      "out",
+      "block_end",
+      "in"
+    ],
+    [
+      "block_end",
+      "out",
+      "delay",
+      "in"
+    ],
+    [
+      "delay",
+      "out",
+      "unlock",
+      "in"
+    ]
+  ],
+  "data_edges": [
+    [
+      "mod",
+      "down",
+      "if_mod",
+      "cond"
+    ],
+    [
+      "win",
+      "in_game",
+      "if_win",
+      "cond"
+    ],
+    [
+      "occ",
+      "blocked",
+      "if_blocked",
+      "cond"
+    ],
+    [
+      "occ",
+      "in_transition",
+      "if_trans",
+      "cond"
+    ],
+    [
+      "pop",
+      "value2",
+      "slots",
+      "a"
+    ],
+    [
+      "pop",
+      "value",
+      "slots",
+      "b"
+    ],
+    [
+      "sw_vill",
+      "value",
+      "if_sw_vill",
+      "cond"
+    ],
+    [
+      "q_vill",
+      "found",
+      "if_qvill",
+      "cond"
+    ],
+    [
+      "c_per_v",
+      "value",
+      "plan_v",
+      "a"
+    ],
+    [
+      "tc",
+      "count",
+      "plan_v",
+      "b"
+    ],
+    [
+      "plan_v",
+      "value",
+      "prod_v",
+      "planned"
+    ],
+    [
+      "slots",
+      "value",
+      "prod_v",
+      "available_slots"
+    ],
+    [
+      "food",
+      "value",
+      "prod_v",
+      "resource"
+    ],
+    [
+      "prod_v",
+      "count",
+      "queue_v",
+      "count"
+    ],
+    [
+      "sw_xq",
+      "value",
+      "if_sw_xq",
+      "cond"
+    ],
+    [
+      "q_xq",
+      "found",
+      "if_qxq",
+      "cond"
+    ],
+    [
+      "c_per_x",
+      "value",
+      "plan_x",
+      "a"
+    ],
+    [
+      "tc",
+      "count",
+      "plan_x",
+      "b"
+    ],
+    [
+      "plan_x",
+      "value",
+      "prod_x",
+      "planned"
+    ],
+    [
+      "slots",
+      "value",
+      "prod_x",
+      "available_slots"
+    ],
+    [
+      "gold",
+      "value",
+      "prod_x",
+      "resource"
+    ],
+    [
+      "prod_x",
+      "count",
+      "queue_x",
+      "count"
+    ],
+    [
+      "sw_cart",
+      "value",
+      "if_sw_cart",
+      "cond"
+    ],
+    [
+      "q_cart",
+      "found",
+      "if_qcart",
+      "cond"
+    ],
+    [
+      "c_per_cart",
+      "value",
+      "plan_cart",
+      "a"
+    ],
+    [
+      "c_one",
+      "value",
+      "plan_cart",
+      "b"
+    ],
+    [
+      "plan_cart",
+      "value",
+      "prod_cart",
+      "planned"
+    ],
+    [
+      "slots",
+      "value",
+      "prod_cart",
+      "available_slots"
+    ],
+    [
+      "gold",
+      "value",
+      "prod_cart",
+      "resource"
+    ],
+    [
+      "prod_cart",
+      "count",
+      "queue_cart",
+      "count"
+    ]
+  ]
+}

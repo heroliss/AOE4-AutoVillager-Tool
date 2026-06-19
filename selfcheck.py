@@ -16,6 +16,7 @@ import flow.nodes  # noqa: F401  注册全部节点
 from flow.flows.villager import build_villager_graph
 from flow.flows.trade_cart import build_trade_cart_graph
 from flow.flows.jin import build_jin_graph
+from flow.flows.combined import build_combined_graph
 
 
 class Stub(DataNode):
@@ -132,9 +133,48 @@ def main() -> None:
     ok &= check("不出乡骑(W键)", not any("按键 w" in m for m in logs))
     ok &= check("回退出村民(Q键) x3 = min(3,150,300//50=6)", any("按键 q x3" in m for m in logs))
 
+    # ==================== 统一生产（含各段开关）====================
+    COMBINED = {
+        "win": {"in_game": True, "active": True},
+        "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02},
+        "q_vill": {"found": False, "in_transition": False, "which": -1},
+        "q_xq": {"found": False, "in_transition": False, "which": -1},
+        "q_cart": {"found": False, "in_transition": False, "which": -1},
+        "pop": {"value": 50, "value2": 200, "ok": True},     # 空位 150
+        "food": {"value": 300, "value2": None, "ok": True},
+        "gold": {"value": 800, "value2": None, "ok": True},
+        "tc": {"count": 1, "ok": True},
+    }
+    print("== 统一生产：默认(村民开/乡骑关/商队关) -> 只出村民 ==")
+    logs, _ = run_with_stubs(build_combined_graph, COMBINED)
+    ok &= check("出村民 q x3 = min(3*1,150,300//50=6)", any("按键 q x3" in m for m in logs))
+    ok &= check("不出乡骑(无W键)", not any("按键 w" in m for m in logs))
+    ok &= check("不选市场(无G键，商队段关闭)", not any("按键 g" in m for m in logs))
+
+    print("== 统一生产：三段全开 -> 村民+乡骑+商队都出 ==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "sw_xq": {"value": True}, "sw_cart": {"value": True}})
+    ok &= check("出乡骑 w x2 = min(2*1,150,800//80=10)", any("按键 w x2" in m for m in logs))
+    ok &= check("选市场 G 键(商队段开启)", any("按键 g" in m for m in logs))
+    ok &= check("出商队 q x5 = min(5*1,150,800//100=8)", any("按键 q x5" in m for m in logs))
+    ok &= check("出村民 q x3", any("按键 q x3" in m for m in logs))
+
+    print("== 统一生产：关闭村民段 -> 该段被跳过 ==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "sw_vill": {"value": False}})
+    ok &= check("村民段关闭则不出村民", not any("按键 q x3" in m for m in logs))
+
+    print("== 统一生产：队列已有村民 -> 跳过村民段(不影响其它) ==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "q_vill": {"found": True, "in_transition": False, "which": 0},
+                              "sw_cart": {"value": True}})
+    ok &= check("队列已有村民则不再出村民", not any("按键 q x3" in m for m in logs))
+    ok &= check("但商队段仍正常(选市场G)", any("按键 g" in m for m in logs))
+
     print("== 自动排版：主线横向铺开、支线左上汇入、无重叠 ==")
     from flow.layout import mainline_layout, no_overlaps, estimate_size
-    for name, build in (("出农", build_villager_graph), ("出商队", build_trade_cart_graph), ("金朝", build_jin_graph)):
+    for name, build in (("出农", build_villager_graph), ("出商队", build_trade_cart_graph),
+                        ("金朝", build_jin_graph), ("统一", build_combined_graph)):
         gg = build()
         mainline_layout(gg)
         bad = no_overlaps(gg)
@@ -158,7 +198,8 @@ def main() -> None:
     os.makedirs("flows", exist_ok=True)
     for fname, build in (("villager", build_villager_graph),
                          ("trade_cart", build_trade_cart_graph),
-                         ("jin", build_jin_graph)):
+                         ("jin", build_jin_graph),
+                         ("combined", build_combined_graph)):
         gg = build()
         mainline_layout(gg)
         gg.save(f"flows/{fname}.flow.json")
