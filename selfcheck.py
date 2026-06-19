@@ -132,6 +132,21 @@ def main() -> None:
     ok &= check("不出乡骑(W键)", not any("按键 w" in m for m in logs))
     ok &= check("回退出村民(Q键) x3 = min(3,150,300//50=6)", any("按键 q x3" in m for m in logs))
 
+    print("== 自动排版：无重叠 + 折叠紧凑 ==")
+    from flow.layout import layered_layout, no_overlaps, estimate_size
+    for name, build in (("出农", build_villager_graph), ("出商队", build_trade_cart_graph), ("金朝", build_jin_graph)):
+        gg = build()
+        layered_layout(gg)
+        bad = no_overlaps(gg)
+        xs = [gg.positions[n][0] for n in gg.nodes]
+        ys = [gg.positions[n][1] for n in gg.nodes]
+        ws = [estimate_size(gg.nodes[n]) for n in gg.nodes]
+        width = max(x + w for x, (w, h) in zip(xs, ws)) - min(xs)
+        height = max(y + h for y, (w, h) in zip(ys, ws)) - min(ys)
+        aspect = max(width, height) / max(1.0, min(width, height))
+        ok &= check(f"{name}: 无节点重叠", not bad)
+        ok &= check(f"{name}: 版面 {int(width)}x{int(height)} 长宽比 {aspect:.2f}（均衡、不再单向过长）", aspect < 2.2)
+
     print("== JSON 序列化往返 ==")
     g = build_villager_graph()
     data = g.to_dict()
