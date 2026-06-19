@@ -52,6 +52,21 @@ const ED = (function () {
     return p.dtype === "any" ? 0 : p.dtype;   // 0 = 通配
   }
 
+  // 文本像素宽（CJK 17、其余 9），与 layout.py 的估算一致，保证编辑器节点宽度=排版预留宽度
+  function textW(s) {
+    let w = 0;
+    for (const c of String(s == null ? "" : s)) w += c.charCodeAt(0) > 0x2E80 ? 17 : 9;
+    return w;
+  }
+  // 节点最小宽度：容纳 标题 / 端口名 / "参数名+输入框"，与 layout.estimate_size 同公式
+  function nodeMinWidth(def) {
+    if (!def) return 160;
+    let w = textW(def.title) + 46;
+    for (const p of (def.inputs || []).concat(def.outputs || [])) w = Math.max(w, textW(p.label) + 46);
+    for (const p of (def.params || [])) w = Math.max(w, textW(p.label) + 196);
+    return Math.max(160, w);
+  }
+
   // 精简/定制 LiteGraph 菜单与交互（去重、去掉用不到的 group/subgraph、连线菜单不再混入"添加节点"）
   function installEditorTweaks() {
     // 连线中点菜单：只留"删除连线"（不再混入与空白处重复的 Add Node）
@@ -126,20 +141,47 @@ const ED = (function () {
     };
 
     // 超长文本参数在节点上"截断显示"（带省略号），不改变真实值（编辑/保存仍是完整值）。
+    // 按"该控件可用值宽 = 节点宽 - 参数名宽 - 留白"计算可显示字数，避免与参数名重叠。
     const _origDrawWidgets = LGraphCanvas.prototype.drawNodeWidgets;
     LGraphCanvas.prototype.drawNodeWidgets = function (node, posY, ctx, active_widget) {
       const saved = [];
-      const maxChars = Math.max(4, Math.floor((node.size[0] - 90) / 9));
       for (const w of (node.widgets || [])) {
-        if ((w.type === "text" || w.type === "string") &&
-            w.value != null && String(w.value).length > maxChars) {
-          saved.push([w, w.value]);
-          w.value = String(w.value).slice(0, maxChars) + "…";
+        if ((w.type === "text" || w.type === "string") && w.value != null) {
+          const avail = node.size[0] - textW(w.name) - 40;
+          const maxChars = Math.max(3, Math.floor(avail / 8));
+          const sv = String(w.value);
+          if (sv.length > maxChars) { saved.push([w, w.value]); w.value = sv.slice(0, maxChars) + "…"; }
         }
       }
       try { _origDrawWidgets.call(this, node, posY, ctx, active_widget); }
       finally { for (const s of saved) s[0].value = s[1]; }
     };
+
+    // 右键菜单过高时"内部滚动"而非整体平移：LiteGraph 给菜单根加了 wheel 监听把整个菜单
+    // top 上下移动，这里在菜单构造期吞掉 wheel/mousewheel 监听，并设最大高度+overflow，
+    // 让滚轮滚动内容。（用临时替换 addEventListener 实现，构造结束即还原。）
+    if (!LiteGraph.__menuScrollPatched) {
+      LiteGraph.__menuScrollPatched = true;
+      const OrigCM = LiteGraph.ContextMenu;
+      const CM = function (values, options) {
+        const proto = Element.prototype, origAdd = proto.addEventListener;
+        proto.addEventListener = function (type, fn, opts) {
+          if (type === "wheel" || type === "mousewheel") return;
+          return origAdd.call(this, type, fn, opts);
+        };
+        try { OrigCM.call(this, values, options); }
+        finally { proto.addEventListener = origAdd; }
+        if (this.root) {
+          this.root.style.maxHeight = "84vh";
+          this.root.style.overflowY = "auto";
+          this.root.style.overflowX = "hidden";
+        }
+        return this;
+      };
+      CM.prototype = OrigCM.prototype;
+      for (const k in OrigCM) { try { CM[k] = OrigCM[k]; } catch (e) {} }
+      LiteGraph.ContextMenu = CM;
+    }
 
     // 多选后整体拖动：点击"已在多选中的节点"且无修饰键时，保留整个多选（默认会清空只留这个，导致只拖动一个）
     const _origProcNodeSel = LGraphCanvas.prototype.processNodeSelected;
@@ -209,6 +251,7 @@ const ED = (function () {
           for (const p of D.inputs) this.addInput(p.name, slotType(p), { label: p.label });
           for (const p of D.params) addParamWidget(this, p);
           for (const p of D.outputs) this.addOutput(p.name, slotType(p), { label: p.label });
+          this.size[0] = Math.max(this.size[0] || 0, nodeMinWidth(D));  // 加宽容纳"参数名+值"，与排版预留一致
           this._typeId = D.type;
           if (!this._id) this._id = D.type.split(".").pop() + "_" + (seq++);
         };
@@ -459,6 +502,12 @@ const ED = (function () {
   }
 
   // ---- 右键连线任意位置：找出离光标最近的连线（采样贝塞尔曲线）----
+  function distToSeg(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+    let t = len2 ? ((px - x1) * dx + (py - y1) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+  }
   function linkNear(gx, gy) {
     if (!graph) return null;
     const thr = 14 / (canvas.ds.scale || 1);   // 命中阈值（图坐标）
@@ -470,10 +519,16 @@ const ED = (function () {
       let p0, p3;
       try { p0 = a.getConnectionPos(false, l.origin_slot); p3 = b.getConnectionPos(true, l.target_slot); }
       catch (e) { continue; }
-      for (let t = 0; t <= 1.0001; t += 0.04) {
-        const pt = canvas.computeConnectionPoint(p0, p3, t);  // 与渲染所用样条完全一致，命中更准
-        const d = Math.hypot(pt[0] - gx, pt[1] - gy);
+      // 采样数随连线长度增加（含水平凸起），并用"点到线段"距离覆盖采样间隙——
+      // 否则长的/竖向的连线采样点太稀，点在线上也会漏判。
+      const span = Math.hypot(p3[0] - p0[0], p3[1] - p0[1]) + Math.abs(p3[0] - p0[0]) * 0.5;
+      const steps = Math.max(24, Math.min(200, Math.round(span / 10)));
+      let prev = canvas.computeConnectionPoint(p0, p3, 0);
+      for (let i = 1; i <= steps; i++) {
+        const cur = canvas.computeConnectionPoint(p0, p3, i / steps);
+        const d = distToSeg(gx, gy, prev[0], prev[1], cur[0], cur[1]);
         if (d < bestD) { bestD = d; best = l; }
+        prev = cur;
       }
     }
     return best;
