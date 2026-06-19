@@ -233,26 +233,66 @@ const ED = (function () {
     w._key = p.key;                  // 保存时用作参数键（不动 w.name，它是显示标签）
     node.properties[p.key] = w.value;
 
-    // 图片模板参数：额外加一个"选择图片…"按钮，用系统文件框选图片填入（多模板可累加）
+    // 设一个值进控件并同步（用于"吸色"顺带回填同节点的坐标参数）。
+    const setByKey = (key, val) => {
+      const w2 = (node.widgets || []).find((x) => x._key === key);
+      if (w2) { w2.value = val; if (node.properties) node.properties[key] = val; return true; }
+      return false;
+    };
+    // 关键：按钮回调发生在画布鼠标交互未结束时（画布仍持有指针捕获），若此刻直接弹
+    // 系统【模态】框/全屏覆盖层会冲突、"只闪一下"。统一延迟到交互结束后再调后端。
+    const defer = (openingMsg, runner, onResult) => {
+      setStatus(openingMsg);
+      setTimeout(() => {
+        Promise.resolve(runner()).then(onResult)
+          .catch((e) => showError("采集失败：" + (e && (e.stack || e.message) || e)));
+      }, 120);
+    };
+    const apply = (val, msg) => { w.value = val; cb(val); if (canvas) canvas.setDirty(true, true); setStatus(msg); };
+    const mkBtn = (label, run) => {
+      const btn = node.addWidget("button", label, null, run);
+      btn._noSave = true;            // 按钮不是参数，保存时跳过（collect 按 _key 取值）
+    };
+    const csv = (arr) => (arr || []).join(",");
+
+    // 各参数类型挂上对应的"点一下就采集"按钮（采集时编辑器会自动让开、截到游戏画面）。
     if (p.ptype === "template" || p.ptype === "templates") {
       const multi = p.ptype === "templates";
-      const doPick = () => {
-        // 关键：若在画布按钮回调里（鼠标交互未结束、画布仍持有指针捕获）直接弹系统【模态】
-        // 文件框，会与画布指针捕获冲突，对话框"只闪一下"就消失。延迟到交互结束后再弹即可。
-        setStatus("正在打开图片选择框…");
-        setTimeout(() => {
-          Promise.resolve(api().pick_templates(multi)).then((paths) => {
-            if (!paths || !paths.length) { setStatus("已取消选择图片"); return; }
-            const picked = paths.join(",");
-            w.value = (multi && w.value) ? (w.value + "," + picked) : picked;  // 多模板追加，单模板替换
-            cb(w.value);
-            if (canvas) canvas.setDirty(true, true);
-            setStatus("已选择 " + paths.length + " 张图片");
-          }).catch((e) => showError("选择图片失败：" + (e && (e.stack || e.message) || e)));
-        }, 120);
-      };
-      const btn = node.addWidget("button", "选择图片…", null, doPick);
-      btn._noSave = true;            // 按钮不是参数，保存时跳过（collect 按 _key 取值）
+      // 从已有图片文件选择（系统文件框）
+      mkBtn("选择图片…", () => defer("正在打开图片选择框…", () => api().pick_templates(multi), (paths) => {
+        if (!paths || !paths.length) { setStatus("已取消选择图片"); return; }
+        const picked = paths.join(",");
+        apply((multi && w.value) ? (w.value + "," + picked) : picked, "已选择 " + paths.length + " 张图片");
+      }));
+      // 直接在游戏画面上框选裁出模板
+      mkBtn("截取模板…", () => defer("框选模板区域…（Enter 保存 / Esc 取消）", () => api().capture_template(), (path) => {
+        if (!path) { setStatus("已取消截取模板"); return; }
+        apply((multi && w.value) ? (w.value + "," + path) : path, "已截取模板：" + path);
+      }));
+    } else if (p.ptype === "region") {
+      mkBtn("框选区域…", () => defer("框选区域…（Enter 确认 / Esc 取消）", () => api().pick_region(), (box) => {
+        if (!box) { setStatus("已取消框选"); return; }
+        apply(csv(box), "已框选区域：" + csv(box));
+      }));
+    } else if (p.ptype === "point") {
+      mkBtn("取点…", () => defer("点击取点…（Esc 取消）", () => api().pick_point(), (pt) => {
+        if (!pt) { setStatus("已取消取点"); return; }
+        apply(csv(pt), "已取点：" + csv(pt));
+      }));
+    } else if (p.ptype === "color") {
+      mkBtn("吸色…", () => defer("点击吸色…（Esc 取消）", () => api().pick_color(), (r) => {
+        if (!r) { setStatus("已取消吸色"); return; }
+        apply(csv(r.color), "已吸色：" + csv(r.color));
+        // 顺带回填同节点配套的坐标参数（color↔pixel / color_hdr↔pixel_hdr）。
+        if (r.point && setByKey(p.key.replace("color", "pixel"), csv(r.point))) {
+          if (canvas) canvas.setDirty(true, true);
+        }
+      }));
+    } else if (p.ptype === "key") {
+      mkBtn("捕获按键…", () => defer("请按下按键…（Esc 取消）", () => api().pick_key(), (k) => {
+        if (!k) { setStatus("已取消捕获"); return; }
+        apply(k, "已捕获按键：" + k);
+      }));
     }
   }
 
@@ -540,7 +580,14 @@ const ED = (function () {
       "· 单击参数输入框：直接编辑，<b>实时生效</b>（无需确认按钮）<br>" +
       "· 右键连线（线上任意处）：删除连线　· 双击节点标题：折叠/展开<br>" +
       "· Ctrl+Z 撤销　· Ctrl+Y 或 Ctrl+Shift+Z 重做<br>" +
-      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存</div>";
+      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存</div>" +
+      "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
+      "<b style='color:#e6c07b'>在游戏画面上直接采集</b>（节点里相应参数下方的按钮）<br>" +
+      "· <b>框选区域…</b>：按住左键拖出矩形，Enter 确认（区域参数）<br>" +
+      "· <b>取点…/吸色…</b>：移动有放大镜，点一下取坐标/颜色（吸色会顺带回填配套坐标）<br>" +
+      "· <b>截取模板…</b>：框选游戏画面裁出小图存为模板（图片参数）<br>" +
+      "· <b>选择图片…</b>：从已有图片文件选模板　· <b>捕获按键…</b>：按一下记下按键<br>" +
+      "<span style='color:#7f8895'>点按钮后编辑器会自动最小化让开、截到游戏画面，采完自动恢复；Esc 取消。</span></div>";
     document.body.appendChild(helpModal);
     helpModal.querySelector("#helpclose").onclick = toggleHelp;
   }

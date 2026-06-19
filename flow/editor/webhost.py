@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Optional
 
 from ..core import Graph, create_node, registry
@@ -24,6 +25,8 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 # 内置流程目录（只读模板，随程序分发）与 用户自定义流程目录（用户的另存到这里）。
 BUILTIN_FLOWS_DIR = os.path.abspath("flows")
 USER_FLOWS_DIR = os.path.abspath("user_flows")
+# 截模板的保存目录（与内置模板同目录，节点里按相对路径 templates/xxx.png 读取）。
+TEMPLATES_DIR = os.path.abspath("templates")
 
 
 # ==================== 注册表 -> 前端类型定义 ====================
@@ -211,6 +214,51 @@ class Api:
         if not res:
             return []
         return list(res) if isinstance(res, (list, tuple)) else [res]
+
+    # ---------- 采集工具（框选/取点/吸色/截模板/捕获按键）----------
+    def _capture(self, fn):
+        """统一外壳：采集前把编辑器让开（最小化→等游戏重绘→抓屏），采完再恢复。
+
+        采集覆盖层是 topmost 全屏窗，盖住一切；要点只是抓屏那一刻编辑器别挡着游戏。
+        fn 在本（worker）线程内自建 Tk root 跑 mainloop，阻塞到覆盖层关闭再返回。
+        """
+        win = self._window
+        try:
+            if win:
+                try:
+                    win.minimize()
+                    time.sleep(0.35)  # 等最小化动画结束 + 游戏画面重绘出来再抓屏
+                except Exception:
+                    pass  # 最小化失败也继续采集（最多是编辑器没让开，覆盖层仍置顶）
+            return fn()
+        finally:
+            try:
+                if win:
+                    win.restore()
+            except Exception:
+                pass
+
+    def pick_region(self):
+        from . import capture
+        return self._capture(capture.pick_region)
+
+    def pick_point(self):
+        from . import capture
+        return self._capture(capture.pick_point)
+
+    def pick_color(self):
+        from . import capture
+        return self._capture(capture.pick_color)
+
+    def pick_key(self):
+        from . import capture
+        # 捕获按键不抓屏、不必让开编辑器，但仍走 worker 线程自建 Tk root。
+        return capture.capture_key()
+
+    def capture_template(self):
+        from . import capture
+        os.makedirs(TEMPLATES_DIR, exist_ok=True)
+        return self._capture(lambda: capture.capture_template(TEMPLATES_DIR))
 
     def autolayout(self, payload):
         from ..layout import mainline_layout
