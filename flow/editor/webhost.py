@@ -131,16 +131,21 @@ def payload_to_graph(payload: dict) -> Graph:
 
 # ==================== pywebview Api ====================
 class Api:
+    # 注意：对象型成员一律用下划线前缀。pywebview 注入 window.pywebview.api 时会用
+    # dir()+getattr() 递归遍历本对象的所有"非下划线"属性去找可调用方法；若把 Window
+    # （其 .native 是 WinForms .NET 控件）或 Graph 暴露为公开属性，它会递归爬整个 .NET
+    # 对象图（AccessibilityObject.Bounds.Empty.Empty… 无限递归），既慢（卡死）又拖慢
+    # api 就绪（偶发 get_defs is not a function）。下划线前缀让 pywebview 跳过它们。
     def __init__(self):
-        self.window = None
-        self.graph: Optional[Graph] = None
-        self.path: Optional[str] = None
+        self._window = None
+        self._graph: Optional[Graph] = None
+        self._path: Optional[str] = None
 
     def get_defs(self):
         return node_defs()
 
     def get_flow(self):
-        return graph_to_payload(self.graph) if self.graph else {"name": "未命名流程", "nodes": [], "edges": []}
+        return graph_to_payload(self._graph) if self._graph else {"name": "未命名流程", "nodes": [], "edges": []}
 
     def list_builtin(self):
         d = "flows"
@@ -150,15 +155,15 @@ class Api:
 
     def open_path(self, path):
         if path and os.path.exists(path):
-            self.graph = Graph.load(path)
-            self.path = path
-            return graph_to_payload(self.graph)
+            self._graph = Graph.load(path)
+            self._path = path
+            return graph_to_payload(self._graph)
         return None
 
     def open_dialog(self):
         import webview
-        res = self.window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False,
-                                             file_types=("Flow (*.json)",))
+        res = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False,
+                                              file_types=("Flow (*.json)",))
         if res:
             return self.open_path(res[0])
         return None
@@ -167,25 +172,25 @@ class Api:
         from ..layout import layered_layout
         g = payload_to_graph(payload)
         layered_layout(g)
-        self.graph = g
+        self._graph = g
         return graph_to_payload(g)
 
     def save(self, payload):
-        self.graph = payload_to_graph(payload)
-        if not self.path:
+        self._graph = payload_to_graph(payload)
+        if not self._path:
             return self.save_as(payload)
-        self.graph.save(self.path)
-        return self.path
+        self._graph.save(self._path)
+        return self._path
 
     def save_as(self, payload):
         import webview
-        self.graph = payload_to_graph(payload)
-        res = self.window.create_file_dialog(webview.SAVE_DIALOG, save_filename="flow.flow.json",
-                                             file_types=("Flow (*.json)",))
+        self._graph = payload_to_graph(payload)
+        res = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename="flow.flow.json",
+                                              file_types=("Flow (*.json)",))
         if res:
             path = res if isinstance(res, str) else res[0]
-            self.graph.save(path)
-            self.path = path
+            self._graph.save(path)
+            self._path = path
             return path
         return None
 
@@ -193,11 +198,11 @@ class Api:
 def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     import webview
     api = Api()
-    api.graph = graph
-    api.path = path
+    api._graph = graph
+    api._path = path
     index = os.path.join(WEB_DIR, "index.html")
-    api.window = webview.create_window("AOE4 Flow Editor", url=index, js_api=api,
-                                       width=1320, height=820)
+    api._window = webview.create_window("AOE4 Flow Editor", url=index, js_api=api,
+                                        width=1320, height=820)
     # 前端通过 js_api 轮询拉取启动数据（pywebview 注入 api 有延迟，前端会等到就绪再拉），
     # 不再用 evaluate_js 主动 push —— 那条路在 WebView2 上有跨线程 COM 报错且不稳定。
     debug = os.environ.get("AOE4_EDITOR_DEBUG") == "1"  # 置 1 可开 WebView2 开发者工具
