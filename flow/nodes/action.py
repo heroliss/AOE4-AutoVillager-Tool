@@ -21,7 +21,7 @@ class PressKey(ControlNode):
     outputs = [exec_out("out")]
     params = [
         ParamSpec("key", "按键", "key", default="q"),
-        ParamSpec("modifiers", "修饰键", "keys", default="", help="逗号分隔，如 ctrl,shift"),
+        ParamSpec("modifiers", "修饰键", "keys", default="", help="从下拉选择按键时要附带的修饰键组合（如 Ctrl+Shift）。"),
         ParamSpec("repeat", "重复次数", "int", default=1, minimum=1, maximum=100,
                   help="未连入 count 时使用此值"),
         ParamSpec("shift_batch", "Shift批量", "bool", default=False,

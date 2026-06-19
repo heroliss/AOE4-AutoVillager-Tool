@@ -236,6 +236,13 @@ const ED = (function () {
       w = node.addWidget("toggle", p.label, !!p.default, cb);
     else if (p.ptype === "enum")
       w = node.addWidget("combo", p.label, String(p.default ?? ""), cb, { values: (p.choices || []).map(String) });
+    else if (p.ptype === "keys") {
+      // 修饰键：直接用下拉菜单（值在 Python 侧与 csv 互转）。容纳已存的非标准组合。
+      const vals = MOD_LABELS.slice();
+      const dv = p.default == null ? "（无）" : String(p.default);
+      if (!vals.includes(dv)) vals.unshift(dv);
+      w = node.addWidget("combo", p.label, dv, cb, { values: vals });
+    }
     else
       w = node.addWidget("text", p.label, p.default == null ? "" : String(p.default), cb);
     w._key = p.key;                  // 保存时用作参数键（不动 w.name，它是显示标签）
@@ -309,10 +316,8 @@ const ED = (function () {
         if (!k) { setStatus("已取消捕获"); return; }
         apply(k, "已捕获按键：" + k);
       }));
-    } else if (p.ptype === "keys") {
-      // 修饰键不适合“按一下捕获”（是按住态、可多个），改为勾选弹窗，覆盖全部常见修饰键。
-      mkBtn("选择修饰键…", () => pickModifiers(w.value, (val) => apply(val, "已设置修饰键：" + (val || "（无）"))));
     }
+    // 注：修饰键(keys)已是下拉控件（见上方控件创建），无需额外按钮。
 
     // 图片参数：在节点下方的卡片里画出模板缩略图预览（值变化即刷新；见 nodeDrawForeground）。
     if (p.ptype === "template" || p.ptype === "templates")
@@ -322,31 +327,9 @@ const ED = (function () {
   // 与 layout.py 的卡片尺寸常量保持一致（排版预留高度 = 这里画出的高度）。
   // 模板按"列表"画：每个图片一行（缩略图 + 文件名）。
   const CARD = { LTH: 36, ROW: 40, PAD: 8, CGAP: 4, NOTE_LH: 16, DIV: 6, CAP: 12 };
-
-  // 修饰键多选弹窗：覆盖 Shift/Ctrl/Alt/Win，可多选，返回逗号分隔串。
-  function pickModifiers(currentCsv, onPick) {
-    document.getElementById("modpick")?.remove();
-    const have = new Set(String(currentCsv || "").split(",").map((s) => s.trim()).filter(Boolean));
-    const box = document.createElement("div");
-    box.id = "modpick";
-    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);background:#23272f;" +
-      "color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 18px;z-index:120;" +
-      "box-shadow:0 8px 30px #000a;font:13px/1.8 'Microsoft YaHei',sans-serif;";
-    let rows = "<b style='color:#e6c07b'>选择要监测的修饰键</b>（可多选）<br>";
-    for (const [k, label] of [["shift", "Shift"], ["ctrl", "Ctrl"], ["alt", "Alt"], ["win", "Win（⊞）"]])
-      rows += `<label style='display:block;cursor:pointer'><input type='checkbox' value='${k}' ${have.has(k) ? "checked" : ""}> ${label}</label>`;
-    box.innerHTML = rows +
-      "<div style='margin-top:10px;text-align:right'>" +
-      "<button id='modok' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>确定</button> " +
-      "<button id='modcancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>取消</button></div>";
-    document.body.appendChild(box);
-    box.querySelector("#modok").onclick = () => {
-      const picked = Array.from(box.querySelectorAll("input:checked")).map((c) => c.value);
-      box.remove();
-      onPick(picked.join(","));
-    };
-    box.querySelector("#modcancel").onclick = () => box.remove();
-  }
+  // 修饰键下拉选项（友好标签；Python 侧与 csv "ctrl,shift" 互转）。
+  const MOD_LABELS = ["（无）", "Shift", "Ctrl", "Alt", "Win",
+    "Ctrl+Shift", "Ctrl+Alt", "Shift+Alt", "Ctrl+Shift+Alt"];
 
   // ---- 模板缩略图：本地文件不让网页直接读，由 Python 读成 data URL 回传，这里缓存 ----
   const imgCache = {};   // path -> HTMLImageElement | "loading" | "fail"
@@ -764,6 +747,7 @@ const ED = (function () {
 
   function load(flow, opts) {
     const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
+    const keepHistory = !!(opts && opts.keepHistory);   // 自动排版：保留撤销历史（这样排版可被 Ctrl+Z 撤销）
     flowMeta = {
       name: flow.name || "未命名流程",
       desc: flow.description || "",
@@ -771,7 +755,7 @@ const ED = (function () {
       path: ("path" in flow) ? flow.path : flowMeta.path,
       readonly: ("readonly" in flow) ? !!flow.readonly : flowMeta.readonly,
     };
-    undoStack = []; redoStack = [];   // 新流程：清空撤销历史
+    if (!keepHistory) { undoStack = []; redoStack = []; }   // 新流程：清空撤销历史（排版除外）
     const added = buildGraph(flow);
     const total = (flow.nodes || []).length;
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
@@ -782,16 +766,16 @@ const ED = (function () {
     else { attachBaselineRefs(); refreshDirty(); }  // 排版后保留原基线，重新挂上控件引用
   }
 
-  // 顶部工具栏右侧：显示当前流程名 + 来源（内置只读 / 我的流程）。
+  // 顶部工具栏：显示当前流程名 + 来源（内置只读 / 我的流程）；说明作为悬浮提示。
   function updateFlowMeta() {
     const el = document.getElementById("flowmeta");
     if (!el) return;
     let tag = "";
-    if (flowMeta.readonly) tag = " · <span class='ro'>内置·只读（保存将另存为）</span>";
+    if (flowMeta.readonly) tag = " · <span class='ro'>内置·只读</span>";
     else if (flowMeta.path) tag = " · 我的流程";
     el.innerHTML = "📄 " + esc(flowMeta.name) + tag;
-    // 没有选中节点时，右下角说明面板展示流程说明
-    if (!selectedNode) showFlowHelp();
+    el.title = (flowMeta.readonly ? "内置流程（只读）：保存会另存到「我的流程」。\n\n" : "") +
+               (flowMeta.desc || "（暂无流程说明，点顶部「流程信息…」添加）");
   }
 
   // 顶部下拉：列出内置/我的流程，按【中文流程名】显示（值仍是完整相对路径，供 openBuiltin 打开）。
@@ -799,7 +783,8 @@ const ED = (function () {
   function fillFlowList(list) {
     const sel = document.getElementById("builtin");
     if (!sel) return;
-    sel.innerHTML = "<option value=''>内置流程…</option>";
+    // 首项是"提示标签"：disabled 故不可被选中，仅作为下拉收起时的按钮文案（选完会重置回它）。
+    sel.innerHTML = "<option value='' disabled selected>打开内置流程…</option>";
     const groups = { "flows": [], "user_flows": [] };
     for (const it of (list || [])) {
       const item = (typeof it === "string") ? { path: it, name: it } : it;   // 兼容旧的纯字符串
@@ -870,16 +855,21 @@ const ED = (function () {
       } catch (err) { showError("打开失败：" + (err.stack || err)); }
     },
     async openBuiltin(path) {
+      const sel = document.getElementById("builtin");
       if (!path) return;
       try {
         const flow = await api().open_path(path);
         if (flow) load(flow);
-      } catch (err) { showError("打开内置流程失败：" + (err.stack || err)); }
+      } catch (err) { showError("打开流程失败：" + (err.stack || err)); }
+      finally { if (sel) sel.selectedIndex = 0; }   // 重置回提示项，下拉像按钮一样可重复选同一项
     },
     async autolayout() {
       try {
         const flow = await api().autolayout(collect());
-        if (flow) load(flow, { clean: false });   // 只动了版面：保留“未保存”判定
+        if (!flow) return;
+        snapshotNow();                              // 先把“排版前”快照确保进撤销栈
+        load(flow, { clean: false, keepHistory: true });   // 只动版面：保留“未保存”判定且可撤销
+        setStatus("已自动排版（可 Ctrl+Z 撤销）");
       } catch (err) { showError("自动排版失败：" + (err.stack || err)); }
     },
     fit,
@@ -907,7 +897,7 @@ const ED = (function () {
       "padding:8px 10px;font:12px/1.6 'Microsoft YaHei',sans-serif;display:none;z-index:50;";
     document.body.appendChild(helpEl);
     canvas.onNodeSelected = (n) => { selectedNode = n; showNodeHelp(n); };
-    canvas.onNodeDeselected = () => { selectedNode = null; showFlowHelp(); };   // 取消选中 -> 显示流程说明
+    canvas.onNodeDeselected = () => { selectedNode = null; helpEl.style.display = "none"; };
   }
 
   // 选中节点的说明面板：只放“该节点专属”的内容（用途 + 需要解释的端口/参数），
@@ -960,24 +950,6 @@ const ED = (function () {
         };
       });
     }
-    helpEl.style.display = "block";
-  }
-
-  // 未选中节点时，右下角面板展示「流程说明」（可点[编辑]修改名称/说明）。
-  function showFlowHelp() {
-    if (!helpEl) return;
-    const sub = "color:#7f8895;border-top:1px solid #3a404a;margin-top:6px;padding-top:4px";
-    let html = `<div style="font-weight:bold;color:#e6e9ee;margin-bottom:2px">📄 ${esc(flowMeta.name || "未命名流程")} ` +
-               `<a href="#" id="flowedit" style="color:#7fb0ee;text-decoration:none;font-weight:normal">[编辑]</a></div>`;
-    if (flowMeta.readonly)
-      html += `<div style="color:#e6a23c">内置流程（只读）——保存会另存到「我的流程」，不会覆盖内置。</div>`;
-    html += flowMeta.desc
-      ? `<div style="color:#9aa3af;white-space:pre-line;margin-top:2px">${esc(flowMeta.desc)}</div>`
-      : `<div style="color:#6b727d;margin-top:2px">（暂无流程说明，点 [编辑] 添加）</div>`;
-    html += `<div style="${sub}">点击任一节点查看该节点说明；右键节点可加“描述”。</div>`;
-    helpEl.innerHTML = html;
-    const a = helpEl.querySelector("#flowedit");
-    if (a) a.onclick = (e) => { e.preventDefault(); editFlowInfo(); };
     helpEl.style.display = "block";
   }
 
@@ -1165,8 +1137,8 @@ const ED = (function () {
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
       graph.onConnectionChange = scheduleSnap;
       graph.onNodeAdded = scheduleSnap;
-      // 删除节点：除快照外，把右下角面板切回“流程说明”（否则被删节点的说明会残留）
-      graph.onNodeRemoved = () => { scheduleSnap(); selectedNode = null; showFlowHelp(); };
+      // 删除节点：除快照外，隐藏右下角说明面板（否则被删节点的说明会残留）
+      graph.onNodeRemoved = () => { scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none"; };
       canvas.onNodeMoved = scheduleSnap;
       // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
       canvas.canvas.addEventListener("pointerdown", onRightDown, true);

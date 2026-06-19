@@ -75,12 +75,37 @@ def _port_kind_map() -> dict:
 
 
 # ==================== 参数值 <-> 前端 ====================
+# 修饰键：内部存 csv（"ctrl,shift"），前端下拉显示友好标签（"Ctrl+Shift"）。
+_MOD_ORDER = ["ctrl", "shift", "alt", "win"]
+_MOD_LABEL = {"ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Win"}
+
+
+def _keys_to_label(v) -> str:
+    if isinstance(v, (list, tuple)):
+        toks = [str(x).strip().lower() for x in v if str(x).strip()]
+    else:
+        toks = [t.strip().lower() for t in str(v or "").split(",") if t.strip()]
+    toks = [t for t in _MOD_ORDER if t in toks] + [t for t in toks if t not in _MOD_ORDER]
+    return "+".join(_MOD_LABEL.get(t, t.capitalize()) for t in toks) if toks else "（无）"
+
+
+def _label_to_keys(s) -> str:
+    s = str(s or "").strip()
+    if s in ("", "（无）", "(无)", "无"):
+        return ""
+    parts = [p.strip().lower() for p in s.replace("，", "+").replace(",", "+").split("+") if p.strip()]
+    parts = [t for t in _MOD_ORDER if t in parts] + [t for t in parts if t not in _MOD_ORDER]
+    return ",".join(parts)
+
+
 def _param_to_js_raw(spec, v):
-    """供前端控件显示：列表类（region/point/color/templates）转成字符串。"""
+    """供前端控件显示：列表类（region/point/color/templates）转成字符串；keys 转友好标签。"""
     if spec.ptype in ("region", "point", "color"):
         return ",".join(str(x) for x in (v or []))
     if spec.ptype == "templates":
         return ",".join(str(x) for x in (v or []))
+    if spec.ptype == "keys":
+        return _keys_to_label(v)
     return v
 
 
@@ -108,7 +133,9 @@ def _param_from_js(spec, v):
         return out
     if t == "templates":
         return [p.strip() for p in str(v).replace("\n", ",").split(",") if p.strip()]
-    return v  # enum / str / regex / key / keys / template
+    if t == "keys":
+        return _label_to_keys(v)   # 友好标签 -> csv（"Ctrl+Shift" -> "ctrl,shift"）
+    return v  # enum / str / regex / key / template
 
 
 # ==================== Graph <-> 载荷 ====================

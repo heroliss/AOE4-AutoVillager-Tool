@@ -236,8 +236,10 @@ def _fmt_log(v) -> str:
 class LogNode(ControlNode):
     """日志：把文本 + 最多三个数据值打印到运行日志（调试/观察检测结果用）。
 
-    多个「值」按顺序拼接。例：把「三态遮挡检测」的「状态」接到「值」、「置信度」接到「值2」，
-    再在「文本」里写个前缀，日志就会输出形如「遮挡 完全遮挡 0.83」。
+    在「文本」里用占位符 {0}/{1}/{2} 引用「值/值2/值3」，例如文本写：
+        遮挡={1} 状态={0}
+    把「三态遮挡检测」的「状态」接到「值」、「置信度」接到「值2」，就会输出「遮挡=0.83 状态=完全遮挡」。
+    若文本里没有写占位符，则把各个值依次接在文本后面（如「遮挡 完全遮挡 0.83」）。
     （日志当前打印到控制台/日志文件；在编辑器里实时查看属于后续“编辑器内运行”能力。）
     """
 
@@ -246,20 +248,25 @@ class LogNode(ControlNode):
     title = "日志"
     inputs = [
         exec_in("in"),
-        data_in("value", DataType.ANY, label="值"),
-        data_in("value2", DataType.ANY, label="值2", help="可选的第二个值（如把状态接值、置信度接值2）"),
-        data_in("value3", DataType.ANY, label="值3", help="可选的第三个值"),
+        data_in("value", DataType.ANY, label="值", help="文本里用 {0} 引用"),
+        data_in("value2", DataType.ANY, label="值2", help="文本里用 {1} 引用（如把状态接值、置信度接值2）"),
+        data_in("value3", DataType.ANY, label="值3", help="文本里用 {2} 引用"),
     ]
     outputs = [exec_out("out")]
-    params = [ParamSpec("message", "文本", "str", default="")]
+    params = [ParamSpec("message", "文本", "str", default="",
+                        help="可用 {0}/{1}/{2} 引用 值/值2/值3；不写占位符则把各值依次接在文本后。")]
 
     def execute(self, ctx, inputs):
-        parts = []
-        if self.values["message"]:
-            parts.append(str(self.values["message"]))
-        for key in ("value", "value2", "value3"):
-            v = inputs.get(key)
-            if v is not None:
-                parts.append(_fmt_log(v))
-        ctx.log("INFO", " ".join(parts))
+        vals = [inputs.get("value"), inputs.get("value2"), inputs.get("value3")]
+        msg = self.values["message"] or ""
+        if any(("{%d}" % i) in msg for i in range(3)):
+            # 占位符模式：{0}=值 {1}=值2 {2}=值3（未连入的值替换为空串）
+            for i, v in enumerate(vals):
+                msg = msg.replace("{%d}" % i, _fmt_log(v) if v is not None else "")
+            out = msg
+        else:
+            parts = [str(msg)] if msg else []
+            parts += [_fmt_log(v) for v in vals if v is not None]
+            out = " ".join(parts)
+        ctx.log("INFO", out)
         return {}, "out"

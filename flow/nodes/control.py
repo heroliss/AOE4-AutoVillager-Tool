@@ -64,8 +64,8 @@ class ModifierDown(DataNode):
     title = "修饰键检测"
     outputs = [data_out("down", DataType.BOOL, label="按住修饰键",
                         help="此刻是否按住了所监测的任一修饰键（接「分支」的条件即可实现「按住则暂停」）。")]
-    params = [ParamSpec("keys", "监测修饰键", "str", default="shift,ctrl,alt",
-                        help="逗号分隔，监测其中任一是否被按住，如 shift,ctrl,alt")]
+    params = [ParamSpec("keys", "监测修饰键", "keys", default="shift,ctrl,alt",
+                        help="从下拉选择要监测的修饰键组合；监测其中任一是否被按住。")]
 
     def evaluate(self, ctx, inputs):
         which = tuple(k.strip() for k in self.values["keys"].split(",") if k.strip())
