@@ -1,11 +1,12 @@
 """
 启动节点编辑器。
 
-    python run_editor.py [flow.json]            # 经典编辑器（node_editor，参数在节点内，无缩放）
-    python run_editor.py --canvas [flow.json]   # 自绘画布（支持滚轮缩放/平移，开发中）
+    python run_editor.py [flow.json]            # 默认：网页编辑器（LiteGraph + pywebview，缩放/右键/节点内参数）
+    python run_editor.py --classic [flow.json]  # 备用：DPG 经典 node_editor（无缩放）
+    python run_editor.py --canvas  [flow.json]  # 备用：DPG 自绘画布（缩放，开发中）
 
 可选位置参数：要打开的流程图 JSON 路径；不给则新建空白流程。
-（DearPyGui 在 Python 3.14 上验证可用，直接用系统 python 即可。）
+诊断：设环境变量 AOE4_EDITOR_DEBUG=1 可在网页编辑器中打开 WebView2 开发者工具。
 """
 from __future__ import annotations
 

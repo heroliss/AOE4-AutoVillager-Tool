@@ -1,11 +1,36 @@
 // AOE4 Flow Editor —— LiteGraph 前端胶水
-// 职责：从 Python 取"节点定义/流程"，注册 LiteGraph 节点类型并建图；编辑后回传保存。
-// 连线 exec/data 的归类、参数类型回解析都在 Python 侧完成（见 webhost.py），前端只忠实搬运。
+// 职责：注册 LiteGraph 节点类型并建图；编辑后回传保存。
+// 启动数据（节点定义/初始流程/内置列表）由 Python 主动 push 进来（window.__bootstrap__），
+// 若未收到再回退到 js_api 拉取。连线 exec/data 归类、参数类型回解析都在 Python 侧完成。
 
 const ED = (function () {
   let graph, canvas, defs = [];
   let typeKeyByType = {};   // our type_id -> LiteGraph 注册名
   let seq = 1;
+  let booted = false;
+
+  // ---- 错误可视化（界面里看不到控制台，所以把错误显示出来）----
+  function showError(msg) {
+    try { console.error(msg); } catch (e) {}
+    let el = document.getElementById("errbox");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "errbox";
+      el.style.cssText = "position:absolute;left:10px;bottom:10px;max-width:70%;max-height:45%;" +
+        "overflow:auto;background:#3a1212;color:#ffd7d7;border:1px solid #a33;border-radius:6px;" +
+        "padding:8px 10px;font:12px/1.5 Consolas,monospace;white-space:pre-wrap;z-index:9999;";
+      el.title = "点击关闭";
+      el.onclick = () => el.remove();
+      document.body.appendChild(el);
+    }
+    el.textContent = "⚠ 出错（点击关闭）：\n" + msg;
+  }
+  window.addEventListener("error", (e) =>
+    showError((e.message || e.error || "脚本错误") + "\n  " + (e.filename || "") + ":" + (e.lineno || "")));
+  window.addEventListener("unhandledrejection", (e) => {
+    const r = e.reason;
+    showError("Promise 被拒绝：" + (r && (r.stack || r.message) || r));
+  });
 
   // 连线按类型上色
   function setupColors() {
@@ -41,53 +66,78 @@ const ED = (function () {
   }
 
   function registerTypes(list) {
-    defs = list;
-    for (const def of list) {
-      const key = "aoe4/" + def.category + "/" + def.title;
-      typeKeyByType[def.type] = key;
-      const D = def;
-      function Ctor() {
-        this.title = D.title;
-        for (const p of D.inputs) this.addInput(p.name, slotType(p), { label: p.label });
-        for (const p of D.params) addParamWidget(this, p);
-        for (const p of D.outputs) this.addOutput(p.name, slotType(p), { label: p.label });
-        this._typeId = D.type;
-        if (!this._id) this._id = D.type.split(".").pop() + "_" + (seq++);
+    defs = list || [];
+    let okN = 0, failN = 0, lastErr = "";
+    for (const def of defs) {
+      try {
+        const key = "aoe4/" + def.category + "/" + def.title;
+        typeKeyByType[def.type] = key;
+        const D = def;
+        const Ctor = function () {
+          this.title = D.title;
+          for (const p of D.inputs) this.addInput(p.name, slotType(p), { label: p.label });
+          for (const p of D.params) addParamWidget(this, p);
+          for (const p of D.outputs) this.addOutput(p.name, slotType(p), { label: p.label });
+          this._typeId = D.type;
+          if (!this._id) this._id = D.type.split(".").pop() + "_" + (seq++);
+        };
+        Ctor.title = def.title;
+        if (!LiteGraph.registered_node_types[key])
+          LiteGraph.registerNodeType(key, Ctor);
+        okN++;
+      } catch (err) {
+        failN++; lastErr = (def && def.type) + " → " + (err && (err.stack || err.message) || err);
       }
-      Ctor.title = def.title;
-      LiteGraph.registerNodeType(key, Ctor);
     }
+    if (failN) showError(`注册节点类型失败 ${failN}/${defs.length}，最后一个：\n${lastErr}`);
+    return okN;
   }
 
   function buildGraph(flow) {
+    if (!graph) return 0;
     graph.clear();
     const idMap = {};
+    const missing = {};
+    let added = 0, lastErr = "";
     for (const nd of flow.nodes || []) {
-      const key = typeKeyByType[nd.type];
-      if (!key) continue;
-      const n = LiteGraph.createNode(key);
-      n._id = nd.id;
-      n._typeId = nd.type;
-      n.pos = [nd.pos ? nd.pos[0] : 0, nd.pos ? nd.pos[1] : 0];
-      for (const w of (n.widgets || [])) {
-        if (nd.params && w._key in nd.params) {
-          let v = nd.params[w._key];
-          w.value = (w.type === "combo") ? String(v) : v;
-          n.properties[w._key] = w.value;
+      try {
+        const key = typeKeyByType[nd.type];
+        if (!key) { missing[nd.type] = (missing[nd.type] || 0) + 1; continue; }
+        const n = LiteGraph.createNode(key);
+        if (!n) { missing[nd.type] = (missing[nd.type] || 0) + 1; continue; }
+        n._id = nd.id;
+        n._typeId = nd.type;
+        n.pos = [nd.pos ? nd.pos[0] : 0, nd.pos ? nd.pos[1] : 0];
+        for (const w of (n.widgets || [])) {
+          if (nd.params && w._key in nd.params) {
+            let v = nd.params[w._key];
+            w.value = (w.type === "combo") ? String(v) : v;
+            n.properties[w._key] = w.value;
+          }
         }
+        graph.add(n);
+        idMap[nd.id] = n;
+        added++;
+      } catch (err) {
+        lastErr = (nd && nd.type) + " → " + (err && (err.stack || err.message) || err);
       }
-      graph.add(n);
-      idMap[nd.id] = n;
     }
     for (const e of flow.edges || []) {
-      const a = idMap[e.src], b = idMap[e.dst];
-      if (!a || !b) continue;
-      const so = a.findOutputSlot(e.src_port);
-      const si = b.findInputSlot(e.dst_port);
-      if (so >= 0 && si >= 0) a.connect(so, b, si);
+      try {
+        const a = idMap[e.src], b = idMap[e.dst];
+        if (!a || !b) continue;
+        const so = a.findOutputSlot(e.src_port);
+        const si = b.findInputSlot(e.dst_port);
+        if (so >= 0 && si >= 0) a.connect(so, b, si);
+      } catch (err) { /* 单条连线失败不致命 */ }
     }
     graph.setDirtyCanvas(true, true);
     fit();
+    const miss = Object.keys(missing);
+    if (miss.length)
+      showError("未注册的节点类型（未渲染）：" + miss.map((t) => t + "×" + missing[t]).join(", "));
+    if (lastErr) showError("建图时有节点失败，最后一个：\n" + lastErr);
+    return added;
   }
 
   function collect() {
@@ -128,55 +178,71 @@ const ED = (function () {
   }
 
   // ---- 与 Python 交互 ----
-  async function api() { return window.pywebview.api; }
-
-  async function load(flow) {
-    graph._aoe4_name = flow.name;
-    buildGraph(flow);
-    setStatus(`流程：${flow.name} ｜ 节点 ${(flow.nodes || []).length}`);
+  function api() {
+    if (!(window.pywebview && window.pywebview.api))
+      throw new Error("pywebview.api 尚不可用");
+    return window.pywebview.api;
   }
+
+  function load(flow) {
+    graph._aoe4_name = flow.name;
+    const added = buildGraph(flow);
+    const total = (flow.nodes || []).length;
+    setStatus(`流程：${flow.name} ｜ 节点 ${added}/${total}`);
+  }
+
+  // ---- 启动：优先用 Python push 进来的数据 ----
+  function boot(data) {
+    if (booted) return;
+    booted = true;
+    try {
+      const okN = registerTypes(data.defs);
+      const sel = document.getElementById("builtin");
+      for (const p of (data.builtin || [])) {
+        const o = document.createElement("option"); o.value = p; o.textContent = p; sel.appendChild(o);
+      }
+      if (data.flow) load(data.flow);
+      else setStatus(`已就绪 ｜ 已注册 ${okN} 种节点（右键空白处添加）`);
+    } catch (err) {
+      showError("启动失败：\n" + (err && (err.stack || err.message) || err));
+    }
+  }
+  window.__bootstrap__ = function (data) { boot(data); return true; };
 
   const self = {
     async save() {
-      const p = await (await api()).save(collect());
-      setStatus(p ? `已保存 ${p}` : "已取消保存");
+      try {
+        const p = await api().save(collect());
+        setStatus(p ? `已保存 ${p}` : "已取消保存");
+      } catch (err) { showError("保存失败：" + (err.stack || err)); }
     },
     async saveAs() {
-      const p = await (await api()).save_as(collect());
-      setStatus(p ? `已保存 ${p}` : "已取消");
+      try {
+        const p = await api().save_as(collect());
+        setStatus(p ? `已保存 ${p}` : "已取消");
+      } catch (err) { showError("另存为失败：" + (err.stack || err)); }
     },
     async open() {
-      const flow = await (await api()).open_dialog();
-      if (flow) load(flow);
+      try {
+        const flow = await api().open_dialog();
+        if (flow) load(flow);
+      } catch (err) { showError("打开失败：" + (err.stack || err)); }
     },
     async openBuiltin(path) {
       if (!path) return;
-      const flow = await (await api()).open_path(path);
-      if (flow) load(flow);
+      try {
+        const flow = await api().open_path(path);
+        if (flow) load(flow);
+      } catch (err) { showError("打开内置流程失败：" + (err.stack || err)); }
     },
     async autolayout() {
-      const flow = await (await api()).autolayout(collect());
-      if (flow) load(flow);
+      try {
+        const flow = await api().autolayout(collect());
+        if (flow) load(flow);
+      } catch (err) { showError("自动排版失败：" + (err.stack || err)); }
     },
     fit,
   };
-
-  async function init() {
-    setupColors();
-    graph = new LGraph();
-    canvas = new LGraphCanvas("#graph", graph);
-    resize();
-    window.addEventListener("resize", resize);
-
-    const a = await api();
-    registerTypes(await a.get_defs());
-    // 填充内置流程下拉
-    const sel = document.getElementById("builtin");
-    for (const p of await a.list_builtin()) {
-      const o = document.createElement("option"); o.value = p; o.textContent = p; sel.appendChild(o);
-    }
-    load(await a.get_flow());
-  }
 
   function resize() {
     const w = document.getElementById("wrap");
@@ -185,11 +251,36 @@ const ED = (function () {
     if (canvas) canvas.resize();
   }
 
-  function waitApi() {
-    if (window.pywebview && window.pywebview.api) init();
-    else setTimeout(waitApi, 50);
+  function start() {
+    try {
+      setupColors();
+      graph = new LGraph();
+      canvas = new LGraphCanvas("#graph", graph);
+      resize();
+      window.addEventListener("resize", resize);
+      window.__bootReady = true;       // 通知 Python：可以 push 启动数据了
+      setStatus("等待启动数据…");
+      setTimeout(fallbackPull, 4000);  // 兜底：若 Python 未 push，则主动拉取
+    } catch (err) {
+      showError("初始化画布失败：\n" + (err && (err.stack || err.message) || err));
+    }
   }
-  window.addEventListener("DOMContentLoaded", waitApi);
 
+  // 兜底：Python 没 push 成功时，用 js_api 拉取
+  async function fallbackPull() {
+    if (booted) return;
+    try {
+      if (!(window.pywebview && window.pywebview.api)) { setTimeout(fallbackPull, 400); return; }
+      const a = window.pywebview.api;
+      const d = await a.get_defs();
+      const b = await a.list_builtin();
+      const f = await a.get_flow();
+      boot({ defs: d, builtin: b, flow: f });
+    } catch (err) {
+      showError("回退拉取启动数据失败：\n" + (err && (err.stack || err.message) || err));
+    }
+  }
+
+  window.addEventListener("DOMContentLoaded", start);
   return self;
 })();

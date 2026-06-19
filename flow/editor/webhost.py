@@ -191,6 +191,8 @@ class Api:
 
 
 def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
+    import json
+    import time
     import webview
     api = Api()
     api.graph = graph
@@ -198,4 +200,24 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     index = os.path.join(WEB_DIR, "index.html")
     api.window = webview.create_window("AOE4 Flow Editor", url=index, js_api=api,
                                        width=1320, height=820)
-    webview.start()
+
+    def _boot(window):
+        # 等待前端就绪后，主动把启动数据 push 进页面（比前端 js_api 拉取更可靠）。
+        deadline = time.time() + 30.0   # WebView2 首次冷启动可能较慢，给足时间
+        while time.time() < deadline:
+            try:
+                if window.evaluate_js("window.__bootReady === true"):
+                    break
+            except Exception:
+                pass
+            time.sleep(0.05)
+        data = {"defs": node_defs(), "flow": api.get_flow(), "builtin": api.list_builtin()}
+        inner = json.dumps(data, ensure_ascii=True)   # 纯 ASCII，嵌入安全
+        literal = json.dumps(inner)                    # 转成 JS 字符串字面量
+        try:
+            window.evaluate_js("window.__bootstrap__(JSON.parse(" + literal + "))")
+        except Exception as e:  # 兜底交给前端 fallbackPull
+            print("bootstrap push failed:", e)
+
+    debug = os.environ.get("AOE4_EDITOR_DEBUG") == "1"  # 置 1 可开 WebView2 开发者工具
+    webview.start(_boot, api.window, debug=debug)
