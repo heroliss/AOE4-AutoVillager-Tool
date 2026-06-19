@@ -48,6 +48,44 @@ const ED = (function () {
     return p.dtype === "any" ? 0 : p.dtype;   // 0 = 通配
   }
 
+  // 精简/定制 LiteGraph 菜单与交互（去重、去掉用不到的 group/subgraph、连线菜单不再混入"添加节点"）
+  function installEditorTweaks() {
+    // 连线中点菜单：只留"删除连线"（不再混入与空白处重复的 Add Node）
+    LGraphCanvas.prototype.showLinkMenu = function (link, e) {
+      const that = this;
+      new LiteGraph.ContextMenu(["删除连线"], {
+        event: e, title: "连线",
+        callback: (v) => { if (v === "删除连线") that.graph.removeLink(link.id); },
+      });
+      return false;
+    };
+    // 画布空白右键：只留"添加节点"（去掉 Add Group / Align / 子图等）
+    LGraphCanvas.prototype.getCanvasMenuOptions = function () {
+      return [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
+    };
+    // 节点右键：精简到 克隆 / 删除（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/Collapse/Pin/Colors/Shapes 等堆叠项）
+    LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
+      const opts = [];
+      if (node.clonable !== false)
+        opts.push({ content: "克隆", callback: LGraphCanvas.onMenuNodeClone });
+      opts.push({
+        content: "删除",
+        disabled: !(node.removable !== false && !node.block_delete),
+        callback: LGraphCanvas.onMenuNodeRemove,
+      });
+      return opts;
+    };
+    // 编辑值的浮动输入框：点击其外部即关闭（符合"所有弹窗点外部关闭"的预期）
+    if (!window.__dlgCloseHooked) {
+      window.__dlgCloseHooked = true;
+      document.addEventListener("pointerdown", (e) => {
+        document.querySelectorAll(".graphdialog").forEach((d) => {
+          if (!d.contains(e.target) && typeof d.close === "function") d.close();
+        });
+      }, true);
+    }
+  }
+
   function addParamWidget(node, p) {
     // 构造期（new base_class）createNode 尚未给 node.properties 赋初值，需自行兜底，
     // 否则末尾 node.properties[key]=... 会抛 TypeError，导致带参数的节点整体创建失败。
@@ -70,10 +108,13 @@ const ED = (function () {
 
   function registerTypes(list) {
     defs = list || [];
+    // 只保留本工具的节点：清掉 litegraph 自带的 const/subgraph/group 等，避免"添加节点"菜单混乱、与本工具结构重复
+    LiteGraph.registered_node_types = {};
+    LiteGraph.Nodes = {};
     let okN = 0, failN = 0, lastErr = "";
     for (const def of defs) {
       try {
-        const key = "aoe4/" + def.category + "/" + def.title;
+        const key = def.category + "/" + def.title;   // 顶层菜单直接按中文分类（事件/数据/逻辑/…）
         typeKeyByType[def.type] = key;
         const D = def;
         const Ctor = function () {
@@ -260,8 +301,10 @@ const ED = (function () {
   function start() {
     try {
       setupColors();
+      installEditorTweaks();
       graph = new LGraph();
       canvas = new LGraphCanvas("#graph", graph);
+      canvas.allow_searchbox = false;   // 关闭双击/Shift 弹出的搜索框（易误触；加节点统一走右键空白处"添加节点"）
       resize();
       window.addEventListener("resize", resize);
       window.__bootReady = true;       // 供 Python 可选地 push 启动数据（__bootstrap__）
