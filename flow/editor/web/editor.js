@@ -449,15 +449,43 @@ const ED = (function () {
     canvas.onNodeDeselected = () => { helpEl.style.display = "none"; };
   }
 
+  // 连线模型图例：每次选中节点都在顶部提示一次，帮新手建立"白线/彩线"概念
+  const HELP_LEGEND =
+    "<b style='color:#e6c07b'>白线</b>＝执行顺序（先做什么、走哪条路）；出口不接任何节点＝本帧到此结束。" +
+    "<b style='color:#7fbf7f'>彩线</b>＝传值（按需取用，可一连多）。";
+
+  function portLine(p) {
+    const isExec = p.kind === "exec";
+    const tag = isExec ? "<span style='color:#e6c07b'>[白]</span>"
+                       : "<span style='color:#7fbf7f'>[彩]</span>";
+    const help = p.help ? `：${esc(p.help)}` : "";
+    return `<div style="margin-top:2px">${tag} <b style="color:#bcd">${esc(p.label || p.name)}</b>${help}</div>`;
+  }
+
   function showNodeHelp(node) {
     if (!helpEl) return;
     const d = defByType[node && node._typeId];
     if (!d) { helpEl.style.display = "none"; return; }
+    const sub = "color:#7f8895;border-top:1px solid #3a404a;margin-top:6px;padding-top:4px";
     let html = `<div style="font-weight:bold;color:#e6e9ee;margin-bottom:2px">${esc(d.title)}</div>`;
-    if (d.help) html += `<div style="color:#9aa3af;margin-bottom:4px">${esc(d.help)}</div>`;
+    // 完整说明（保留换行）
+    const doc = d.doc || d.help || "";
+    if (doc) html += `<div style="color:#9aa3af;margin-bottom:2px;white-space:pre-line">${esc(doc)}</div>`;
+    html += `<div style="color:#6b7280;font-size:11px;line-height:1.5;margin-top:4px">${HELP_LEGEND}</div>`;
+    // 输入 / 输出端口（仅在有端口时显示；含义不直观者带说明）
+    const ins = d.inputs || [], outs = d.outputs || [];
+    if (ins.length) {
+      html += `<div style="${sub}">输入</div>`;
+      for (const p of ins) html += portLine(p);
+    }
+    if (outs.length) {
+      html += `<div style="${sub}">输出</div>`;
+      for (const p of outs) html += portLine(p);
+    }
+    // 参数说明
     const ps = (d.params || []).filter((p) => p.help);
     if (ps.length) {
-      html += `<div style="color:#7f8895;border-top:1px solid #3a404a;margin-top:4px;padding-top:4px">参数说明</div>`;
+      html += `<div style="${sub}">参数说明</div>`;
       for (const p of ps)
         html += `<div style="margin-top:2px"><b style="color:#bcd">${esc(p.label)}</b>：${esc(p.help)}</div>`;
     }

@@ -14,22 +14,31 @@
       }
     },
     {
-      "id": "pause",
-      "type": "control.pause_if_modifier",
+      "id": "mod",
+      "type": "sense.modifier_down",
       "pos": [
-        420.0,
-        816.0
+        49.0,
+        700.0
       ],
       "params": {
         "keys": "shift,ctrl,alt"
       }
     },
     {
+      "id": "if_mod",
+      "type": "control.if",
+      "pos": [
+        480.5,
+        798.0
+      ],
+      "params": {}
+    },
+    {
       "id": "win",
       "type": "sense.window_check",
       "pos": [
         403.0,
-        562.0
+        544.0
       ],
       "params": {
         "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
@@ -461,12 +470,12 @@
     [
       "tick",
       "out",
-      "pause",
+      "if_mod",
       "in"
     ],
     [
-      "pause",
-      "out",
+      "if_mod",
+      "false",
       "if_win",
       "in"
     ],
@@ -586,6 +595,12 @@
     ]
   ],
   "data_edges": [
+    [
+      "mod",
+      "down",
+      "if_mod",
+      "cond"
+    ],
     [
       "win",
       "in_game",

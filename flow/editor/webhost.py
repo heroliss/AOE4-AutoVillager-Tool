@@ -32,6 +32,12 @@ def _doc_summary(cls) -> str:
     return doc.splitlines()[0].strip()
 
 
+def _doc_full(cls) -> str:
+    """完整文档字符串（去公共缩进），用于编辑器帮助面板的详细说明。"""
+    import textwrap
+    return textwrap.dedent(cls.__doc__ or "").strip()
+
+
 def node_defs() -> list[dict]:
     defs = []
     for type_id, cls in registry().items():
@@ -40,10 +46,11 @@ def node_defs() -> list[dict]:
             "title": cls.title,
             "category": cls.category,
             "help": _doc_summary(cls),
+            "doc": _doc_full(cls),
             "inputs": [{"name": p.name, "kind": p.kind.value, "dtype": p.dtype.value,
-                        "label": p.display} for p in cls.inputs],
+                        "label": p.display, "help": p.help} for p in cls.inputs],
             "outputs": [{"name": p.name, "kind": p.kind.value, "dtype": p.dtype.value,
-                         "label": p.display} for p in cls.outputs],
+                         "label": p.display, "help": p.help} for p in cls.outputs],
             "params": [{"key": s.key, "label": s.label, "ptype": s.ptype,
                         "default": _param_to_js_raw(s, s.default), "choices": s.choices,
                         "min": s.minimum, "max": s.maximum, "step": s.step,

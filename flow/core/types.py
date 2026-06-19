@@ -38,6 +38,7 @@ class Port:
     kind: PortKind
     dtype: DataType = DataType.ANY  # 仅对 DATA 端口有意义
     label: str = ""                 # UI 显示名（留空则用 name）
+    help: str = ""                  # 端口用途说明（编辑器选中节点时展示，给新手看）
 
     @property
     def display(self) -> str:
@@ -45,21 +46,23 @@ class Port:
 
 
 # —— 便捷构造函数（让节点定义更简洁）——
-# 执行端口默认给中文显示名（"进入"/"继续"），语义出口请显式传 label（如 真/假/到点）。
-def exec_in(name: str = "in", label: str = "") -> Port:
-    return Port(name, PortKind.EXEC, label=label or ("进入" if name == "in" else name))
+# 执行端口默认给中文显示名（"进入"/"继续"）；语义出口请显式传 label（如 真/假/到点）。
+# 端口的通用模型说明（白线/彩线）由编辑器帮助面板的"图例"统一解释，避免每个端口重复；
+# 仅在端口含义不直观时显式传 help（如「分支」的 条件/真/假）。
+def exec_in(name: str = "in", label: str = "", help: str = "") -> Port:
+    return Port(name, PortKind.EXEC, label=label or ("进入" if name == "in" else name), help=help)
 
 
-def exec_out(name: str = "out", label: str = "") -> Port:
-    return Port(name, PortKind.EXEC, label=label or ("继续" if name == "out" else name))
+def exec_out(name: str = "out", label: str = "", help: str = "") -> Port:
+    return Port(name, PortKind.EXEC, label=label or ("继续" if name == "out" else name), help=help)
 
 
-def data_in(name: str, dtype: DataType = DataType.ANY, label: str = "") -> Port:
-    return Port(name, PortKind.DATA, dtype=dtype, label=label)
+def data_in(name: str, dtype: DataType = DataType.ANY, label: str = "", help: str = "") -> Port:
+    return Port(name, PortKind.DATA, dtype=dtype, label=label, help=help)
 
 
-def data_out(name: str, dtype: DataType = DataType.ANY, label: str = "") -> Port:
-    return Port(name, PortKind.DATA, dtype=dtype, label=label)
+def data_out(name: str, dtype: DataType = DataType.ANY, label: str = "", help: str = "") -> Port:
+    return Port(name, PortKind.DATA, dtype=dtype, label=label, help=help)
 
 
 # 参数类型集合。编辑器据此决定用哪种控件：

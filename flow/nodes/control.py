@@ -1,18 +1,18 @@
 """
-控制流节点：整屏预取、定时门、修饰键暂停门、输入屏蔽作用域、文件锁。
+控制流节点：整屏预取、定时门、修饰键检测、输入屏蔽作用域、文件锁。
 
 这些把原主循环里的 continue / 每3秒检查 / 修饰键暂停 / BlockInput / 文件锁
 显式化为可连线的节点。输入屏蔽与文件锁用"开始/结束"两个节点表达作用域，
 执行器在每帧结束时兜底释放，避免跨帧泄漏。
 
 约定：执行流走到"没有连出的出口"即结束本帧（无需专门的"结束"节点）——
-例如条件节点的某个分支不接任何节点，就表示该情况下本帧到此为止。
+例如「分支」节点的某个出口不接任何节点，就表示该情况下本帧到此为止。
 """
 from __future__ import annotations
 
 import time
 
-from ..core import ControlNode, ParamSpec, exec_in, exec_out, register
+from ..core import ControlNode, DataNode, ParamSpec, DataType, exec_in, exec_out, data_out, register
 
 
 @register
@@ -52,21 +52,24 @@ class EveryNSeconds(ControlNode):
 
 
 @register
-class PauseIfModifier(ControlNode):
-    """若用户正按住修饰键则结束本帧（暂停自动操作），否则继续。"""
-    type_id = "control.pause_if_modifier"
-    category = "控制"
-    title = "修饰键暂停门"
-    inputs = [exec_in("in")]
-    outputs = [exec_out("out")]
-    params = [ParamSpec("keys", "监测修饰键", "str", default="shift,ctrl,alt")]
+class ModifierDown(DataNode):
+    """检测此刻是否按住了指定修饰键（Shift/Ctrl/Alt），输出「按住修饰键」(是/否)。
 
-    def execute(self, ctx, inputs):
+    常用于"人在手动操作时暂停自动化"：把输出接到「分支」的条件——按住时走「真」（下游不接＝
+    本帧结束＝暂停），没按时走「假」（继续）。这样它和其它检测节点一致：只负责"看一眼给个是/否"，
+    真正的分岔交给「分支」。
+    """
+    type_id = "sense.modifier_down"
+    category = "感知"
+    title = "修饰键检测"
+    outputs = [data_out("down", DataType.BOOL, label="按住修饰键",
+                        help="此刻是否按住了所监测的任一修饰键（接「分支」的条件即可实现「按住则暂停」）。")]
+    params = [ParamSpec("keys", "监测修饰键", "str", default="shift,ctrl,alt",
+                        help="逗号分隔，监测其中任一是否被按住，如 shift,ctrl,alt")]
+
+    def evaluate(self, ctx, inputs):
         which = tuple(k.strip() for k in self.values["keys"].split(",") if k.strip())
-        if ctx.modifiers_pressed(which):
-            ctx.log("INFO", "检测到修饰键，暂停")
-            return {}, None
-        return {}, "out"
+        return {"down": bool(ctx.modifiers_pressed(which))}
 
 
 @register

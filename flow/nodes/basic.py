@@ -170,14 +170,27 @@ class ClampNode(DataNode):
         return {"value": max(self.values["lo"], min(self.values["hi"], v))}
 
 
-# ==================== 条件分支 ====================
+# ==================== 分支（按是/否分岔执行流）====================
 @register
 class If(ControlNode):
+    """分支：读入一个「是/否」判断，把执行流分到 真 / 假 两条路（对应虚幻蓝图的 Branch）。
+
+    用法：把任意检测/比较节点输出的「是/否」接到这里的「条件」，再从「真」「假」两个出口各自往后连。
+    接到哪个出口就走哪条路；某个出口不接任何节点，就表示那种情况下「本帧到此结束」。
+    判断本身（截图/识别/比较等）由专门的节点完成——本节点只负责「分岔」。
+    """
     type_id = "control.if"
     category = "控制"
-    title = "条件"
-    inputs = [exec_in("in"), data_in("cond", DataType.BOOL, label="条件")]
-    outputs = [exec_out("true", label="真"), exec_out("false", label="假")]
+    title = "分支"
+    inputs = [
+        exec_in("in"),
+        data_in("cond", DataType.BOOL, label="条件",
+                help="一个「是/否」值（彩线）。通常接检测/比较节点的输出，例如「在游戏中」「命中」「食物≥50」。"),
+    ]
+    outputs = [
+        exec_out("true", label="真", help="当「条件」为「是」时走这条路。"),
+        exec_out("false", label="假", help="当「条件」为「否」时走这条路；不接＝该情况下本帧结束。"),
+    ]
 
     def execute(self, ctx, inputs):
         return {}, ("true" if bool(inputs.get("cond")) else "false")

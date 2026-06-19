@@ -53,7 +53,8 @@ def build_single_type(cfg: dict) -> Graph:
 
     # —— 入口与快速门 ——
     add("tick", "event.on_tick", {"interval": 0.1})
-    add("pause", "control.pause_if_modifier")
+    add("mod", "sense.modifier_down")          # 检测是否按住修饰键（按住＝人在手动操作）
+    add("if_mod", "control.if")                # 按住则暂停（真分支不接＝结束本帧），否则继续
     add("win", "sense.window_check", {"pixel": cfg["win_pixel"], "color": cfg["win_color"]})
     add("if_win", "control.if")
 
@@ -114,8 +115,8 @@ def build_single_type(cfg: dict) -> Graph:
 
     # ==================== 执行流 ====================
     # 注：条件分支若不接任何节点，即表示该情况下"结束本帧"（执行器走到无连出的出口自然停止）。
-    g.connect_exec("tick", "out", "pause", "in")
-    g.connect_exec("pause", "out", "if_win", "in")
+    g.connect_exec("tick", "out", "if_mod", "in")
+    g.connect_exec("if_mod", "false", "if_win", "in")   # 没按修饰键 -> 继续；按住(真)不接 = 暂停
     g.connect_exec("if_win", "true", "if_blocked", "in")
     g.connect_exec("if_blocked", "false", "if_trans", "in")
     g.connect_exec("if_trans", "false", "if_vill", "in")
@@ -141,6 +142,7 @@ def build_single_type(cfg: dict) -> Graph:
     g.connect_exec("delay", "out", "unlock", "in")
 
     # ==================== 数据流 ====================
+    g.connect_data("mod", "down", "if_mod", "cond")
     g.connect_data("win", "in_game", "if_win", "cond")
     g.connect_data("occ", "blocked", "if_blocked", "cond")
     g.connect_data("occ", "in_transition", "or_trans", "a")
