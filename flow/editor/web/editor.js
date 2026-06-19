@@ -264,26 +264,35 @@ const ED = (function () {
       canvas = new LGraphCanvas("#graph", graph);
       resize();
       window.addEventListener("resize", resize);
-      window.__bootReady = true;       // 通知 Python：可以 push 启动数据了
-      setStatus("等待启动数据…");
-      setTimeout(fallbackPull, 4000);  // 兜底：若 Python 未 push，则主动拉取
+      window.__bootReady = true;       // 供 Python 可选地 push 启动数据（__bootstrap__）
+      setStatus("正在连接后端…");
+      pullWhenReady(0);                // 主路径：轮询直到 api 就绪再拉取（pywebview 注入 api 有延迟）
     } catch (err) {
       showError("初始化画布失败：\n" + (err && (err.stack || err.message) || err));
     }
   }
 
-  // 兜底：Python 没 push 成功时，用 js_api 拉取
-  async function fallbackPull() {
+  // pywebview 把 js_api 方法注入 window.pywebview.api 有延迟（且 api 对象可能先于方法出现），
+  // 因此必须轮询到 get_defs 真的是函数再拉取，否则会 "a.get_defs is not a function"。
+  async function pullWhenReady(tries) {
     if (booted) return;
+    const a = window.pywebview && window.pywebview.api;
+    if (!a || typeof a.get_defs !== "function") {
+      if (tries > 200) {  // 约 40 秒仍不就绪才报错
+        showError("无法连接后端：window.pywebview.api.get_defs 始终不可用。\n" +
+                  "（pywebview/WebView2 注入失败？可设 AOE4_EDITOR_DEBUG=1 开开发者工具排查）");
+        return;
+      }
+      setTimeout(() => pullWhenReady(tries + 1), 200);
+      return;
+    }
     try {
-      if (!(window.pywebview && window.pywebview.api)) { setTimeout(fallbackPull, 400); return; }
-      const a = window.pywebview.api;
       const d = await a.get_defs();
       const b = await a.list_builtin();
       const f = await a.get_flow();
       boot({ defs: d, builtin: b, flow: f });
     } catch (err) {
-      showError("回退拉取启动数据失败：\n" + (err && (err.stack || err.message) || err));
+      showError("拉取启动数据失败：\n" + (err && (err.stack || err.message) || err));
     }
   }
 
