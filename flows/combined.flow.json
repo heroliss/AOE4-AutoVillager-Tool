@@ -127,7 +127,7 @@
       "type": "sense.ocr_number",
       "pos": [
         3114.5,
-        1008.0
+        1198.0
       ],
       "params": {
         "region": [
@@ -198,7 +198,7 @@
       "type": "game.tc_count",
       "pos": [
         3097.0,
-        672.0
+        742.0
       ],
       "params": {
         "icon_region": [
@@ -232,7 +232,7 @@
       "type": "data.const_number",
       "pos": [
         5998.5,
-        672.0
+        742.0
       ],
       "params": {
         "value": 1
@@ -354,7 +354,7 @@
       "type": "data.const_number",
       "pos": [
         3140.0,
-        540.0
+        610.0
       ],
       "params": {
         "value": 3
@@ -470,7 +470,7 @@
       "type": "data.const_number",
       "pos": [
         4573.5,
-        540.0
+        610.0
       ],
       "params": {
         "value": 2
@@ -586,7 +586,7 @@
       "type": "data.const_number",
       "pos": [
         5998.5,
-        540.0
+        610.0
       ],
       "params": {
         "value": 5

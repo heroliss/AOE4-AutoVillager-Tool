@@ -8,6 +8,7 @@ const ED = (function () {
   let typeKeyByType = {};   // our type_id -> LiteGraph 注册名
   let defByType = {};       // our type_id -> 定义（含 help/参数说明），用于选中节点时显示说明
   let helpEl = null;
+  let selectedNode = null;   // 当前选中的节点（用于参数变动时刷新“已修改”列表）
   let seq = 1;
   let booted = false;
   // 撤销/重做（快照式）
@@ -304,9 +305,13 @@ const ED = (function () {
       mkBtn("选择修饰键…", () => pickModifiers(w.value, (val) => apply(val, "已设置修饰键：" + (val || "（无）"))));
     }
 
-    // 图片参数：在节点下方画出模板缩略图预览（值变化即刷新；见 installNodePreview/onDrawForeground）。
-    if (p.ptype === "template" || p.ptype === "templates") node._previewKey = p.key;
+    // 图片参数：在节点下方的卡片里画出模板缩略图预览（值变化即刷新；见 nodeDrawForeground）。
+    if (p.ptype === "template" || p.ptype === "templates")
+      (node._previewKeys = node._previewKeys || []).push(p.key);
   }
+
+  // 与 layout.py 的卡片尺寸常量保持一致（排版预留高度 = 这里画出的高度）。
+  const CARD = { TH: 44, GAP: 6, PAD: 8, CGAP: 4, NOTE_LH: 16, DIV: 6, CAP: 12 };
 
   // 修饰键多选弹窗：覆盖 Shift/Ctrl/Alt/Win，可多选，返回逗号分隔串。
   function pickModifiers(currentCsv, onPick) {
@@ -364,40 +369,95 @@ const ED = (function () {
     }
     return out;
   }
-  // 在节点下方画：用户描述（📝）+ 图片参数的缩略图预览。挂到每种节点的 onDrawForeground。
+  function roundRect(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  // 收集本节点所有图片参数当前指向的路径。
+  function nodePreviewPaths(node) {
+    const out = [];
+    for (const k of (node._previewKeys || [])) {
+      const w = (node.widgets || []).find((x) => x._key === k);
+      if (w && w.value) for (const p of String(w.value).split(",").map((s) => s.trim())) if (p) out.push(p);
+    }
+    return out;
+  }
+  // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板缩略图）。
   function nodeDrawForeground(ctx) {
     if (this.flags && this.flags.collapsed) return;
-    let y = this.size[1] + 6;
-    if (this._note) {
-      ctx.save();
-      ctx.font = "12px 'Microsoft YaHei',sans-serif";
-      ctx.fillStyle = "#c9b87a";
-      for (const ln of wrapText(ctx, "📝 " + this._note, this.size[0])) { ctx.fillText(ln, 0, y + 10); y += 16; }
-      ctx.restore();
-      y += 3;
-    }
-    if (this._previewKey) {
-      const w = (this.widgets || []).find((x) => x._key === this._previewKey);
-      const paths = (w && w.value) ? String(w.value).split(",").map((s) => s.trim()).filter(Boolean) : [];
-      const TH = 46; let x = 0;
-      for (const pth of paths) {
+    // ① 已修改参数标记：在该参数控件行右侧画橙点（last_y 是 LiteGraph 画该控件时记下的 y）
+    for (const w of (this.widgets || [])) {
+      if (paramChanged(w) && w.last_y != null) {
         ctx.save();
-        ctx.fillStyle = "#15171c"; ctx.fillRect(x, y, TH, TH);
-        const im = getThumb(pth);
-        if (im) {
-          const r = Math.min(TH / im.width, TH / im.height);
-          const dw = im.width * r, dh = im.height * r;
-          ctx.drawImage(im, x + (TH - dw) / 2, y + (TH - dh) / 2, dw, dh);
-        } else {
-          ctx.fillStyle = "#666"; ctx.font = "10px sans-serif";
-          ctx.fillText(imgCache[pth] === "fail" ? "?" : "…", x + TH / 2 - 3, y + TH / 2 + 3);
-        }
-        ctx.strokeStyle = "#3a404a"; ctx.strokeRect(x, y, TH, TH);
+        ctx.fillStyle = "#e6a23c";
+        ctx.beginPath();
+        ctx.arc(this.size[0] - 7, w.last_y + (LiteGraph.NODE_WIDGET_HEIGHT || 20) / 2, 3.5, 0, Math.PI * 2);
+        ctx.fill();
         ctx.restore();
-        x += TH + 6;
-        if (x + TH > this.size[0]) { x = 0; y += TH + 6; }
       }
     }
+    // ② 附属卡片
+    const note = this._note || "";
+    const paths = nodePreviewPaths(this);
+    if (!note && !paths.length) return;
+    const W = this.size[0], inner = Math.max(1, W - 2 * CARD.PAD);
+    ctx.font = "12px 'Microsoft YaHei',sans-serif";
+    const noteLines = note ? wrapText(ctx, "📝 " + note, inner) : [];
+    const shown = Math.min(paths.length, CARD.CAP);
+    const perRow = Math.max(1, Math.floor(inner / (CARD.TH + CARD.GAP)));
+    const rows = paths.length ? Math.ceil(shown / perRow) : 0;
+    const extraLine = paths.length > shown ? CARD.NOTE_LH : 0;
+    let bodyH = noteLines.length * CARD.NOTE_LH + rows * (CARD.TH + CARD.GAP) + extraLine;
+    if (noteLines.length && rows) bodyH += CARD.DIV;
+    const cardY = this.size[1] + CARD.CGAP, cardH = CARD.PAD * 2 + bodyH;
+    // 卡片背景（圆角 + 细边，和节点连成一体的观感）
+    ctx.save();
+    roundRect(ctx, 0, cardY, W, cardH, 6);
+    ctx.fillStyle = "#1b1f27"; ctx.fill();
+    ctx.strokeStyle = "#3a404a"; ctx.lineWidth = 1; ctx.stroke();
+    let y = cardY + CARD.PAD;
+    if (noteLines.length) {
+      ctx.fillStyle = "#c9b87a"; ctx.font = "12px 'Microsoft YaHei',sans-serif";
+      for (const ln of noteLines) { ctx.fillText(ln, CARD.PAD, y + 11); y += CARD.NOTE_LH; }
+      if (rows) {
+        y += CARD.DIV / 2;
+        ctx.strokeStyle = "#2c323c"; ctx.beginPath();
+        ctx.moveTo(CARD.PAD, y); ctx.lineTo(W - CARD.PAD, y); ctx.stroke();
+        y += CARD.DIV / 2;
+      }
+    }
+    let x = CARD.PAD, c = 0;
+    for (let i = 0; i < shown; i++) {
+      const pth = paths[i], im = getThumb(pth);
+      roundRect(ctx, x, y, CARD.TH, CARD.TH, 4);
+      ctx.fillStyle = "#11141a"; ctx.fill();
+      if (im) {
+        ctx.save(); ctx.clip();
+        const r = Math.min(CARD.TH / im.width, CARD.TH / im.height);
+        const dw = im.width * r, dh = im.height * r;
+        ctx.drawImage(im, x + (CARD.TH - dw) / 2, y + (CARD.TH - dh) / 2, dw, dh);
+        ctx.restore();
+        roundRect(ctx, x, y, CARD.TH, CARD.TH, 4);
+      } else {
+        ctx.fillStyle = "#666"; ctx.font = "11px sans-serif";
+        ctx.fillText(imgCache[pth] === "fail" ? "?" : "…", x + CARD.TH / 2 - 3, y + CARD.TH / 2 + 4);
+      }
+      ctx.strokeStyle = "#3a404a"; ctx.lineWidth = 1; ctx.stroke();
+      x += CARD.TH + CARD.GAP;
+      if (++c >= perRow) { c = 0; x = CARD.PAD; y += CARD.TH + CARD.GAP; }
+    }
+    if (extraLine) {
+      if (c !== 0) y += CARD.TH + CARD.GAP;
+      ctx.fillStyle = "#7f8895"; ctx.font = "11px sans-serif";
+      ctx.fillText("+" + (paths.length - shown) + " 张", CARD.PAD, y + 11);
+    }
+    ctx.restore();
   }
   // 节点右键菜单追加“编辑描述/清除描述”。
   function nodeExtraMenu(_canvas, options) {
@@ -437,15 +497,49 @@ const ED = (function () {
     box.querySelector("#notecancel").onclick = () => box.remove();
   }
 
-  // ---- 未保存修改标记：当前内容与“上次保存/载入”签名不一致即为脏 ----
-  let savedSig = null;
+  // ---- 未保存修改标记（全局 ●未保存 + 每个参数的橙点/恢复）----
+  let savedSig = null;           // 全局：上次保存/载入时 collect() 的签名
+  let savedParams = {};          // 每参数基线：nodeId -> { key: 基线值 }
   function curSig() { try { return JSON.stringify(collect()); } catch (e) { return null; } }
-  function markSaved() { savedSig = curSig(); showDirty(false); }
+  function markSaved() {         // 保存/载入后：把“当前”设为基线，清除所有标记
+    savedParams = {};
+    for (const n of graph._nodes) {
+      const m = {}; for (const w of (n.widgets || [])) if (w._key) m[w._key] = w.value;
+      savedParams[n._id] = m;
+    }
+    savedSig = curSig();
+    attachBaselineRefs();
+    showDirty(false);
+  }
+  function attachBaselineRefs() { // 撤销/重做/排版会重建控件 -> 从 savedParams 重新挂上各控件的基线值
+    for (const n of graph._nodes) {
+      const m = savedParams[n._id] || {};
+      for (const w of (n.widgets || [])) if (w._key) w._saved = (w._key in m) ? m[w._key] : w.value;
+    }
+  }
+  function paramChanged(w) { return !!(w && w._key && w._saved !== undefined && String(w.value) !== String(w._saved)); }
   function refreshDirty() { showDirty(savedSig !== null && curSig() !== savedSig); }
   function showDirty(d) {
     const el = document.getElementById("dirty");
     if (el) el.textContent = d ? "●未保存" : "";
     try { document.title = (d ? "*" : "") + "AOE4 Flow Editor"; } catch (e) {}
+  }
+  function labelOf(node, key) {
+    const d = defByType[node && node._typeId];
+    const p = d && (d.params || []).find((q) => q.key === key);
+    return (p && p.label) || key;
+  }
+  function revertParam(node, key) {   // 把某参数恢复为基线（上次保存/载入）值
+    const w = (node.widgets || []).find((x) => x._key === key);
+    if (!w || w._saved === undefined) return;
+    w.value = w._saved;
+    if (node.properties) node.properties[key] = w.value;
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap();
+    showNodeHelp(node);             // 刷新说明面板里的“已修改”列表
+  }
+  function revertNode(node) {
+    for (const w of (node.widgets || [])) if (paramChanged(w)) revertParam(node, w._key);
   }
 
   function registerTypes(list) {
@@ -581,7 +675,8 @@ const ED = (function () {
     return window.pywebview.api;
   }
 
-  function load(flow) {
+  function load(flow, opts) {
+    const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
     graph._aoe4_name = flow.name;
     undoStack = []; redoStack = [];   // 新流程：清空撤销历史
     const added = buildGraph(flow);
@@ -589,7 +684,8 @@ const ED = (function () {
     fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
     setStatus(`流程：${flow.name} ｜ 节点 ${added}/${total}`);
     snapshotNow();   // 记录初始快照，作为撤销的基线
-    markSaved();     // 刚载入＝与磁盘一致，清除“未保存”标记
+    if (clean) markSaved();                         // 刚载入＝与磁盘一致，清除“未保存”标记
+    else { attachBaselineRefs(); refreshDirty(); }  // 排版后保留原基线，重新挂上控件引用
   }
 
   // ---- 启动：优先用 Python push 进来的数据 ----
@@ -641,7 +737,7 @@ const ED = (function () {
     async autolayout() {
       try {
         const flow = await api().autolayout(collect());
-        if (flow) load(flow);
+        if (flow) load(flow, { clean: false });   // 只动了版面：保留“未保存”判定
       } catch (err) { showError("自动排版失败：" + (err.stack || err)); }
     },
     fit,
@@ -668,8 +764,8 @@ const ED = (function () {
       "overflow:auto;background:#23272fee;color:#cfd3da;border:1px solid #3a404a;border-radius:6px;" +
       "padding:8px 10px;font:12px/1.6 'Microsoft YaHei',sans-serif;display:none;z-index:50;";
     document.body.appendChild(helpEl);
-    canvas.onNodeSelected = showNodeHelp;
-    canvas.onNodeDeselected = () => { helpEl.style.display = "none"; };
+    canvas.onNodeSelected = (n) => { selectedNode = n; showNodeHelp(n); };
+    canvas.onNodeDeselected = () => { selectedNode = null; helpEl.style.display = "none"; };
   }
 
   // 选中节点的说明面板：只放“该节点专属”的内容（用途 + 需要解释的端口/参数），
@@ -701,6 +797,27 @@ const ED = (function () {
         html += `<div style="margin-top:2px"><b style="color:#bcd">${esc(p.label)}</b>：${esc(p.help)}</div>`;
     }
     helpEl.innerHTML = html;
+    // 已修改（未保存）的参数：列出 旧→新 并给“恢复”链接（每项 + 全部）
+    const changed = (node.widgets || []).filter(paramChanged);
+    if (changed.length) {
+      const box = document.createElement("div");
+      box.style.cssText = sub;
+      let h2 = "<span style='color:#e6a23c'>已修改（未保存）</span> " +
+               "<a href='#' data-revert='*' style='color:#7fb0ee;text-decoration:none'>[全部恢复]</a>";
+      for (const w of changed)
+        h2 += `<div style="margin-top:3px"><b style="color:#bcd">${esc(labelOf(node, w._key))}</b> ` +
+              `<a href="#" data-revert="${esc(w._key)}" style="color:#7fb0ee;text-decoration:none">[恢复]</a>` +
+              `<br><span style="color:#7f8895">旧：${esc(w._saved)} → 新：${esc(w.value)}</span></div>`;
+      box.innerHTML = h2;
+      helpEl.appendChild(box);
+      box.querySelectorAll("[data-revert]").forEach((a) => {
+        a.onclick = (e) => {
+          e.preventDefault();
+          const k = a.getAttribute("data-revert");
+          if (k === "*") revertNode(node); else revertParam(node, k);
+        };
+      });
+    }
     helpEl.style.display = "block";
   }
 
@@ -761,6 +878,8 @@ const ED = (function () {
     if (undoStack.length > 100) undoStack.shift();
     redoStack = [];
     refreshDirty();
+    // 选中的节点参数有改动时，同步刷新右下角“已修改”列表（橙点本就实时随重绘更新）
+    if (selectedNode && helpEl && helpEl.style.display !== "none") showNodeHelp(selectedNode);
   }
   function scheduleSnap() { clearTimeout(snapTimer); snapTimer = setTimeout(snapshotNow, 250); }
   function applySnapshot(s) {
@@ -771,6 +890,7 @@ const ED = (function () {
     for (const n of graph._nodes) if (n.flags && n.flags.collapsed) collapsed.add(n._id);
     buildGraph(JSON.parse(s));
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
+    attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
     canvas.setDirty(true, true);
     suppressSnap = false;
@@ -853,7 +973,7 @@ const ED = (function () {
       graph.onConnectionChange = scheduleSnap;
       graph.onNodeAdded = scheduleSnap;
       // 删除节点：除快照外，隐藏右下角说明面板（否则被删节点的说明会残留）
-      graph.onNodeRemoved = () => { scheduleSnap(); if (helpEl) helpEl.style.display = "none"; };
+      graph.onNodeRemoved = () => { scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none"; };
       canvas.onNodeMoved = scheduleSnap;
       // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
       canvas.canvas.addEventListener("pointerdown", onRightDown, true);

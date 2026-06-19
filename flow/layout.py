@@ -13,7 +13,18 @@
 """
 from __future__ import annotations
 
+import math
 from collections import deque
+
+# 节点下方"附属卡片"（模板缩略图预览 + 用户描述）的尺寸常量，必须与 editor.js 的画法保持一致，
+# 否则自动排版预留的高度与实际渲染对不上、会重叠或留白。
+THUMB = 44.0          # 缩略图边长
+THUMB_GAP = 6.0       # 缩略图间距
+CARD_PAD = 8.0        # 卡片内边距
+CARD_GAP = 4.0        # 卡片与节点之间的缝
+NOTE_LH = 16.0        # 描述行高
+DIVIDER = 6.0         # 描述与缩略图之间的分隔
+PREVIEW_CAP = 12      # 最多显示的缩略图数（多出来用 "+N" 表示）
 
 
 def _text_w(s: str) -> float:
@@ -22,7 +33,7 @@ def _text_w(s: str) -> float:
 
 
 def estimate_size(node) -> tuple[float, float]:
-    """估算节点在画布上的宽高（像素）。"""
+    """估算节点"本体"在画布上的宽高（像素），不含下方附属卡片。"""
     title_w = _text_w(node.title) + 46
     port_w = max([_text_w(p.display) + 46 for p in (list(node.inputs) + list(node.outputs))] or [0])
     param_w = max([_text_w(p.label) + 196 for p in node.params] or [0])  # 标签 + 输入框宽度
@@ -32,6 +43,54 @@ def estimate_size(node) -> tuple[float, float]:
     return (w, float(h))
 
 
+def _template_paths(node) -> list:
+    """节点上 template/templates 参数当前指向的图片路径（用于估算预览高度）。"""
+    out = []
+    for s in node.params:
+        if getattr(s, "ptype", None) in ("template", "templates"):
+            v = node.values.get(s.key)
+            if isinstance(v, (list, tuple)):
+                out += [p for p in v if p]
+            elif v:
+                out += [p for p in str(v).split(",") if p.strip()]
+    return out
+
+
+def _card_h(node, note: str, width: float) -> float:
+    """节点下方附属卡片（描述+缩略图）的总占高；无内容返回 0。与 editor.js 的卡片画法对应。"""
+    inner = max(1.0, width - 2 * CARD_PAD)
+    note_h = 0.0
+    if note:
+        lines = 0
+        prefix = _text_w("📝 ")
+        for i, para in enumerate(str(note).split("\n")):
+            tw = (prefix if i == 0 else 0.0) + _text_w(para)
+            lines += max(1, math.ceil(tw / inner))
+        note_h = lines * NOTE_LH
+    paths = _template_paths(node)
+    prev_h = 0.0
+    if paths:
+        per_row = max(1, int(inner // (THUMB + THUMB_GAP)))
+        shown = min(len(paths), PREVIEW_CAP)
+        rows = math.ceil(shown / per_row)
+        prev_h = rows * (THUMB + THUMB_GAP)
+        if len(paths) > shown:
+            prev_h += NOTE_LH
+    if note_h == 0 and prev_h == 0:
+        return 0.0
+    total = CARD_PAD + note_h + prev_h + CARD_PAD
+    if note_h and prev_h:
+        total += DIVIDER
+    return CARD_GAP + total
+
+
+def full_size(graph, nid, size_fn=None) -> tuple[float, float]:
+    """节点的"占位尺寸" = 本体 + 下方附属卡片。排版与重叠校验都用它，才能给预览/描述留出空间。"""
+    node = graph.nodes[nid]
+    w, h = (size_fn(nid) if size_fn else estimate_size(node))
+    return (w, h + _card_h(node, graph.notes.get(nid, ""), w))
+
+
 def layered_layout(graph, size_fn=None, node_gap: float = 30.0, band_gap: float = 34.0,
                    col_gap: float = 60.0, x0: float = 40.0, y0: float = 40.0,
                    max_per_col: int = 9) -> None:
@@ -39,7 +98,7 @@ def layered_layout(graph, size_fn=None, node_gap: float = 30.0, band_gap: float 
     nodes = list(graph.nodes)
     if not nodes:
         return
-    sizes = {n: (size_fn(n) if size_fn else estimate_size(graph.nodes[n])) for n in nodes}
+    sizes = {n: full_size(graph, n, size_fn) for n in nodes}
 
     # —— 构图（去重）——
     succ = {n: [] for n in nodes}
@@ -166,7 +225,7 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: flo
     nodes = list(graph.nodes)
     if not nodes:
         return
-    sz = {n: (size_fn(n) if size_fn else estimate_size(graph.nodes[n])) for n in nodes}
+    sz = {n: full_size(graph, n, size_fn) for n in nodes}
 
     def is_exec(nid):
         nd = graph.nodes[nid]
@@ -298,7 +357,7 @@ def no_overlaps(graph, size_fn=None) -> list:
     rects = []
     for n in graph.nodes:
         x, y = graph.positions.get(n, (0, 0))
-        w, h = (size_fn(n) if size_fn else estimate_size(graph.nodes[n]))
+        w, h = full_size(graph, n, size_fn)
         rects.append((n, x, y, w, h))
     bad = []
     for i in range(len(rects)):
