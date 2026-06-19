@@ -85,7 +85,8 @@ const ED = (function () {
     LGraphCanvas.prototype.getCanvasMenuOptions = function () {
       return [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
     };
-    // 节点右键：精简到 克隆 / 删除（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/Collapse/Pin/Colors/Shapes 等堆叠项）
+    // 节点右键：精简到 克隆 / 删除 + 节点自定义项（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/
+    // Collapse/Pin/Colors/Shapes 等堆叠项）。务必调用 node.getExtraMenuOptions，否则“添加/编辑描述”不出现。
     LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
       const opts = [];
       if (node.clonable !== false)
@@ -95,6 +96,10 @@ const ED = (function () {
         disabled: !(node.removable !== false && !node.block_delete),
         callback: LGraphCanvas.onMenuNodeRemove,
       });
+      if (node.getExtraMenuOptions) {
+        const extra = node.getExtraMenuOptions(this, opts);   // nodeExtraMenu 直接 push 进 opts
+        if (Array.isArray(extra)) for (const e of extra) opts.push(e);
+      }
       return opts;
     };
     // 值编辑浮框：去掉 OK 按钮，输入即"实时生效"；回车/失焦/点外部即关闭。
@@ -272,6 +277,8 @@ const ED = (function () {
         if (!path) { setStatus("已取消截取模板"); return; }
         apply((multi && w.value) ? (w.value + "," + path) : path, "已截取模板：" + path);
       }));
+      // 多图：打开"列表编辑器"，逐条增删/排序更方便
+      if (multi) mkBtn("编辑列表…", () => editImageList(node, w, p));
     } else if (p.ptype === "region") {
       mkBtn("框选区域…", () => defer("框选区域…（Enter 确认 / Esc 取消）", () => api().pick_region(), (box) => {
         if (!box) { setStatus("已取消框选"); return; }
@@ -505,6 +512,76 @@ const ED = (function () {
     box.querySelector("#notecancel").onclick = () => box.remove();
   }
 
+  // 多图参数的"列表编辑器"：逐条看缩略图+路径，可删除/上移/下移，并直接添加（选图/截模板）。
+  // 所有改动即时写回控件（节点上的列表预览同步刷新），点关闭即结束。
+  function editImageList(node, widget, p) {
+    document.getElementById("imglist")?.remove();
+    let paths = String(widget.value || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const box = document.createElement("div");
+    box.id = "imglist";
+    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(520px,94vw);" +
+      "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
+      "padding:14px 16px;z-index:140;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+    document.body.appendChild(box);
+    const btnCss = "background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:2px 9px;cursor:pointer;margin-left:5px";
+    const apply = () => {           // 即时写回控件 + 标脏 + 刷新画布
+      widget.value = paths.join(",");
+      if (node.properties) node.properties[p.key] = widget.value;
+      if (canvas) canvas.setDirty(true, true);
+      scheduleSnap(); refreshDirty();
+    };
+    function render() {
+      let h = "<b style='color:#e6c07b'>编辑图片列表</b>（" + esc(p.label) + "，共 " + paths.length + " 张）" +
+        "<div style='margin-top:8px'>";
+      if (!paths.length) h += "<div style='color:#6b727d'>（空，点下方按钮添加图片）</div>";
+      paths.forEach((pth, i) => {
+        h += "<div data-i='" + i + "' style='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #2c323c'>" +
+          "<img class='th' data-p='" + esc(pth) + "' style='width:40px;height:40px;object-fit:contain;flex:none;" +
+          "background:#11141a;border:1px solid #3a404a;border-radius:4px'/>" +
+          "<span style='flex:1;word-break:break-all;color:#aeb6c2' title='" + esc(pth) + "'>" + esc(baseName(pth)) + "</span>" +
+          "<button data-act='up' " + (i === 0 ? "disabled" : "") + " style='" + btnCss + "'>↑</button>" +
+          "<button data-act='down' " + (i === paths.length - 1 ? "disabled" : "") + " style='" + btnCss + "'>↓</button>" +
+          "<button data-act='del' style='" + btnCss + ";color:#e88'>删除</button></div>";
+      });
+      h += "</div><div style='margin-top:12px;text-align:right'>" +
+        "<button id='il_pick' style='" + btnCss + "'>＋ 选择图片</button>" +
+        "<button id='il_cap' style='" + btnCss + "'>＋ 截取模板</button>" +
+        "<button id='il_close' style='" + btnCss + ";border-color:#5a6' >关闭</button></div>";
+      box.innerHTML = h;
+      // 缩略图：本地文件不让网页直接读，向 Python 取 data URL（已缓存的直接复用 getThumb 的结果）
+      box.querySelectorAll("img.th").forEach((im) => {
+        const pp = im.getAttribute("data-p"), c = imgCache[pp];
+        if (c && c !== "loading" && c !== "fail") im.src = c.src;
+        else Promise.resolve(api().image_data_url(pp)).then((u) => { if (u) im.src = u; }).catch(() => {});
+      });
+      box.querySelectorAll("[data-act]").forEach((b) => {
+        b.onclick = () => {
+          const i = +b.closest("[data-i]").getAttribute("data-i"), act = b.getAttribute("data-act");
+          if (act === "del") paths.splice(i, 1);
+          else if (act === "up" && i > 0) { const t = paths[i - 1]; paths[i - 1] = paths[i]; paths[i] = t; }
+          else if (act === "down" && i < paths.length - 1) { const t = paths[i + 1]; paths[i + 1] = paths[i]; paths[i] = t; }
+          apply(); render();
+        };
+      });
+      box.querySelector("#il_pick").onclick = () => {
+        setStatus("正在打开图片选择框…");
+        Promise.resolve(api().pick_templates(true)).then((arr) => {
+          if (arr && arr.length) { paths = paths.concat(arr); apply(); render(); setStatus("已添加 " + arr.length + " 张图片"); }
+          else setStatus("已取消选择图片");
+        }).catch((e) => showError("选择图片失败：" + (e && (e.stack || e.message) || e)));
+      };
+      box.querySelector("#il_cap").onclick = () => {
+        setStatus("框选模板区域…（Enter 保存 / Esc 取消）");
+        Promise.resolve(api().capture_template()).then((path) => {
+          if (path) { paths.push(path); apply(); render(); setStatus("已截取模板：" + path); }
+          else setStatus("已取消截取模板");
+        }).catch((e) => showError("截取模板失败：" + (e && (e.stack || e.message) || e)));
+      };
+      box.querySelector("#il_close").onclick = () => box.remove();
+    }
+    render();
+  }
+
   // ---- 未保存修改标记（全局 ●未保存 + 每个参数的橙点/恢复）----
   let savedSig = null;           // 全局：上次保存/载入时 collect() 的签名
   let savedParams = {};          // 每参数基线：nodeId -> { key: 基线值 }
@@ -717,25 +794,26 @@ const ED = (function () {
     if (!selectedNode) showFlowHelp();
   }
 
-  // 顶部下拉：把 "flows/x.flow.json" / "user_flows/x.flow.json" 分组成「内置流程」「我的流程」，
-  // 选项文字只显示去掉目录与 .flow.json 后缀的名字（值仍是完整相对路径，供 openBuiltin 打开）。
+  // 顶部下拉：列出内置/我的流程，按【中文流程名】显示（值仍是完整相对路径，供 openBuiltin 打开）。
+  // 后端返回 [{path, name}]；按路径前缀分组成「内置流程（只读）」「我的流程」。
   function fillFlowList(list) {
     const sel = document.getElementById("builtin");
     if (!sel) return;
-    sel.innerHTML = "<option value=''>打开流程…</option>";
+    sel.innerHTML = "<option value=''>内置流程…</option>";
     const groups = { "flows": [], "user_flows": [] };
-    for (const p of list) {
-      const dir = p.split("/")[0];
-      (groups[dir] || (groups[dir] = [])).push(p);
+    for (const it of (list || [])) {
+      const item = (typeof it === "string") ? { path: it, name: it } : it;   // 兼容旧的纯字符串
+      const dir = String(item.path).split("/")[0];
+      (groups[dir] || (groups[dir] = [])).push(item);
     }
     const mk = (label, items) => {
       if (!items.length) return;
       const og = document.createElement("optgroup");
       og.label = label;
-      for (const p of items) {
+      for (const item of items) {
         const o = document.createElement("option");
-        o.value = p;
-        o.textContent = p.split("/").pop().replace(/\.flow\.json$/, "");
+        o.value = item.path;
+        o.textContent = item.name || item.path.split("/").pop().replace(/\.flow\.json$/, "");
         og.appendChild(o);
       }
       sel.appendChild(og);

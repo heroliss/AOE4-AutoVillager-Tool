@@ -182,12 +182,26 @@ class Api:
     def get_flow(self):
         return self._payload(self._graph)
 
+    @staticmethod
+    def _flow_name(path):
+        """只读出流程文件里的 name（中文流程名），失败则返回空串。"""
+        try:
+            import json
+            with open(path, "r", encoding="utf-8") as fp:
+                return (json.load(fp).get("name") or "").strip()
+        except Exception:
+            return ""
+
     def list_builtin(self):
-        # 同时列出内置流程(flows/)与用户另存的流程(user_flows/)，路径前缀即可区分。
+        # 同时列出内置流程(flows/)与用户另存的流程(user_flows/)；返回 {path, name} 供前端按中文名显示。
         out = []
         for d in ("flows", "user_flows"):
             if os.path.isdir(d):
-                out += [f"{d}/{f}" for f in sorted(os.listdir(d)) if f.endswith(".flow.json")]
+                for f in sorted(os.listdir(d)):
+                    if f.endswith(".flow.json"):
+                        full = os.path.join(d, f)
+                        out.append({"path": f"{d}/{f}",
+                                    "name": self._flow_name(full) or f[:-len(".flow.json")]})
         return out
 
     def _is_builtin(self, path):
