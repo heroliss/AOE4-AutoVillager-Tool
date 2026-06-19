@@ -37,7 +37,7 @@ class ConstNumber(DataNode):
     type_id = "data.const_number"
     category = "数据"
     title = "常量(数值)"
-    outputs = [data_out("value", DataType.NUMBER)]
+    outputs = [data_out("value", DataType.NUMBER, label="数值")]
     params = [ParamSpec("value", "数值", "float", default=0.0)]
 
     def evaluate(self, ctx, inputs):
@@ -49,7 +49,7 @@ class Switch(DataNode):
     type_id = "data.switch"
     category = "数据"
     title = "开关(布尔)"
-    outputs = [data_out("value", DataType.BOOL)]
+    outputs = [data_out("value", DataType.BOOL, label="布尔值")]
     params = [ParamSpec("on", "开启", "bool", default=True)]
 
     def evaluate(self, ctx, inputs):
@@ -68,7 +68,7 @@ class Compare(DataNode):
     type_id = "logic.compare"
     category = "逻辑"
     title = "比较"
-    inputs = [data_in("a", DataType.NUMBER), data_in("b", DataType.NUMBER)]
+    inputs = [data_in("a", DataType.NUMBER, label="甲"), data_in("b", DataType.NUMBER, label="乙")]
     outputs = [data_out("result", DataType.BOOL, label="结果")]
     params = [ParamSpec("op", "运算符", "enum", default="<",
                         choices=["<", "<=", ">", ">=", "==", "!="])]
@@ -85,7 +85,7 @@ class LogicAnd(DataNode):
     type_id = "logic.and"
     category = "逻辑"
     title = "与"
-    inputs = [data_in("a", DataType.BOOL), data_in("b", DataType.BOOL)]
+    inputs = [data_in("a", DataType.BOOL, label="甲"), data_in("b", DataType.BOOL, label="乙")]
     outputs = [data_out("result", DataType.BOOL, label="结果")]
 
     def evaluate(self, ctx, inputs):
@@ -97,7 +97,7 @@ class LogicOr(DataNode):
     type_id = "logic.or"
     category = "逻辑"
     title = "或"
-    inputs = [data_in("a", DataType.BOOL), data_in("b", DataType.BOOL)]
+    inputs = [data_in("a", DataType.BOOL, label="甲"), data_in("b", DataType.BOOL, label="乙")]
     outputs = [data_out("result", DataType.BOOL, label="结果")]
 
     def evaluate(self, ctx, inputs):
@@ -109,7 +109,7 @@ class LogicNot(DataNode):
     type_id = "logic.not"
     category = "逻辑"
     title = "非"
-    inputs = [data_in("a", DataType.BOOL)]
+    inputs = [data_in("a", DataType.BOOL, label="输入")]
     outputs = [data_out("result", DataType.BOOL, label="结果")]
 
     def evaluate(self, ctx, inputs):
@@ -129,8 +129,8 @@ class Arithmetic(DataNode):
     type_id = "math.arith"
     category = "算式"
     title = "算式"
-    inputs = [data_in("a", DataType.NUMBER), data_in("b", DataType.NUMBER)]
-    outputs = [data_out("value", DataType.NUMBER)]
+    inputs = [data_in("a", DataType.NUMBER, label="甲"), data_in("b", DataType.NUMBER, label="乙")]
+    outputs = [data_out("value", DataType.NUMBER, label="结果")]
     params = [ParamSpec("op", "运算符", "enum", default="+",
                         choices=["+", "-", "*", "/", "//"])]
 
@@ -145,9 +145,9 @@ class MinNode(DataNode):
     type_id = "math.min"
     category = "算式"
     title = "取最小"
-    inputs = [data_in("a", DataType.NUMBER), data_in("b", DataType.NUMBER),
-              data_in("c", DataType.NUMBER), data_in("d", DataType.NUMBER)]
-    outputs = [data_out("value", DataType.NUMBER)]
+    inputs = [data_in("a", DataType.NUMBER, label="甲"), data_in("b", DataType.NUMBER, label="乙"),
+              data_in("c", DataType.NUMBER, label="丙"), data_in("d", DataType.NUMBER, label="丁")]
+    outputs = [data_out("value", DataType.NUMBER, label="最小值")]
 
     def evaluate(self, ctx, inputs):
         vals = [v for v in (inputs.get("a"), inputs.get("b"),
@@ -160,8 +160,8 @@ class ClampNode(DataNode):
     type_id = "math.clamp"
     category = "算式"
     title = "钳制"
-    inputs = [data_in("value", DataType.NUMBER)]
-    outputs = [data_out("value", DataType.NUMBER)]
+    inputs = [data_in("value", DataType.NUMBER, label="输入")]
+    outputs = [data_out("value", DataType.NUMBER, label="结果")]
     params = [ParamSpec("lo", "下限", "float", default=0.0),
               ParamSpec("hi", "上限", "float", default=999999.0)]
 
@@ -189,7 +189,7 @@ class SetVar(ControlNode):
     type_id = "control.set_var"
     category = "控制"
     title = "写变量"
-    inputs = [exec_in("in"), data_in("value", DataType.ANY)]
+    inputs = [exec_in("in"), data_in("value", DataType.ANY, label="值")]
     outputs = [exec_out("out")]
     params = [ParamSpec("name", "变量名", "str", default="x")]
 
@@ -203,7 +203,7 @@ class GetVar(DataNode):
     type_id = "data.get_var"
     category = "数据"
     title = "读变量"
-    outputs = [data_out("value", DataType.ANY)]
+    outputs = [data_out("value", DataType.ANY, label="值")]
     params = [ParamSpec("name", "变量名", "str", default="x"),
               ParamSpec("default", "默认值", "float", default=0.0)]
 
@@ -217,7 +217,7 @@ class LogNode(ControlNode):
     type_id = "debug.log"
     category = "调试"
     title = "日志"
-    inputs = [exec_in("in"), data_in("value", DataType.ANY)]
+    inputs = [exec_in("in"), data_in("value", DataType.ANY, label="值")]
     outputs = [exec_out("out")]
     params = [ParamSpec("message", "文本", "str", default="")]
 

@@ -22,7 +22,7 @@ class ScreenCapture(DataNode):
     type_id = "sense.capture"
     category = "感知"
     title = "截图"
-    outputs = [data_out("image", DataType.IMAGE)]
+    outputs = [data_out("image", DataType.IMAGE, label="图像")]
     params = [ParamSpec("region", "区域", "region", default=[0, 0, 100, 100],
                         help="(left, top, right, bottom)；若已预取整屏则自动切片复用")]
 
@@ -36,7 +36,7 @@ class PixelColor(DataNode):
     type_id = "sense.pixel_color"
     category = "感知"
     title = "像素颜色"
-    outputs = [data_out("match", DataType.BOOL), data_out("color", DataType.COLOR)]
+    outputs = [data_out("match", DataType.BOOL, label="匹配"), data_out("color", DataType.COLOR, label="颜色")]
     params = [
         ParamSpec("point", "坐标", "point", default=[0, 0]),
         ParamSpec("color", "目标颜色", "color", default=[0, 0, 0]),
@@ -59,7 +59,7 @@ class WindowCheck(DataNode):
     type_id = "sense.window_check"
     category = "感知"
     title = "游戏窗口检测"
-    outputs = [data_out("in_game", DataType.BOOL), data_out("active", DataType.BOOL)]
+    outputs = [data_out("in_game", DataType.BOOL, label="在游戏中"), data_out("active", DataType.BOOL, label="窗口激活")]
     params = [
         ParamSpec("keywords", "窗口标题关键词", "str",
                   default="Age of Empires IV,帝国时代IV,帝国时代4",
@@ -90,12 +90,12 @@ class TemplateMatch(DataNode):
     type_id = "sense.template_match"
     category = "感知"
     title = "模板匹配"
-    inputs = [data_in("image", DataType.IMAGE)]
+    inputs = [data_in("image", DataType.IMAGE, label="图像")]
     outputs = [
-        data_out("found", DataType.BOOL),
-        data_out("confidence", DataType.NUMBER),
-        data_out("which", DataType.NUMBER),          # 命中的模板序号（0 起），用于多模板
-        data_out("in_transition", DataType.BOOL),    # 半透明UI渐入渐出（需开启 transition_guard）
+        data_out("found", DataType.BOOL, label="命中"),
+        data_out("confidence", DataType.NUMBER, label="置信度"),
+        data_out("which", DataType.NUMBER, label="命中序号"),     # 命中的模板序号（0 起），用于多模板
+        data_out("in_transition", DataType.BOOL, label="渐变中"),  # 半透明UI渐入渐出（需开启 transition_guard）
     ]
     params = [
         ParamSpec("region", "区域", "region", default=[0, 0, 100, 100],
@@ -166,11 +166,11 @@ class OcrNumber(DataNode):
     type_id = "sense.ocr_number"
     category = "感知"
     title = "OCR数字"
-    inputs = [data_in("image", DataType.IMAGE)]
+    inputs = [data_in("image", DataType.IMAGE, label="图像")]
     outputs = [
-        data_out("value", DataType.NUMBER),
-        data_out("value2", DataType.NUMBER),  # 第二个捕获组（如人口 当前/上限）
-        data_out("ok", DataType.BOOL),
+        data_out("value", DataType.NUMBER, label="数值"),
+        data_out("value2", DataType.NUMBER, label="数值2"),  # 第二个捕获组（如人口 当前/上限）
+        data_out("ok", DataType.BOOL, label="成功"),
     ]
     params = [
         ParamSpec("region", "区域", "region", default=[0, 0, 100, 40],

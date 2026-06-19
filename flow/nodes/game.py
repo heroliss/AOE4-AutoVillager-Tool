@@ -19,13 +19,13 @@ class Occlusion(DataNode):
     type_id = "game.occlusion"
     category = "游戏"
     title = "三态遮挡检测"
-    inputs = [data_in("image", DataType.IMAGE)]
+    inputs = [data_in("image", DataType.IMAGE, label="图像")]
     outputs = [
-        data_out("blocked", DataType.BOOL),
-        data_out("in_transition", DataType.BOOL),
-        data_out("clear", DataType.BOOL),
-        data_out("confidence", DataType.NUMBER),
-        data_out("state", DataType.STRING),
+        data_out("blocked", DataType.BOOL, label="遮挡"),
+        data_out("in_transition", DataType.BOOL, label="渐变中"),
+        data_out("clear", DataType.BOOL, label="未遮挡"),
+        data_out("confidence", DataType.NUMBER, label="置信度"),
+        data_out("state", DataType.STRING, label="状态"),
     ]
     params = [
         ParamSpec("region", "检测区域", "region", default=[265, 950, 280, 970]),
@@ -106,7 +106,7 @@ class TcCount(DataNode):
     type_id = "game.tc_count"
     category = "游戏"
     title = "多TC计数"
-    outputs = [data_out("count", DataType.NUMBER), data_out("ok", DataType.BOOL)]
+    outputs = [data_out("count", DataType.NUMBER, label="数量"), data_out("ok", DataType.BOOL, label="成功")]
     params = [
         ParamSpec("icon_region", "多TC检测区域", "region", default=[444, 1212, 492, 1259]),
         ParamSpec("single_region", "单TC预检测区域", "region", default=[300, 1140, 354, 1194]),
@@ -182,12 +182,12 @@ class ProduceCount(DataNode):
     category = "游戏"
     title = "产能计算"
     inputs = [
-        data_in("planned", DataType.NUMBER),
-        data_in("available_slots", DataType.NUMBER),
-        data_in("resource", DataType.NUMBER),
-        data_in("current_count", DataType.NUMBER),
+        data_in("planned", DataType.NUMBER, label="计划数"),
+        data_in("available_slots", DataType.NUMBER, label="空位"),
+        data_in("resource", DataType.NUMBER, label="资源"),
+        data_in("current_count", DataType.NUMBER, label="当前数量"),
     ]
-    outputs = [data_out("count", DataType.NUMBER)]
+    outputs = [data_out("count", DataType.NUMBER, label="数量")]
     params = [
         ParamSpec("cost_per_unit", "单位资源成本", "float", default=50.0, minimum=0.0),
         ParamSpec("cap", "数量上限", "int", default=-1, help="-1 表示不启用上限"),

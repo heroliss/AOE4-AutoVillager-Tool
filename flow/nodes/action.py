@@ -17,7 +17,7 @@ class PressKey(ControlNode):
     type_id = "action.press_key"
     category = "操作"
     title = "按键"
-    inputs = [exec_in("in"), data_in("count", DataType.NUMBER)]
+    inputs = [exec_in("in"), data_in("count", DataType.NUMBER, label="数量")]
     outputs = [exec_out("out")]
     params = [
         ParamSpec("key", "按键", "key", default="q"),
