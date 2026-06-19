@@ -185,6 +185,16 @@ class Api:
             return self.open_path(res[0])
         return None
 
+    def pick_templates(self, multiple=True):
+        """选择一个或多个模板图片，返回路径列表（供 template/templates 参数填入）。"""
+        import webview
+        res = self._window.create_file_dialog(
+            webview.OPEN_DIALOG, allow_multiple=bool(multiple),
+            file_types=("图片 (*.png;*.jpg;*.jpeg;*.bmp)", "所有文件 (*.*)"))
+        if not res:
+            return []
+        return list(res) if isinstance(res, (list, tuple)) else [res]
+
     def autolayout(self, payload):
         from ..layout import mainline_layout
         g = payload_to_graph(payload)

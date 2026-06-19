@@ -232,6 +232,22 @@ const ED = (function () {
       w = node.addWidget("text", p.label, p.default == null ? "" : String(p.default), cb);
     w._key = p.key;                  // 保存时用作参数键（不动 w.name，它是显示标签）
     node.properties[p.key] = w.value;
+
+    // 图片模板参数：额外加一个"选择图片…"按钮，用系统文件框选图片填入（多模板可累加）
+    if (p.ptype === "template" || p.ptype === "templates") {
+      const multi = p.ptype === "templates";
+      const btn = node.addWidget("button", "选择图片…", null, async () => {
+        try {
+          const paths = await api().pick_templates(multi);
+          if (!paths || !paths.length) return;
+          const picked = paths.join(",");
+          w.value = (multi && w.value) ? (w.value + "," + picked) : picked;  // 多模板追加，单模板替换
+          cb(w.value);
+          if (canvas) canvas.setDirty(true, true);
+        } catch (e) { showError("选择图片失败：" + (e && (e.stack || e.message) || e)); }
+      });
+      btn._noSave = true;            // 按钮不是参数，保存时跳过（collect 按 _key 取值）
+    }
   }
 
   function registerTypes(list) {
@@ -319,7 +335,7 @@ const ED = (function () {
     const nodes = [], edges = [];
     for (const n of graph._nodes) {
       const params = {};
-      for (const w of (n.widgets || [])) params[w._key] = w.value;
+      for (const w of (n.widgets || [])) if (w._key) params[w._key] = w.value;  // 跳过按钮等无_key控件
       nodes.push({ id: n._id, type: n._typeId, pos: [Math.round(n.pos[0]), Math.round(n.pos[1])], params });
     }
     for (const k in graph.links) {
@@ -615,6 +631,7 @@ const ED = (function () {
       canvas.allow_searchbox = false;   // 关闭双击/Shift 弹出的搜索框（易误触；加节点统一走右键空白处"添加节点"）
       canvas.show_info = false;          // 隐藏左下角 T/I/N/V/FPS 调试信息（对普通用户无意义）
       canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
+      canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       setupHelpPanel();
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
       graph.onConnectionChange = scheduleSnap;
