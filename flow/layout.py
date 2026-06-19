@@ -153,13 +153,14 @@ def layered_layout(graph, size_fn=None, node_gap: float = 30.0, band_gap: float 
 
 def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: float = 34.0,
                     col_gap: float = 64.0, x0: float = 40.0, y0: float = 40.0) -> None:
-    """主线+分支式排版：执行流(控制节点)排成一条【始终向右、不折行】的主线，每个节点的
-    数据来源放在它【左上方】（更靠前的列），使数据连线一律从左向右汇入；同一列里的支线
-    再按"接入下游的输入端口次序"自上而下排，尽量减少连线交叉。
+    """主线+分支式排版：执行流(控制节点)排成一条【始终向右、不折行】的笔直主线；每个节点的
+    数据来源放在它【更靠前的列】，使数据连线一律从左向右汇入；支线再【平分到主线上下两侧】，
+    并按"接入消费者的连接点高度"对齐排列，尽量避免连线扭麻花。
 
     - 主线列号：控制节点按执行流最长路径定列，单行从左到右铺开（宽就宽，但主线一眼可辨）。
     - 支线列号：数据节点放在"消费者列 - 1"，链式来源逐级再向左 —— 来源在前、消费在后。
-    - 落位：主线块贴行底形成一条水平主线；数据支线自下而上堆在主线上方。
+    - 落位：先放主线（各列块顶对齐成一条水平线）；再从右往左放支线（保证消费者已就位），
+      按消费者输入连接点的高度排序、平分到主线上下两侧——接入点高者在上、低者在下，连线就近少交叉。
     """
     nodes = list(graph.nodes)
     if not nodes:
@@ -225,63 +226,75 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 26.0, branch_gap: flo
     for n in col:
         col[n] -= base
 
-    # —— 同列支线排序键：按"接入最靠右消费者的输入端口序"，减少连线交叉 ——
-    def port_index(node_id, port_name):
-        for i, p in enumerate(graph.nodes[node_id].inputs):
-            if p.name == port_name:
-                return i
-        return 0
-
-    order_key = {}
-    for n in nodes:
-        if n in spine_set:
-            continue
-        best = None
-        for e in graph.data_edges:
-            if e.src_id == n and e.dst_id in col:
-                k = (col[e.dst_id], port_index(e.dst_id, e.dst_port))
-                if best is None or k > best:
-                    best = k
-        order_key[n] = best or (0, 0)
-
-    # —— 按列归并 + 度量 ——
+    # —— 列 x 坐标 + 列宽 ——
     by_col = {}
     for n in nodes:
         by_col.setdefault(col[n], []).append(n)
     cols_sorted = sorted(by_col)
-
-    col_w, col_spine, col_data, colH = {}, {}, {}, {}
+    col_w = {c: max(sz[n][0] for n in by_col[c]) for c in cols_sorted}
+    col_x, x = {}, x0
     for c in cols_sorted:
-        ns = by_col[c]
-        col_w[c] = max(sz[n][0] for n in ns)
-        sp = sorted((n for n in ns if n in spine_set), key=lambda n: col[n])
-        da = sorted((n for n in ns if n not in spine_set), key=lambda n: order_key[n])
-        col_spine[c], col_data[c] = sp, da
-        spineH = sum(sz[n][1] for n in sp) + node_gap * (len(sp) - 1) if sp else 0.0
-        dataH = sum(sz[n][1] for n in da) + node_gap * (len(da) - 1) if da else 0.0
-        colH[c] = spineH + (branch_gap if (sp and da) else 0.0) + dataH
+        col_x[c] = x
+        x += col_w[c] + col_gap
 
-    rowH = max(colH.values()) if colH else 0.0
-
-    # —— 落位：单行；主线贴行底成一条水平线，数据支线自上而下堆在其上方 ——
-    x = x0
+    # —— 先放主线：各列控制节点块顶对齐到同一条线，形成一条笔直主线 ——
+    Y_SPINE = 0.0
+    col_spine = {c: sorted((n for n in by_col[c] if n in spine_set), key=lambda n: col[n])
+                 for c in cols_sorted}
+    spine_top, spine_bot = {}, {}
     for c in cols_sorted:
-        sp, da = col_spine[c], col_data[c]
-        spineH = sum(sz[n][1] for n in sp) + node_gap * (len(sp) - 1) if sp else 0.0
-        spine_top = y0 + rowH - spineH          # 主线块顶（块底贴行底）
-        yy = spine_top
-        for n in sp:
+        yy = Y_SPINE
+        for n in col_spine[c]:
             w, h = sz[n]
-            graph.positions[n] = (x + (col_w[c] - w) / 2.0, yy)
+            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yy)
             yy += h + node_gap
-        # 数据支线：从主线上方往上堆；端口序小者(接上方端口)放更上方，减少交叉
-        yb = spine_top - branch_gap
-        for n in reversed(da):
+        spine_top[c] = Y_SPINE
+        spine_bot[c] = (yy - node_gap) if col_spine[c] else Y_SPINE
+
+    # 估算某输入端口的纵坐标（用于按"连接点上下位置"对齐，避免连线扭麻花）
+    def in_port_y(node_id, port_name):
+        nd = graph.nodes[node_id]
+        idx = next((i for i, p in enumerate(nd.inputs) if p.name == port_name), 0)
+        return graph.positions[node_id][1] + 30.0 + idx * 24.0 + 12.0
+
+    def anchor_y(n):
+        # 该来源接入的各消费者"输入连接点"的平均高度（消费者在右、已就位）
+        ys = [in_port_y(e.dst_id, e.dst_port) for e in graph.data_edges
+              if e.src_id == n and e.dst_id in graph.positions]
+        return sum(ys) / len(ys) if ys else Y_SPINE
+
+    # —— 再放数据支线：从右往左逐列（保证消费者已就位），按消费者连接点高度排序，
+    #    并把支线平分到主线上下两侧——接入点高者在上、低者在下，连线就近、少交叉。——
+    odd_toggle = 0
+    for c in reversed(cols_sorted):
+        da = [n for n in by_col[c] if n not in spine_set]
+        if not da:
+            continue
+        da.sort(key=anchor_y)
+        mid = len(da) // 2
+        if len(da) % 2 == 1:                  # 奇数个：让"多出来的一个"在上下之间轮换，整体更平衡
+            if odd_toggle % 2:
+                mid = len(da) - mid
+            odd_toggle += 1
+        upper, lower = da[:mid], da[mid:]     # 接入点偏高的一半在上，偏低的一半在下
+        yb = spine_top[c] - branch_gap        # 上方：贴近主线者接入点较低，最上者接入点最高
+        for n in reversed(upper):
             w, h = sz[n]
             yb -= h
-            graph.positions[n] = (x + (col_w[c] - w) / 2.0, yb)
+            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yb)
             yb -= node_gap
-        x += col_w[c] + col_gap
+        yb = spine_bot[c] + branch_gap        # 下方：贴近主线者接入点较高，最下者接入点最低
+        for n in lower:
+            w, h = sz[n]
+            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yb)
+            yb += h + node_gap
+
+    # 主线上方支线会落到负 y，整体平移使最上沿对齐到 y0
+    if graph.positions:
+        dy = y0 - min(p[1] for p in graph.positions.values())
+        for n in graph.positions:
+            px, py = graph.positions[n]
+            graph.positions[n] = (px, py + dy)
 
 
 def needs_layout(graph) -> bool:

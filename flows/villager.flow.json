@@ -7,7 +7,7 @@
       "type": "event.on_tick",
       "pos": [
         40.0,
-        840.0
+        480.0
       ],
       "params": {
         "interval": 0.1
@@ -18,7 +18,7 @@
       "type": "sense.modifier_down",
       "pos": [
         49.0,
-        700.0
+        340.0
       ],
       "params": {
         "keys": "shift,ctrl,alt"
@@ -29,7 +29,7 @@
       "type": "control.if",
       "pos": [
         494.5,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -38,7 +38,7 @@
       "type": "sense.window_check",
       "pos": [
         403.0,
-        454.0
+        662.0
       ],
       "params": {
         "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
@@ -69,7 +69,7 @@
       "type": "control.if",
       "pos": [
         887.5,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -100,7 +100,7 @@
       "type": "sense.template_match",
       "pos": [
         818.0,
-        472.0
+        662.0
       ],
       "params": {
         "region": [
@@ -121,7 +121,7 @@
       "type": "logic.or",
       "pos": [
         1189.0,
-        640.0
+        322.0
       ],
       "params": {}
     },
@@ -130,7 +130,7 @@
       "type": "control.if",
       "pos": [
         1189.0,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -139,7 +139,7 @@
       "type": "control.if",
       "pos": [
         1413.0,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -148,7 +148,7 @@
       "type": "control.if",
       "pos": [
         1637.0,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -157,7 +157,7 @@
       "type": "control.prefetch_full",
       "pos": [
         1921.5,
-        846.0
+        480.0
       ],
       "params": {}
     },
@@ -166,7 +166,7 @@
       "type": "sense.ocr_number",
       "pos": [
         1861.0,
-        58.0
+        614.0
       ],
       "params": {
         "region": [
@@ -186,7 +186,7 @@
       "type": "sense.ocr_number",
       "pos": [
         1861.0,
-        514.0
+        938.0
       ],
       "params": {
         "region": [
@@ -206,7 +206,7 @@
       "type": "control.if",
       "pos": [
         2249.5,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -215,7 +215,7 @@
       "type": "data.const_number",
       "pos": [
         1886.5,
-        382.0
+        340.0
       ],
       "params": {
         "value": 50
@@ -226,7 +226,7 @@
       "type": "logic.compare",
       "pos": [
         2206.0,
-        298.0
+        112.0
       ],
       "params": {
         "op": ">="
@@ -237,7 +237,7 @@
       "type": "control.if",
       "pos": [
         2560.5,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -246,7 +246,7 @@
       "type": "math.arith",
       "pos": [
         2206.0,
-        610.0
+        292.0
       ],
       "params": {
         "op": "-"
@@ -257,7 +257,7 @@
       "type": "data.const_number",
       "pos": [
         2214.5,
-        478.0
+        662.0
       ],
       "params": {
         "value": 0
@@ -268,7 +268,7 @@
       "type": "logic.compare",
       "pos": [
         2517.0,
-        610.0
+        662.0
       ],
       "params": {
         "op": ">"
@@ -279,7 +279,7 @@
       "type": "control.if",
       "pos": [
         2828.0,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -288,7 +288,7 @@
       "type": "control.lock_acquire",
       "pos": [
         3052.0,
-        822.0
+        480.0
       ],
       "params": {}
     },
@@ -297,7 +297,7 @@
       "type": "control.input_block_begin",
       "pos": [
         3276.0,
-        816.0
+        480.0
       ],
       "params": {
         "max_duration": 3.0
@@ -308,7 +308,7 @@
       "type": "action.press_key",
       "pos": [
         3639.0,
-        642.0
+        480.0
       ],
       "params": {
         "key": "0",
@@ -324,7 +324,7 @@
       "type": "action.release_modifiers",
       "pos": [
         4072.0,
-        846.0
+        480.0
       ],
       "params": {}
     },
@@ -333,7 +333,7 @@
       "type": "action.press_key",
       "pos": [
         4374.0,
-        642.0
+        480.0
       ],
       "params": {
         "key": "h",
@@ -349,7 +349,7 @@
       "type": "game.tc_count",
       "pos": [
         3994.0,
-        502.0
+        614.0
       ],
       "params": {
         "icon_region": [
@@ -383,7 +383,7 @@
       "type": "control.if",
       "pos": [
         4798.0,
-        798.0
+        480.0
       ],
       "params": {}
     },
@@ -392,7 +392,7 @@
       "type": "data.const_number",
       "pos": [
         4037.0,
-        370.0
+        340.0
       ],
       "params": {
         "value": 3
@@ -403,7 +403,7 @@
       "type": "math.arith",
       "pos": [
         4396.0,
-        454.0
+        292.0
       ],
       "params": {
         "op": "*"
@@ -414,7 +414,7 @@
       "type": "game.produce_count",
       "pos": [
         4729.0,
-        532.0
+        662.0
       ],
       "params": {
         "cost_per_unit": 50,
@@ -426,7 +426,7 @@
       "type": "action.press_key",
       "pos": [
         5091.0,
-        642.0
+        480.0
       ],
       "params": {
         "key": "q",
@@ -442,7 +442,7 @@
       "type": "action.press_key",
       "pos": [
         5446.0,
-        642.0
+        480.0
       ],
       "params": {
         "key": "0",
@@ -458,7 +458,7 @@
       "type": "action.press_key",
       "pos": [
         5801.0,
-        642.0
+        480.0
       ],
       "params": {
         "key": "0",
@@ -474,7 +474,7 @@
       "type": "action.release_modifiers",
       "pos": [
         6156.0,
-        846.0
+        480.0
       ],
       "params": {}
     },
@@ -483,7 +483,7 @@
       "type": "control.input_block_end",
       "pos": [
         6380.0,
-        846.0
+        480.0
       ],
       "params": {}
     },
@@ -492,7 +492,7 @@
       "type": "control.delay",
       "pos": [
         6604.0,
-        816.0
+        480.0
       ],
       "params": {
         "seconds": 3.0
@@ -503,7 +503,7 @@
       "type": "control.lock_release",
       "pos": [
         6881.0,
-        846.0
+        480.0
       ],
       "params": {}
     }
