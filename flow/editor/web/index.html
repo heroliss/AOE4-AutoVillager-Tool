@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>AOE4 Flow Editor</title>
+<link rel="stylesheet" href="vendor/litegraph.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #1c1f26; color: #cfd3da;
+               font-family: "Microsoft YaHei", "SimHei", sans-serif; overflow: hidden; }
+  #toolbar { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+             background: #23272f; border-bottom: 1px solid #333; }
+  #toolbar button, #toolbar select {
+             background: #2f343d; color: #cfd3da; border: 1px solid #444; border-radius: 4px;
+             height: 26px; padding: 0 10px; cursor: pointer; font-size: 13px; }
+  #toolbar button:hover { background: #3a404a; }
+  #toolbar .spacer { flex: 1; }
+  #status { color: #8b909a; font-size: 12px; }
+  #wrap { position: absolute; top: 38px; left: 0; right: 0; bottom: 0; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <button onclick="ED.save()">保存</button>
+    <button onclick="ED.saveAs()">另存为</button>
+    <button onclick="ED.open()">打开</button>
+    <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="">打开内置流程…</option></select>
+    <button onclick="ED.autolayout()">自动排版</button>
+    <button onclick="ED.fit()">适应窗口</button>
+    <span class="spacer"></span>
+    <span id="status">提示：右键空白处添加节点 · 滚轮缩放 · 拖动平移</span>
+  </div>
+  <div id="wrap"><canvas id="graph"></canvas></div>
+
+  <script src="vendor/litegraph.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>

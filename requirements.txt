@@ -6,4 +6,5 @@ pydirectinput
 psutil
 mss
 pyinstaller
-dearpygui  # 节点编辑器（Phase 1+）
+pywebview  # 网页节点编辑器宿主（默认编辑器，Windows 用系统 WebView2）
+dearpygui  # 备用编辑器（--classic / --canvas）

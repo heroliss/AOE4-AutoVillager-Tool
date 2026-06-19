@@ -21,20 +21,29 @@ import flow.nodes  # noqa: F401  注册全部节点
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("file", nargs="?", help="要打开的流程图 JSON")
-    ap.add_argument("--canvas", action="store_true", help="使用支持缩放的自绘画布编辑器")
+    ap.add_argument("--classic", action="store_true", help="经典 DPG 节点编辑器（参数在节点内，无缩放）")
+    ap.add_argument("--canvas", action="store_true", help="DPG 自绘画布（缩放，开发中）")
     args = ap.parse_args()
 
-    graph = Graph.load(args.file) if args.file and os.path.exists(args.file) else None
+    path = args.file if args.file and os.path.exists(args.file) else None
+    graph = Graph.load(path) if path else None
 
-    if args.canvas:
-        from flow.editor.canvas import CanvasEditor
-        app = CanvasEditor(graph)
-    else:
+    if args.classic:
         from flow.editor import EditorApp
         app = EditorApp(graph)
-    if args.file and os.path.exists(args.file):
-        app._current_path = args.file
-    app.run()
+        if path:
+            app._current_path = path
+        app.run()
+    elif args.canvas:
+        from flow.editor.canvas import CanvasEditor
+        app = CanvasEditor(graph)
+        if path:
+            app._current_path = path
+        app.run()
+    else:
+        # 默认：网页节点编辑器（LiteGraph + pywebview，支持缩放/右键菜单/节点内可编辑参数）
+        from flow.editor.webhost import launch
+        launch(graph, path)
 
 
 if __name__ == "__main__":
