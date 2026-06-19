@@ -74,9 +74,7 @@ class EditorApp:
             self._set_status("未找到中文字体，界面中文可能显示为问号")
             return
         with dpg.font_registry():
-            with dpg.font(path, size) as f:
-                dpg.add_font_range_hint(dpg.mvFontRangeHint_Chinese_Simplified_Common)
-                dpg.add_font_range_hint(dpg.mvFontRangeHint_Default)
+            f = dpg.add_font(path, size)   # 新版 DPG 字形范围自动包含，无需 range_hint
         dpg.bind_font(f)
 
     # ==================== UI 构建 ====================
