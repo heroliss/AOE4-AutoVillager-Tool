@@ -139,12 +139,15 @@ def main() -> None:
     ok &= check("往返结构一致", g2.to_dict() == data)
     ok &= check(f"节点数 {len(g.nodes)} / 执行连线 {len(g.exec_edges)} / 数据连线 {len(g.data_edges)}", True)
 
-    # 落盘三个默认流程，供后续编辑器/headless 使用
+    # 落盘三个默认流程（含自动排版坐标），供编辑器/headless 使用
+    from flow.layout import layered_layout
     os.makedirs("flows", exist_ok=True)
     for fname, build in (("villager", build_villager_graph),
                          ("trade_cart", build_trade_cart_graph),
                          ("jin", build_jin_graph)):
-        build().save(f"flows/{fname}.flow.json")
+        gg = build()
+        layered_layout(gg)
+        gg.save(f"flows/{fname}.flow.json")
         print(f"已写出 flows/{fname}.flow.json")
 
     print("\n" + ("全部通过 OK" if ok else "存在失败 FAIL"))

@@ -23,6 +23,7 @@ import dearpygui.dearpygui as dpg
 
 from ..core import Graph, create_node, registry
 from ..core.types import PortKind
+from ..layout import layered_layout, needs_layout
 
 # 端口标记：执行用三角、数据用圆点，便于一眼区分
 _EXEC_MARK = ">"
@@ -49,7 +50,8 @@ class EditorApp:
     def run(self):
         dpg.create_context()
         self.build_ui()
-        dpg.create_viewport(title="自动化流程编辑器", width=1280, height=800)
+        # 视口标题用英文：DPG/GLFW 的 OS 标题栏对中文会乱码（界面内中文由字体正常渲染）
+        dpg.create_viewport(title="AOE4 Flow Editor", width=1280, height=800)
         dpg.setup_dearpygui()
         dpg.set_primary_window("main_window", True)
         dpg.show_viewport()
@@ -88,7 +90,8 @@ class EditorApp:
                     dpg.add_menu_item(label="保存", callback=self._on_save)
                     dpg.add_menu_item(label="另存为...", callback=self._show_save_dialog)
                 with dpg.menu(label="编辑"):
-                    dpg.add_menu_item(label="删除选中节点 (Del)", callback=self._delete_selected)
+                    dpg.add_menu_item(label="自动排版", callback=self._auto_layout)
+                    dpg.add_menu_item(label="删除选中节点/连线 (Del)", callback=self._delete_selected)
                 self.status_id = dpg.add_text("", tag="status_text")
 
             with dpg.group(horizontal=True):
@@ -135,6 +138,8 @@ class EditorApp:
 
     # ==================== 从图生成节点/连线 ====================
     def _populate_from_graph(self):
+        if needs_layout(self.graph):      # 节点都堆在原点时自动排版，避免叠在左上角
+            layered_layout(self.graph)
         for node_id in self.graph.nodes:
             self._render_node(node_id)
         for e in self.graph.exec_edges:
@@ -326,10 +331,18 @@ class EditorApp:
     def _delete_selected(self, *args):
         if self.editor_id is None:
             return
+        # 先删选中的连线，再删选中的节点
+        for link in dpg.get_selected_links(self.editor_id):
+            self._drop_link(link)
         for dpg_node in dpg.get_selected_nodes(self.editor_id):
             node_id = self.dpg_to_node.get(dpg_node)
             if node_id:
                 self._remove_node(node_id)
+
+    def _auto_layout(self, *args):
+        layered_layout(self.graph)
+        self._reset_canvas(self.graph)
+        self._set_status("已自动排版")
 
     def _remove_node(self, node_id: str):
         # 删除相关连线
