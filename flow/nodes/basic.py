@@ -69,7 +69,7 @@ class Compare(DataNode):
     category = "逻辑"
     title = "比较"
     inputs = [data_in("a", DataType.NUMBER), data_in("b", DataType.NUMBER)]
-    outputs = [data_out("result", DataType.BOOL)]
+    outputs = [data_out("result", DataType.BOOL, label="结果")]
     params = [ParamSpec("op", "运算符", "enum", default="<",
                         choices=["<", "<=", ">", ">=", "==", "!="])]
 
@@ -86,7 +86,7 @@ class LogicAnd(DataNode):
     category = "逻辑"
     title = "与"
     inputs = [data_in("a", DataType.BOOL), data_in("b", DataType.BOOL)]
-    outputs = [data_out("result", DataType.BOOL)]
+    outputs = [data_out("result", DataType.BOOL, label="结果")]
 
     def evaluate(self, ctx, inputs):
         return {"result": bool(inputs.get("a")) and bool(inputs.get("b"))}
@@ -98,7 +98,7 @@ class LogicOr(DataNode):
     category = "逻辑"
     title = "或"
     inputs = [data_in("a", DataType.BOOL), data_in("b", DataType.BOOL)]
-    outputs = [data_out("result", DataType.BOOL)]
+    outputs = [data_out("result", DataType.BOOL, label="结果")]
 
     def evaluate(self, ctx, inputs):
         return {"result": bool(inputs.get("a")) or bool(inputs.get("b"))}
@@ -110,7 +110,7 @@ class LogicNot(DataNode):
     category = "逻辑"
     title = "非"
     inputs = [data_in("a", DataType.BOOL)]
-    outputs = [data_out("result", DataType.BOOL)]
+    outputs = [data_out("result", DataType.BOOL, label="结果")]
 
     def evaluate(self, ctx, inputs):
         return {"result": not bool(inputs.get("a"))}
@@ -176,7 +176,7 @@ class If(ControlNode):
     type_id = "control.if"
     category = "控制"
     title = "条件"
-    inputs = [exec_in("in"), data_in("cond", DataType.BOOL)]
+    inputs = [exec_in("in"), data_in("cond", DataType.BOOL, label="条件")]
     outputs = [exec_out("true", label="真"), exec_out("false", label="假")]
 
     def execute(self, ctx, inputs):

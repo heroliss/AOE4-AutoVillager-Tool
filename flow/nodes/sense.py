@@ -173,9 +173,12 @@ class OcrNumber(DataNode):
         data_out("ok", DataType.BOOL),
     ]
     params = [
-        ParamSpec("region", "区域", "region", default=[0, 0, 100, 40]),
-        ParamSpec("scale", "缩放比例", "float", default=1.0, minimum=0.1, maximum=4.0, step=0.1),
-        ParamSpec("allowlist", "字符白名单", "str", default="0123456789/\\|OolIsS "),
+        ParamSpec("region", "区域", "region", default=[0, 0, 100, 40],
+                  help="要识别数字的屏幕区域（左,上,右,下）。用区域框选工具更直观"),
+        ParamSpec("scale", "缩放比例", "float", default=1.0, minimum=0.1, maximum=4.0, step=0.1,
+                  help="识别前把截图放大的倍数；小字放大到 2~3 倍通常更准"),
+        ParamSpec("allowlist", "字符白名单", "str", default="0123456789/\\|OolIsS ",
+                  help="只允许识别这些字符，能显著提高准确率（数字一般用 0-9 加常见混淆字符）"),
         ParamSpec("regex", "提取正则", "str", default=r"(\d+)",
                   help="第1组->value，第2组->value2；如人口用 (\\d+)[/\\\\|](\\d+)"),
         ParamSpec("aggregate", "多数字聚合", "enum", default="first",

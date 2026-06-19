@@ -6,6 +6,8 @@
 const ED = (function () {
   let graph, canvas, defs = [];
   let typeKeyByType = {};   // our type_id -> LiteGraph 注册名
+  let defByType = {};       // our type_id -> 定义（含 help/参数说明），用于选中节点时显示说明
+  let helpEl = null;
   let seq = 1;
   let booted = false;
 
@@ -116,6 +118,7 @@ const ED = (function () {
       try {
         const key = def.category + "/" + def.title;   // 顶层菜单直接按中文分类（事件/数据/逻辑/…）
         typeKeyByType[def.type] = key;
+        defByType[def.type] = def;
         const D = def;
         const Ctor = function () {
           this.title = D.title;
@@ -295,7 +298,40 @@ const ED = (function () {
     const w = document.getElementById("wrap");
     const c = document.getElementById("graph");
     c.width = w.clientWidth; c.height = w.clientHeight;
-    if (canvas) canvas.resize();
+    if (canvas) { canvas.resize(); canvas.setDirty(true, true); }
+  }
+
+  // ---- 选中节点时显示中文说明（节点简介 + 各参数用法）----
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>]/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  }
+
+  function setupHelpPanel() {
+    helpEl = document.createElement("div");
+    helpEl.id = "helpbox";
+    helpEl.style.cssText = "position:absolute;right:10px;bottom:10px;max-width:340px;max-height:50%;" +
+      "overflow:auto;background:#23272fee;color:#cfd3da;border:1px solid #3a404a;border-radius:6px;" +
+      "padding:8px 10px;font:12px/1.6 'Microsoft YaHei',sans-serif;display:none;z-index:50;";
+    document.body.appendChild(helpEl);
+    canvas.onNodeSelected = showNodeHelp;
+    canvas.onNodeDeselected = () => { helpEl.style.display = "none"; };
+  }
+
+  function showNodeHelp(node) {
+    if (!helpEl) return;
+    const d = defByType[node && node._typeId];
+    if (!d) { helpEl.style.display = "none"; return; }
+    let html = `<div style="font-weight:bold;color:#e6e9ee;margin-bottom:2px">${esc(d.title)}</div>`;
+    if (d.help) html += `<div style="color:#9aa3af;margin-bottom:4px">${esc(d.help)}</div>`;
+    const ps = (d.params || []).filter((p) => p.help);
+    if (ps.length) {
+      html += `<div style="color:#7f8895;border-top:1px solid #3a404a;margin-top:4px;padding-top:4px">参数说明</div>`;
+      for (const p of ps)
+        html += `<div style="margin-top:2px"><b style="color:#bcd">${esc(p.label)}</b>：${esc(p.help)}</div>`;
+    }
+    helpEl.innerHTML = html;
+    helpEl.style.display = "block";
   }
 
   function start() {
@@ -305,8 +341,11 @@ const ED = (function () {
       graph = new LGraph();
       canvas = new LGraphCanvas("#graph", graph);
       canvas.allow_searchbox = false;   // 关闭双击/Shift 弹出的搜索框（易误触；加节点统一走右键空白处"添加节点"）
+      setupHelpPanel();
       resize();
       window.addEventListener("resize", resize);
+      // 用 ResizeObserver 让窗口拖拽改变大小时内容实时刷新（window resize 在部分情况下不够即时）
+      try { new ResizeObserver(resize).observe(document.getElementById("wrap")); } catch (e) {}
       window.__bootReady = true;       // 供 Python 可选地 push 启动数据（__bootstrap__）
       setStatus("正在连接后端…");
       pullWhenReady(0);                // 主路径：轮询直到 api 就绪再拉取（pywebview 注入 api 有延迟）

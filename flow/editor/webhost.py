@@ -24,6 +24,14 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
 
 # ==================== 注册表 -> 前端类型定义 ====================
+def _doc_summary(cls) -> str:
+    """取类文档字符串的首个非空行作为节点说明（给普通用户看的简介）。"""
+    doc = (cls.__doc__ or "").strip()
+    if not doc:
+        return ""
+    return doc.splitlines()[0].strip()
+
+
 def node_defs() -> list[dict]:
     defs = []
     for type_id, cls in registry().items():
@@ -31,13 +39,15 @@ def node_defs() -> list[dict]:
             "type": type_id,
             "title": cls.title,
             "category": cls.category,
+            "help": _doc_summary(cls),
             "inputs": [{"name": p.name, "kind": p.kind.value, "dtype": p.dtype.value,
                         "label": p.display} for p in cls.inputs],
             "outputs": [{"name": p.name, "kind": p.kind.value, "dtype": p.dtype.value,
                          "label": p.display} for p in cls.outputs],
             "params": [{"key": s.key, "label": s.label, "ptype": s.ptype,
                         "default": _param_to_js_raw(s, s.default), "choices": s.choices,
-                        "min": s.minimum, "max": s.maximum, "step": s.step} for s in cls.params],
+                        "min": s.minimum, "max": s.maximum, "step": s.step,
+                        "help": s.help} for s in cls.params],
         })
     return defs
 

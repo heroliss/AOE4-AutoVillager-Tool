@@ -45,12 +45,13 @@ class Port:
 
 
 # —— 便捷构造函数（让节点定义更简洁）——
+# 执行端口默认给中文显示名（"进入"/"继续"），语义出口请显式传 label（如 真/假/到点）。
 def exec_in(name: str = "in", label: str = "") -> Port:
-    return Port(name, PortKind.EXEC, label=label)
+    return Port(name, PortKind.EXEC, label=label or ("进入" if name == "in" else name))
 
 
 def exec_out(name: str = "out", label: str = "") -> Port:
-    return Port(name, PortKind.EXEC, label=label)
+    return Port(name, PortKind.EXEC, label=label or ("继续" if name == "out" else name))
 
 
 def data_in(name: str, dtype: DataType = DataType.ANY, label: str = "") -> Port:
