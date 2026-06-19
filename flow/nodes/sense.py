@@ -175,10 +175,20 @@ class TemplateMatch(DataNode):
 # ==================== OCR 数字 ====================
 @register
 class OcrNumber(DataNode):
-    """识别数字：读取屏幕指定区域里的数字（人口、资源、计数等）。
+    """识别数字：读取屏幕指定区域里的数字（人口、资源、计数等），输出为可参与运算的数值。
 
-    底层用 OCR（光学字符识别 / Optical Character Recognition）把截图里的数字“认”成数值，
-    再用正则提取。常用于读人口「当前/上限」、食物/金币存量等。小字建议把「缩放比例」调到 2~3 倍更准。
+    底层用 OCR（光学字符识别）把截图里的文字“认”出来——OCR 本身能认任意文字，本节点是它的
+    “数字特化版”：用「字符白名单」限定只认数字相关字符、再用「提取正则」从认出的文本里抠出数字，
+    所以输出的是数值而非一串文本（方便直接接「比较」「算式」）。原始文本也从「文本」口输出，便于调试。
+
+    几个常见疑问：
+    · 白名单里为什么有 O o l I s S 这些字母？——它们是数字最常见的误识别（0↔O、1↔l/I、5↔S），
+      列进白名单让 OCR 不至于丢字，识别后再统一纠正回数字，准确率更高。
+    · 「提取正则」干嘛的？——从认出的文本里按模式抠数字：第1组→数值，第2组→数值2。
+      例如人口显示「12/20」，用 (\\d+)[/\\\\|](\\d+) 就能得到 数值=12、数值2=20（当前/上限）。
+    · 区域里有多个数字怎么办？——「多数字聚合」选 first 取正则首个匹配；选 sum 把区域内所有数字相加
+      （如分散显示的村民总数）。本节点不输出“数字列表”，需要逐个用可分别框小区域或用正则分组。
+    · 小字识别不准？——把「缩放比例」调到 2~3 倍通常更准。
     """
 
     type_id = "sense.ocr_number"
@@ -189,6 +199,7 @@ class OcrNumber(DataNode):
         data_out("value", DataType.NUMBER, label="数值"),
         data_out("value2", DataType.NUMBER, label="数值2"),  # 第二个捕获组（如人口 当前/上限）
         data_out("ok", DataType.BOOL, label="成功"),
+        data_out("text", DataType.STRING, label="文本"),     # OCR 认出的原始文本（调试/通用用途）
     ]
     params = [
         ParamSpec("region", "区域", "region", default=[0, 0, 100, 40],
@@ -196,12 +207,13 @@ class OcrNumber(DataNode):
         ParamSpec("scale", "缩放比例", "float", default=1.0, minimum=0.1, maximum=4.0, step=0.1,
                   help="识别前把截图放大的倍数；小字放大到 2~3 倍通常更准"),
         ParamSpec("allowlist", "字符白名单", "str", default="0123456789/\\|OolIsS ",
-                  help="只允许识别这些字符，能显著提高准确率（数字一般用 0-9 加常见混淆字符）"),
+                  help="只允许 OCR 认这些字符以提高准确率。含 O o l I s S 是因为它们是 0 1 5 的常见误识别，"
+                       "认出后会自动纠正回数字；若要识别其它字符可自行增减。"),
         ParamSpec("regex", "提取正则", "str", default=r"(\d+)",
-                  help="第1组->value，第2组->value2；如人口用 (\\d+)[/\\\\|](\\d+)"),
+                  help="从认出的文本里抠数字：第1组->数值，第2组->数值2；如人口用 (\\d+)[/\\\\|](\\d+)"),
         ParamSpec("aggregate", "多数字聚合", "enum", default="first",
                   choices=["first", "sum"],
-                  help="first=取正则首个匹配；sum=所有数字求和（村民总数用）"),
+                  help="first=取正则首个匹配；sum=区域内所有数字求和（村民总数用）"),
     ]
 
     # OCR 常见误识别纠正（O->0 等）
@@ -228,13 +240,13 @@ class OcrNumber(DataNode):
             nums = [int(n) for n in re.findall(r"\d+", cleaned.replace(" ", ""))]
             total = sum(nums)
             self.live = {"raw": raw, "value": total}
-            return {"value": total, "value2": None, "ok": bool(nums)}
+            return {"value": total, "value2": None, "ok": bool(nums), "text": raw}
 
         m = re.search(self.values["regex"], cleaned.replace(" ", ""))
         if not m:
             self.live = {"raw": raw, "value": None}
-            return {"value": None, "value2": None, "ok": False}
+            return {"value": None, "value2": None, "ok": False, "text": raw}
         v1 = int(m.group(1))
         v2 = int(m.group(2)) if m.lastindex and m.lastindex >= 2 else None
         self.live = {"raw": raw, "value": v1, "value2": v2}
-        return {"value": v1, "value2": v2, "ok": True}
+        return {"value": v1, "value2": v2, "ok": True, "text": raw}

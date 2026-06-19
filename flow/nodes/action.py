@@ -1,5 +1,5 @@
 """
-操作节点：按键（支持修饰键 / 重复 / Shift 批量）、释放修饰键、鼠标点击。
+操作节点：按键（可附带修饰键 / 重复若干次）、释放修饰键、鼠标点击。
 
 所有操作在 ctx.dry_run 时只记日志、不真正发送输入，便于无游戏环境验证整图。
 """
@@ -14,6 +14,13 @@ def _parse_mods(text: str) -> list[str]:
 
 @register
 class PressKey(ControlNode):
+    """按键：按下某个键，可附带修饰键(Ctrl/Shift/…)，重复「数量」次（次数可由「数量」输入连入）。
+
+    说明：AOE4 里对生产按钮按住 Shift 点一下会一次排 5 个（这是游戏自带设定，与本工具无关）；
+    若想用它，把「修饰键」设为 Shift 并相应调整次数即可。本节点不再内置“每5个”的批量开关——
+    那只对生产单位有意义，且用在编组(Ctrl+数字)等操作上反而会出错。
+    """
+
     type_id = "action.press_key"
     category = "操作"
     title = "按键"
@@ -23,10 +30,7 @@ class PressKey(ControlNode):
         ParamSpec("key", "按键", "key", default="q"),
         ParamSpec("modifiers", "修饰键", "keys", default="", help="从下拉选择按键时要附带的修饰键组合（如 Ctrl+Shift）。"),
         ParamSpec("repeat", "重复次数", "int", default=1, minimum=1, maximum=100,
-                  help="未连入 count 时使用此值"),
-        ParamSpec("shift_batch", "Shift批量", "bool", default=False,
-                  help="开启后每 batch_size 个用一次 Shift+键（AOE4 一次排5个）"),
-        ParamSpec("batch_size", "每批数量", "int", default=5, minimum=1, maximum=20),
+                  help="按几下；未连入「数量」时用此值，连入则用其数值。"),
         ParamSpec("post_escape", "结束后按ESC", "bool", default=False),
     ]
 
@@ -41,25 +45,17 @@ class PressKey(ControlNode):
 
         if ctx.dry_run:
             desc = ("+".join(mods + [key])) if mods else key
-            extra = " Shift批量" if self.values["shift_batch"] else ""
-            ctx.log("INFO", f"[干跑] 按键 {desc} x{n}{extra}"
+            ctx.log("INFO", f"[干跑] 按键 {desc} x{n}"
                             + ("，再按ESC" if self.values["post_escape"] else ""))
             return {}, "out"
 
         pdi = ctx.input()
-        if self.values["shift_batch"]:
-            bs = self.values["batch_size"]
-            for _ in range(n // bs):
-                pdi.keyDown("shift"); pdi.press(key); pdi.keyUp("shift")
-            for _ in range(n % bs):
-                pdi.press(key)
-        else:
-            for m in mods:
-                pdi.keyDown(m)
-            for _ in range(n):
-                pdi.press(key)
-            for m in reversed(mods):
-                pdi.keyUp(m)
+        for m in mods:
+            pdi.keyDown(m)
+        for _ in range(n):
+            pdi.press(key)
+        for m in reversed(mods):
+            pdi.keyUp(m)
 
         if self.values["post_escape"]:
             pdi.press("escape")

@@ -36,7 +36,6 @@ def default_cfg() -> dict:
         },
         "select_key": "h",
         "queue_key": "q",
-        "shift_batch": True,
         "post_op_delay": 3.0,
     }
 
@@ -104,8 +103,7 @@ def build_single_type(cfg: dict) -> Graph:
     add("planned", "math.arith", {"op": "*"})
     add("produce", "game.produce_count", {"cost_per_unit": cfg["cost_per_unit"], "cap": -1})
 
-    add("queue", "action.press_key",
-        {"key": cfg["queue_key"], "shift_batch": cfg["shift_batch"], "batch_size": 5, "post_escape": True})
+    add("queue", "action.press_key", {"key": cfg["queue_key"], "post_escape": True})
     add("restore", "action.press_key", {"key": "0"})
     add("disband", "action.press_key", {"key": "0", "modifiers": "ctrl,alt"})
     add("relmod2", "action.release_modifiers")

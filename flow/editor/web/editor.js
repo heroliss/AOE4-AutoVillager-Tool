@@ -325,8 +325,8 @@ const ED = (function () {
   }
 
   // 与 layout.py 的卡片尺寸常量保持一致（排版预留高度 = 这里画出的高度）。
-  // 模板按"列表"画：每个图片一行（缩略图 + 文件名）。
-  const CARD = { LTH: 36, ROW: 40, PAD: 8, CGAP: 4, NOTE_LH: 16, DIV: 6, CAP: 12 };
+  // 模板按"缩略图网格"画（仅图片，不显示文件名——增删/查看名字用节点上的"编辑列表…"按钮）。
+  const CARD = { TH: 44, GAP: 6, PAD: 8, CGAP: 4, NOTE_LH: 16, DIV: 6, CAP: 12 };
   // 修饰键下拉选项（友好标签；Python 侧与 csv "ctrl,shift" 互转）。
   const MOD_LABELS = ["（无）", "Shift", "Ctrl", "Alt", "Win",
     "Ctrl+Shift", "Ctrl+Alt", "Shift+Alt", "Ctrl+Shift+Alt"];
@@ -382,7 +382,7 @@ const ED = (function () {
     return out;
   }
   function baseName(p) { return String(p).split(/[\\/]/).pop(); }
-  // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板列表[缩略图+文件名]）。
+  // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板缩略图网格）。
   function nodeDrawForeground(ctx) {
     if (this.flags && this.flags.collapsed) return;
     // ① 已修改参数标记：在该参数控件行右侧画橙点（last_y 是 LiteGraph 画该控件时记下的 y）
@@ -404,9 +404,11 @@ const ED = (function () {
     ctx.font = "12px 'Microsoft YaHei',sans-serif";
     const noteLines = note ? wrapText(ctx, "📝 " + note, inner) : [];
     const shown = Math.min(paths.length, CARD.CAP);
+    const perRow = Math.max(1, Math.floor(inner / (CARD.TH + CARD.GAP)));
+    const rows = paths.length ? Math.ceil(shown / perRow) : 0;
     const extraLine = paths.length > shown ? CARD.NOTE_LH : 0;
-    let bodyH = noteLines.length * CARD.NOTE_LH + shown * CARD.ROW + extraLine;
-    if (noteLines.length && shown) bodyH += CARD.DIV;
+    let bodyH = noteLines.length * CARD.NOTE_LH + rows * (CARD.TH + CARD.GAP) + extraLine;
+    if (noteLines.length && rows) bodyH += CARD.DIV;
     const cardY = this.size[1] + CARD.CGAP, cardH = CARD.PAD * 2 + bodyH;
     // 卡片背景（圆角 + 细边，和节点连成一体的观感）
     ctx.save();
@@ -417,41 +419,35 @@ const ED = (function () {
     if (noteLines.length) {
       ctx.fillStyle = "#c9b87a"; ctx.font = "12px 'Microsoft YaHei',sans-serif";
       for (const ln of noteLines) { ctx.fillText(ln, CARD.PAD, y + 11); y += CARD.NOTE_LH; }
-      if (shown) {
+      if (rows) {
         y += CARD.DIV / 2;
         ctx.strokeStyle = "#2c323c"; ctx.beginPath();
         ctx.moveTo(CARD.PAD, y); ctx.lineTo(W - CARD.PAD, y); ctx.stroke();
         y += CARD.DIV / 2;
       }
     }
-    // 模板列表：每行 [缩略图][文件名]
-    const tx = CARD.PAD, th = CARD.LTH;
-    const nameX = tx + th + 8, nameW = Math.max(10, W - nameX - CARD.PAD);
+    let x = CARD.PAD, c = 0;
     for (let i = 0; i < shown; i++) {
       const pth = paths[i], im = getThumb(pth);
-      const off = (CARD.ROW - th) / 2;
-      roundRect(ctx, tx, y + off, th, th, 4);
+      roundRect(ctx, x, y, CARD.TH, CARD.TH, 4);
       ctx.fillStyle = "#11141a"; ctx.fill();
       if (im) {
         ctx.save(); ctx.clip();
-        const r = Math.min(th / im.width, th / im.height);
+        const r = Math.min(CARD.TH / im.width, CARD.TH / im.height);
         const dw = im.width * r, dh = im.height * r;
-        ctx.drawImage(im, tx + (th - dw) / 2, y + off + (th - dh) / 2, dw, dh);
+        ctx.drawImage(im, x + (CARD.TH - dw) / 2, y + (CARD.TH - dh) / 2, dw, dh);
         ctx.restore();
-        roundRect(ctx, tx, y + off, th, th, 4);
+        roundRect(ctx, x, y, CARD.TH, CARD.TH, 4);
       } else {
         ctx.fillStyle = "#666"; ctx.font = "11px sans-serif";
-        ctx.fillText(imgCache[pth] === "fail" ? "?" : "…", tx + th / 2 - 3, y + off + th / 2 + 4);
+        ctx.fillText(imgCache[pth] === "fail" ? "?" : "…", x + CARD.TH / 2 - 3, y + CARD.TH / 2 + 4);
       }
       ctx.strokeStyle = "#3a404a"; ctx.lineWidth = 1; ctx.stroke();
-      // 文件名（取末段，过长截断），垂直居中
-      ctx.fillStyle = "#aeb6c2"; ctx.font = "12px 'Microsoft YaHei',sans-serif";
-      let nm = baseName(pth);
-      while (nm.length > 4 && ctx.measureText(nm).width > nameW) nm = nm.slice(0, -2) + "…";
-      ctx.fillText(nm, nameX, y + CARD.ROW / 2 + 4);
-      y += CARD.ROW;
+      x += CARD.TH + CARD.GAP;
+      if (++c >= perRow) { c = 0; x = CARD.PAD; y += CARD.TH + CARD.GAP; }
     }
     if (extraLine) {
+      if (c !== 0) y += CARD.TH + CARD.GAP;
       ctx.fillStyle = "#7f8895"; ctx.font = "11px sans-serif";
       ctx.fillText("+" + (paths.length - shown) + " 张", CARD.PAD, y + 11);
     }
@@ -568,7 +564,20 @@ const ED = (function () {
   // ---- 未保存修改标记（全局 ●未保存 + 每个参数的橙点/恢复）----
   let savedSig = null;           // 全局：上次保存/载入时 collect() 的签名
   let savedParams = {};          // 每参数基线：nodeId -> { key: 基线值 }
-  function curSig() { try { return JSON.stringify(collect()); } catch (e) { return null; } }
+  // 规范化签名：按 id/连线排序后再 JSON，使"点选节点导致的 z 序变化"(LiteGraph bringToFront 会重排
+  // graph._nodes)不被误判为"未保存"。只有真正的参数/连线/位置/名称改动才算改动。
+  function curSig() {
+    try {
+      const c = collect();
+      const nodes = c.nodes.slice().sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const edges = c.edges.slice().sort((a, b) => {
+        const ka = a.src + "|" + a.src_port + "|" + a.dst + "|" + a.dst_port;
+        const kb = b.src + "|" + b.src_port + "|" + b.dst + "|" + b.dst_port;
+        return ka < kb ? -1 : ka > kb ? 1 : 0;
+      });
+      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, nodes, edges });
+    } catch (e) { return null; }
+  }
   function markSaved() {         // 保存/载入后：把“当前”设为基线，清除所有标记
     savedParams = {};
     for (const n of graph._nodes) {

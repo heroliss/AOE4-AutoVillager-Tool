@@ -23,10 +23,10 @@ SLOT_H = 20.0         # NODE_SLOT_HEIGHT：每个端口行高
 WIDGET_H = 20.0       # NODE_WIDGET_HEIGHT：每个控件行高（实际占用 WIDGET_H+4）
 MIN_W_WIDGETS = 210.0  # 含控件时 LiteGraph 的最小宽 NODE_WIDTH(140)*1.5
 
-# 节点下方"附属卡片"（模板预览列表 + 用户描述）的尺寸常量，必须与 editor.js 的画法保持一致，
-# 否则自动排版预留的高度与实际渲染对不上、会重叠或留白。
-LIST_TH = 36.0        # 列表行里的缩略图边长
-LIST_ROW = 40.0       # 列表每行高（缩略图 + 文件名）
+# 节点下方"附属卡片"（模板缩略图网格 + 用户描述）的尺寸常量，必须与 editor.js 的画法保持一致，
+# 否则自动排版预留的高度与实际渲染对不上、会重叠或留白。（编辑/增删图片用节点上的"编辑列表…"按钮。）
+THUMB = 44.0          # 缩略图边长
+THUMB_GAP = 6.0       # 缩略图间距
 CARD_PAD = 8.0        # 卡片内边距
 CARD_GAP = 4.0        # 卡片与节点之间的缝
 NOTE_LH = 16.0        # 描述行高
@@ -91,10 +91,7 @@ def _template_paths(node) -> list:
 
 
 def _card_h(node, note: str, width: float) -> float:
-    """节点下方附属卡片（描述 + 模板列表）的总占高；无内容返回 0。与 editor.js 的卡片画法对应。
-
-    模板按"列表"呈现：每个图片占一行（缩略图 + 文件名），故高度 = 行数 * LIST_ROW。
-    """
+    """节点下方附属卡片（描述 + 模板缩略图网格）的总占高；无内容返回 0。与 editor.js 的卡片画法对应。"""
     inner = max(1.0, width - 2 * CARD_PAD)
     note_h = 0.0
     if note:
@@ -105,16 +102,18 @@ def _card_h(node, note: str, width: float) -> float:
             lines += max(1, math.ceil(tw / inner))
         note_h = lines * NOTE_LH
     paths = _template_paths(node)
-    list_h = 0.0
+    prev_h = 0.0
     if paths:
+        per_row = max(1, int(inner // (THUMB + THUMB_GAP)))
         shown = min(len(paths), PREVIEW_CAP)
-        list_h = shown * LIST_ROW
+        rows = math.ceil(shown / per_row)
+        prev_h = rows * (THUMB + THUMB_GAP)
         if len(paths) > shown:
-            list_h += NOTE_LH        # "+N 张" 提示行
-    if note_h == 0 and list_h == 0:
+            prev_h += NOTE_LH        # "+N 张" 提示行
+    if note_h == 0 and prev_h == 0:
         return 0.0
-    total = CARD_PAD + note_h + list_h + CARD_PAD
-    if note_h and list_h:
+    total = CARD_PAD + note_h + prev_h + CARD_PAD
+    if note_h and prev_h:
         total += DIVIDER
     return CARD_GAP + total
 

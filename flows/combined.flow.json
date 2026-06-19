@@ -127,7 +127,7 @@
       "type": "sense.ocr_number",
       "pos": [
         3114.5,
-        1340.0
+        1170.0
       ],
       "params": {
         "region": [
@@ -198,7 +198,7 @@
       "type": "game.tc_count",
       "pos": [
         3097.0,
-        624.0
+        634.0
       ],
       "params": {
         "icon_region": [
@@ -232,7 +232,7 @@
       "type": "data.const_number",
       "pos": [
         5998.5,
-        624.0
+        634.0
       ],
       "params": {
         "value": 1
@@ -269,8 +269,6 @@
         "key": "0",
         "modifiers": "ctrl",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -344,8 +342,6 @@
         "key": "h",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -354,7 +350,7 @@
       "type": "data.const_number",
       "pos": [
         3140.0,
-        516.0
+        526.0
       ],
       "params": {
         "value": 3
@@ -376,7 +372,7 @@
       "type": "game.produce_count",
       "pos": [
         3822.0,
-        344.0
+        296.0
       ],
       "params": {
         "cost_per_unit": 50,
@@ -394,8 +390,6 @@
         "key": "q",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": true,
-        "batch_size": 5,
         "post_escape": true
       }
     },
@@ -404,7 +398,7 @@
       "type": "data.switch",
       "pos": [
         4214.5,
-        344.0
+        296.0
       ],
       "params": {
         "on": false
@@ -460,8 +454,6 @@
         "key": "h",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -470,7 +462,7 @@
       "type": "data.const_number",
       "pos": [
         4573.5,
-        516.0
+        526.0
       ],
       "params": {
         "value": 2
@@ -492,7 +484,7 @@
       "type": "game.produce_count",
       "pos": [
         5247.0,
-        344.0
+        296.0
       ],
       "params": {
         "cost_per_unit": 80,
@@ -510,8 +502,6 @@
         "key": "w",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": true,
-        "batch_size": 5,
         "post_escape": true
       }
     },
@@ -520,7 +510,7 @@
       "type": "data.switch",
       "pos": [
         5639.5,
-        344.0
+        296.0
       ],
       "params": {
         "on": false
@@ -576,8 +566,6 @@
         "key": "g",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -586,7 +574,7 @@
       "type": "data.const_number",
       "pos": [
         5998.5,
-        516.0
+        526.0
       ],
       "params": {
         "value": 5
@@ -608,7 +596,7 @@
       "type": "game.produce_count",
       "pos": [
         6638.0,
-        344.0
+        296.0
       ],
       "params": {
         "cost_per_unit": 100,
@@ -626,8 +614,6 @@
         "key": "q",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": true,
-        "batch_size": 5,
         "post_escape": true
       }
     },
@@ -642,8 +628,6 @@
         "key": "0",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -658,8 +642,6 @@
         "key": "0",
         "modifiers": "ctrl,alt",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },

@@ -75,8 +75,7 @@ def build_combined_graph() -> Graph:
     add("c_per_v", "data.const_number", {"value": 3})
     add("plan_v", "math.arith", {"op": "*"})
     add("prod_v", "game.produce_count", {"cost_per_unit": 50, "cap": -1})
-    add("queue_v", "action.press_key",
-        {"key": "q", "shift_batch": True, "batch_size": 5, "post_escape": True})
+    add("queue_v", "action.press_key", {"key": "q", "post_escape": True})
 
     # ==================== 乡骑段 ====================
     add("sw_xq", "data.switch", {"on": False})              # 开关：是否生产乡骑（金朝）
@@ -88,8 +87,7 @@ def build_combined_graph() -> Graph:
     add("c_per_x", "data.const_number", {"value": 2})
     add("plan_x", "math.arith", {"op": "*"})
     add("prod_x", "game.produce_count", {"cost_per_unit": 80, "cap": -1})
-    add("queue_x", "action.press_key",
-        {"key": "w", "shift_batch": True, "batch_size": 5, "post_escape": True})
+    add("queue_x", "action.press_key", {"key": "w", "post_escape": True})
 
     # ==================== 商队段 ====================
     add("sw_cart", "data.switch", {"on": False})            # 开关：是否生产商队（市场）
@@ -101,8 +99,7 @@ def build_combined_graph() -> Graph:
     add("c_per_cart", "data.const_number", {"value": 5})
     add("plan_cart", "math.arith", {"op": "*"})
     add("prod_cart", "game.produce_count", {"cost_per_unit": 100, "cap": -1})
-    add("queue_cart", "action.press_key",
-        {"key": "q", "shift_batch": True, "batch_size": 5, "post_escape": True})
+    add("queue_cart", "action.press_key", {"key": "q", "post_escape": True})
 
     # ==================== 收尾（整批一次）====================
     add("restore", "action.press_key", {"key": "0"})

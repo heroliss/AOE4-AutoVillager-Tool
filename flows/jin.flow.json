@@ -100,7 +100,7 @@
       "type": "sense.template_match",
       "pos": [
         818.0,
-        608.0
+        618.0
       ],
       "params": {
         "region": [
@@ -207,7 +207,7 @@
       "type": "sense.ocr_number",
       "pos": [
         3437.0,
-        472.0
+        424.0
       ],
       "params": {
         "region": [
@@ -304,8 +304,6 @@
         "key": "0",
         "modifiers": "ctrl",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -329,8 +327,6 @@
         "key": "h",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -339,7 +335,7 @@
       "type": "game.tc_count",
       "pos": [
         3052.0,
-        156.0
+        264.0
       ],
       "params": {
         "icon_region": [
@@ -382,7 +378,7 @@
       "type": "data.const_number",
       "pos": [
         3095.0,
-        872.0
+        156.0
       ],
       "params": {
         "value": 2
@@ -393,7 +389,7 @@
       "type": "math.arith",
       "pos": [
         3454.0,
-        344.0
+        296.0
       ],
       "params": {
         "op": "*"
@@ -416,7 +412,7 @@
       "type": "data.const_number",
       "pos": [
         3462.5,
-        848.0
+        820.0
       ],
       "params": {
         "value": 3
@@ -438,7 +434,7 @@
       "type": "game.produce_count",
       "pos": [
         4149.0,
-        568.0
+        520.0
       ],
       "params": {
         "cost_per_unit": 50,
@@ -472,7 +468,7 @@
       "type": "data.const_number",
       "pos": [
         3462.5,
-        740.0
+        712.0
       ],
       "params": {
         "value": 100
@@ -494,7 +490,7 @@
       "type": "logic.compare",
       "pos": [
         4174.5,
-        440.0
+        392.0
       ],
       "params": {
         "op": ">"
@@ -505,7 +501,7 @@
       "type": "logic.and",
       "pos": [
         4218.0,
-        344.0
+        296.0
       ],
       "params": {}
     },
@@ -567,8 +563,6 @@
         "key": "w",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": true,
-        "batch_size": 5,
         "post_escape": true
       }
     },
@@ -583,8 +577,6 @@
         "key": "q",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": true,
-        "batch_size": 5,
         "post_escape": true
       }
     },
@@ -599,8 +591,6 @@
         "key": "0",
         "modifiers": "",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },
@@ -615,8 +605,6 @@
         "key": "0",
         "modifiers": "ctrl,alt",
         "repeat": 1,
-        "shift_batch": false,
-        "batch_size": 5,
         "post_escape": false
       }
     },

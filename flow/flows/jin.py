@@ -113,10 +113,8 @@ def build_jin_graph() -> Graph:
     add("if_v", "control.if")
 
     # —— 出兵（两分支汇合到统一收尾）——
-    add("queue_xq", "action.press_key",
-        {"key": XQ_KEY, "shift_batch": True, "batch_size": 5, "post_escape": True})
-    add("queue_v", "action.press_key",
-        {"key": V_KEY, "shift_batch": True, "batch_size": 5, "post_escape": True})
+    add("queue_xq", "action.press_key", {"key": XQ_KEY, "post_escape": True})
+    add("queue_v", "action.press_key", {"key": V_KEY, "post_escape": True})
     add("restore", "action.press_key", {"key": "0"})
     add("disband", "action.press_key", {"key": "0", "modifiers": "ctrl,alt"})
     add("relmod2", "action.release_modifiers")
