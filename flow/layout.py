@@ -32,8 +32,8 @@ def estimate_size(node) -> tuple[float, float]:
     return (w, float(h))
 
 
-def layered_layout(graph, size_fn=None, node_gap: float = 46.0, band_gap: float = 50.0,
-                   col_gap: float = 96.0, x0: float = 40.0, y0: float = 40.0,
+def layered_layout(graph, size_fn=None, node_gap: float = 30.0, band_gap: float = 34.0,
+                   col_gap: float = 60.0, x0: float = 40.0, y0: float = 40.0,
                    max_per_col: int = 9) -> None:
     """就地计算并写入 graph.positions（尺寸感知 + 交叉缩减 + 折叠成多列）。"""
     nodes = list(graph.nodes)

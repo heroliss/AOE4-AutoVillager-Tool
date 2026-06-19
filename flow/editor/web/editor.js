@@ -49,7 +49,10 @@ const ED = (function () {
   }
 
   function addParamWidget(node, p) {
-    const cb = (v) => { node.properties[p.key] = v; };
+    // 构造期（new base_class）createNode 尚未给 node.properties 赋初值，需自行兜底，
+    // 否则末尾 node.properties[key]=... 会抛 TypeError，导致带参数的节点整体创建失败。
+    if (!node.properties) node.properties = {};
+    const cb = (v) => { if (!node.properties) node.properties = {}; node.properties[p.key] = v; };
     let w;
     if (p.ptype === "int")
       w = node.addWidget("number", p.label, Number(p.default ?? 0), cb, { step: 10, precision: 0 });
@@ -132,7 +135,6 @@ const ED = (function () {
       } catch (err) { /* 单条连线失败不致命 */ }
     }
     graph.setDirtyCanvas(true, true);
-    fit();
     const miss = Object.keys(missing);
     if (miss.length)
       showError("未注册的节点类型（未渲染）：" + miss.map((t) => t + "×" + missing[t]).join(", "));
@@ -162,7 +164,9 @@ const ED = (function () {
 
   function setStatus(t) { document.getElementById("status").textContent = t; }
 
-  function fit() {
+  // minScale：可读下限。适应窗口按钮用 0.15（真·全图）；载入用较大的下限（可读，
+  // 大图放不下时锚定左上角=流程起点，用户再平移/缩放）。
+  function fit(minScale) {
     const ns = graph._nodes;
     if (!ns.length) return;
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -171,7 +175,8 @@ const ED = (function () {
       x1 = Math.max(x1, n.pos[0] + n.size[0]); y1 = Math.max(y1, n.pos[1] + n.size[1]);
     }
     const cw = canvas.canvas.width, ch = canvas.canvas.height;
-    const s = Math.max(0.15, Math.min(1.4, Math.min((cw - 60) / (x1 - x0), (ch - 60) / (y1 - y0))));
+    const lo = (typeof minScale === "number") ? minScale : 0.15;
+    const s = Math.max(lo, Math.min(1.4, Math.min((cw - 60) / (x1 - x0), (ch - 60) / (y1 - y0))));
     canvas.ds.scale = s;
     canvas.ds.offset = [-x0 + 30 / s, -y0 + 30 / s];
     canvas.setDirty(true, true);
@@ -188,6 +193,7 @@ const ED = (function () {
     graph._aoe4_name = flow.name;
     const added = buildGraph(flow);
     const total = (flow.nodes || []).length;
+    fit(0.5);   // 载入用可读下限；适应窗口按钮(ED.fit())仍为真·全图
     setStatus(`流程：${flow.name} ｜ 节点 ${added}/${total}`);
   }
 
