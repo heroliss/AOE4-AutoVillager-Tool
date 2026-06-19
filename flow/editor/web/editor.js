@@ -39,7 +39,7 @@ const ED = (function () {
   // 连线按类型上色
   function setupColors() {
     const C = LGraphCanvas.link_type_colors;
-    C["exec"] = "#C9C97A";
+    C["exec"] = "#FFFFFF";   // 执行流＝白线（与虚幻蓝图一致）
     C["number"] = "#7AB0EE";
     C["bool"] = "#E0A85A";
     C["string"] = "#9AD08A";
@@ -423,6 +423,7 @@ const ED = (function () {
       } catch (err) { showError("自动排版失败：" + (err.stack || err)); }
     },
     fit,
+    help: toggleHelp,
   };
 
   function resize() {
@@ -449,17 +450,12 @@ const ED = (function () {
     canvas.onNodeDeselected = () => { helpEl.style.display = "none"; };
   }
 
-  // 连线模型图例：每次选中节点都在顶部提示一次，帮新手建立"白线/彩线"概念
-  const HELP_LEGEND =
-    "<b style='color:#e6c07b'>白线</b>＝执行顺序（先做什么、走哪条路）；出口不接任何节点＝本帧到此结束。" +
-    "<b style='color:#7fbf7f'>彩线</b>＝传值（按需取用，可一连多）。";
-
+  // 选中节点的说明面板：只放“该节点专属”的内容（用途 + 需要解释的端口/参数），
+  // 不重复通用的连线模型与操作说明——后者集中在顶部“帮助”里（见 self.help）。
   function portLine(p) {
-    const isExec = p.kind === "exec";
-    const tag = isExec ? "<span style='color:#e6c07b'>[白]</span>"
-                       : "<span style='color:#7fbf7f'>[彩]</span>";
-    const help = p.help ? `：${esc(p.help)}` : "";
-    return `<div style="margin-top:2px">${tag} <b style="color:#bcd">${esc(p.label || p.name)}</b>${help}</div>`;
+    const tag = p.kind === "exec" ? "<span style='color:#ddd'>[执行]</span>"
+                                  : "<span style='color:#7fbf7f'>[数据]</span>";
+    return `<div style="margin-top:2px">${tag} <b style="color:#bcd">${esc(p.label || p.name)}</b>：${esc(p.help)}</div>`;
   }
 
   function showNodeHelp(node) {
@@ -468,21 +464,14 @@ const ED = (function () {
     if (!d) { helpEl.style.display = "none"; return; }
     const sub = "color:#7f8895;border-top:1px solid #3a404a;margin-top:6px;padding-top:4px";
     let html = `<div style="font-weight:bold;color:#e6e9ee;margin-bottom:2px">${esc(d.title)}</div>`;
-    // 完整说明（保留换行）
     const doc = d.doc || d.help || "";
-    if (doc) html += `<div style="color:#9aa3af;margin-bottom:2px;white-space:pre-line">${esc(doc)}</div>`;
-    html += `<div style="color:#6b7280;font-size:11px;line-height:1.5;margin-top:4px">${HELP_LEGEND}</div>`;
-    // 输入 / 输出端口（仅在有端口时显示；含义不直观者带说明）
-    const ins = d.inputs || [], outs = d.outputs || [];
-    if (ins.length) {
-      html += `<div style="${sub}">输入</div>`;
-      for (const p of ins) html += portLine(p);
+    if (doc) html += `<div style="color:#9aa3af;white-space:pre-line">${esc(doc)}</div>`;
+    // 仅展示“含义不直观、带专门说明”的端口（如分支的 条件/真/假），不堆叠每一个端口
+    const ports = (d.inputs || []).concat(d.outputs || []).filter((p) => p.help);
+    if (ports.length) {
+      html += `<div style="${sub}">端口说明</div>`;
+      for (const p of ports) html += portLine(p);
     }
-    if (outs.length) {
-      html += `<div style="${sub}">输出</div>`;
-      for (const p of outs) html += portLine(p);
-    }
-    // 参数说明
     const ps = (d.params || []).filter((p) => p.help);
     if (ps.length) {
       html += `<div style="${sub}">参数说明</div>`;
@@ -491,6 +480,38 @@ const ED = (function () {
     }
     helpEl.innerHTML = html;
     helpEl.style.display = "block";
+  }
+
+  // 顶部“帮助”：集中放连线模型图例 + 常用操作（避免在每个节点面板里重复）
+  let helpModal = null;
+  function toggleHelp() {
+    if (helpModal) { helpModal.remove(); helpModal = null; return; }
+    helpModal = document.createElement("div");
+    helpModal.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);" +
+      "width:min(640px,92vw);max-height:80%;overflow:auto;background:#23272f;color:#cfd3da;" +
+      "border:1px solid #3a404a;border-radius:8px;padding:14px 18px;z-index:100;" +
+      "box-shadow:0 8px 30px #000a;font:13px/1.7 'Microsoft YaHei',sans-serif;";
+    helpModal.innerHTML =
+      "<div style='display:flex;align-items:center;margin-bottom:6px'>" +
+      "<b style='font-size:15px;color:#e6e9ee;flex:1'>编辑器帮助</b>" +
+      "<span id='helpclose' style='cursor:pointer;color:#8b909a;font-size:18px;padding:0 4px'>✕</span></div>" +
+      "<div style='color:#9aa3af'><b style='color:#e6c07b'>连线模型（类虚幻蓝图）</b><br>" +
+      "· <b style='color:#fff'>白线＝执行流</b>：决定先做什么、再做什么、走哪条路。入口是「每帧触发」；" +
+      "某个出口不接任何节点，就表示那种情况下<b>本帧到此结束</b>（无需专门的“结束”节点）。<br>" +
+      "· <b style='color:#7fbf7f'>彩线＝数据流</b>：传递“值”，下游用到时才向上游取，一个输出可同时连给多处；" +
+      "不同颜色＝不同类型（数值/是否/图像/区域…）。<br>" +
+      "· <b>判断与分支</b>：检测/比较类节点只输出一个“是/否”（彩线）；把它接到「分支」的“条件”，" +
+      "再从「真」「假」两个出口分别往后连——判断本身和“分岔”是分开的两件事。</div>" +
+      "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
+      "<b style='color:#e6c07b'>常用操作</b><br>" +
+      "· 右键空白处：添加节点　· 滚轮：缩放　· 拖动空白：平移<br>" +
+      "· 拖动节点标题：移动　· Ctrl+拖动空白：框选多个　· 选中多个后可整体拖动<br>" +
+      "· 单击参数输入框：直接编辑，<b>实时生效</b>（无需确认按钮）<br>" +
+      "· 右键连线（线上任意处）：删除连线　· 双击节点标题：折叠/展开<br>" +
+      "· Ctrl+Z 撤销　· Ctrl+Y 或 Ctrl+Shift+Z 重做<br>" +
+      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存</div>";
+    document.body.appendChild(helpModal);
+    helpModal.querySelector("#helpclose").onclick = toggleHelp;
   }
 
   // ---- 撤销/重做（对整图做 JSON 快照；buildGraph/applySnapshot 期间抑制）----
@@ -583,6 +604,8 @@ const ED = (function () {
       graph = new LGraph();
       canvas = new LGraphCanvas("#graph", graph);
       canvas.allow_searchbox = false;   // 关闭双击/Shift 弹出的搜索框（易误触；加节点统一走右键空白处"添加节点"）
+      canvas.show_info = false;          // 隐藏左下角 T/I/N/V/FPS 调试信息（对普通用户无意义）
+      canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
       setupHelpPanel();
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
       graph.onConnectionChange = scheduleSnap;

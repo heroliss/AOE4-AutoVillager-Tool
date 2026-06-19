@@ -63,10 +63,21 @@ class WindowCheck(DataNode):
     params = [
         ParamSpec("keywords", "窗口标题关键词", "str",
                   default="Age of Empires IV,帝国时代IV,帝国时代4",
-                  help="逗号分隔，命中任一即视为游戏窗口"),
-        ParamSpec("pixel", "检测像素坐标", "point", default=[2526, 1405]),
-        ParamSpec("color", "检测像素颜色", "color", default=[26, 32, 46]),
-        ParamSpec("tolerance", "颜色容差", "int", default=0, minimum=0, maximum=255),
+                  help="逗号分隔；当前窗口标题（忽略大小写）只要【包含】其中任一关键词，就视为游戏窗口。"
+                       "默认给三个是因为不同语言/版本标题不同（英文「Age of Empires IV」、简中「帝国时代IV」「帝国时代4」）——"
+                       "这与原程序一致，是「包含任一关键词」而非精确匹配整串标题。"),
+        ParamSpec("hdr", "HDR模式", "bool", default=False,
+                  help="开/关 HDR 时同一处像素的颜色会不同，故各配一组。开启则用下面「HDR」那组坐标/颜色，否则用「SDR」那组。"),
+        ParamSpec("pixel", "检测像素坐标(SDR)", "point", default=[2526, 1405],
+                  help="只在游戏内才会呈现特定颜色的一个像素点坐标（基于 2560x1440，其它分辨率需调整）。"),
+        ParamSpec("color", "检测像素颜色(SDR)", "color", default=[26, 32, 46],
+                  help="SDR（HDR关闭）下该像素应有的颜色；与实测颜色按「颜色容差」比较。"),
+        ParamSpec("pixel_hdr", "检测像素坐标(HDR)", "point", default=[2526, 1405],
+                  help="HDR 模式下的检测坐标（通常与 SDR 相同，可单独调整）。"),
+        ParamSpec("color_hdr", "检测像素颜色(HDR)", "color", default=[65, 78, 105],
+                  help="HDR（开启）下该像素应有的颜色。"),
+        ParamSpec("tolerance", "颜色容差", "int", default=0, minimum=0, maximum=255,
+                  help="颜色匹配允许的误差；0＝必须完全相同（与原程序一致）。"),
     ]
 
     def evaluate(self, ctx, inputs):
@@ -75,9 +86,10 @@ class WindowCheck(DataNode):
         active = any(k in title for k in kws)
         in_game = False
         if active:
-            x, y = self.values["pixel"]
+            hdr = self.values["hdr"]
+            x, y = self.values["pixel_hdr"] if hdr else self.values["pixel"]
+            exp = tuple(self.values["color_hdr"] if hdr else self.values["color"])
             got = ctx.get_pixel(int(x), int(y))
-            exp = tuple(self.values["color"])
             tol = self.values["tolerance"]
             in_game = all(abs(g - e) <= tol for g, e in zip(got, exp))
         self.live = {"active": active, "in_game": in_game}

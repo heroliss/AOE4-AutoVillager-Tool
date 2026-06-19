@@ -28,7 +28,7 @@
       "id": "if_mod",
       "type": "control.if",
       "pos": [
-        480.5,
+        494.5,
         798.0
       ],
       "params": {}
@@ -38,10 +38,11 @@
       "type": "sense.window_check",
       "pos": [
         403.0,
-        544.0
+        454.0
       ],
       "params": {
         "keywords": "Age of Empires IV,帝国时代IV,帝国时代4",
+        "hdr": false,
         "pixel": [
           2526,
           1405
@@ -51,6 +52,15 @@
           32,
           46
         ],
+        "pixel_hdr": [
+          2526,
+          1405
+        ],
+        "color_hdr": [
+          65,
+          78,
+          105
+        ],
         "tolerance": 0
       }
     },
@@ -58,7 +68,7 @@
       "id": "if_win",
       "type": "control.if",
       "pos": [
-        859.5,
+        887.5,
         798.0
       ],
       "params": {}
@@ -67,7 +77,7 @@
       "id": "occ",
       "type": "game.occlusion",
       "pos": [
-        782.0,
+        810.0,
         40.0
       ],
       "params": {
@@ -89,7 +99,7 @@
       "id": "vill",
       "type": "sense.template_match",
       "pos": [
-        790.0,
+        818.0,
         472.0
       ],
       "params": {
@@ -110,7 +120,7 @@
       "id": "or_trans",
       "type": "logic.or",
       "pos": [
-        1161.0,
+        1189.0,
         640.0
       ],
       "params": {}
@@ -119,7 +129,7 @@
       "id": "if_blocked",
       "type": "control.if",
       "pos": [
-        1161.0,
+        1189.0,
         798.0
       ],
       "params": {}
@@ -128,7 +138,7 @@
       "id": "if_trans",
       "type": "control.if",
       "pos": [
-        1385.0,
+        1413.0,
         798.0
       ],
       "params": {}
@@ -137,7 +147,7 @@
       "id": "if_vill",
       "type": "control.if",
       "pos": [
-        1609.0,
+        1637.0,
         798.0
       ],
       "params": {}
@@ -146,7 +156,7 @@
       "id": "prefetch",
       "type": "control.prefetch_full",
       "pos": [
-        1893.5,
+        1921.5,
         846.0
       ],
       "params": {}
@@ -155,7 +165,7 @@
       "id": "pop",
       "type": "sense.ocr_number",
       "pos": [
-        1833.0,
+        1861.0,
         58.0
       ],
       "params": {
@@ -175,7 +185,7 @@
       "id": "food",
       "type": "sense.ocr_number",
       "pos": [
-        1833.0,
+        1861.0,
         514.0
       ],
       "params": {
@@ -195,7 +205,7 @@
       "id": "if_popok",
       "type": "control.if",
       "pos": [
-        2221.5,
+        2249.5,
         798.0
       ],
       "params": {}
@@ -204,7 +214,7 @@
       "id": "c_minfood",
       "type": "data.const_number",
       "pos": [
-        1858.5,
+        1886.5,
         382.0
       ],
       "params": {
@@ -215,7 +225,7 @@
       "id": "cmp_food",
       "type": "logic.compare",
       "pos": [
-        2178.0,
+        2206.0,
         298.0
       ],
       "params": {
@@ -226,7 +236,7 @@
       "id": "if_foodok",
       "type": "control.if",
       "pos": [
-        2532.5,
+        2560.5,
         798.0
       ],
       "params": {}
@@ -235,7 +245,7 @@
       "id": "slots",
       "type": "math.arith",
       "pos": [
-        2178.0,
+        2206.0,
         610.0
       ],
       "params": {
@@ -246,7 +256,7 @@
       "id": "c_zero",
       "type": "data.const_number",
       "pos": [
-        2186.5,
+        2214.5,
         478.0
       ],
       "params": {
@@ -257,7 +267,7 @@
       "id": "cmp_slots",
       "type": "logic.compare",
       "pos": [
-        2489.0,
+        2517.0,
         610.0
       ],
       "params": {
@@ -268,7 +278,7 @@
       "id": "if_slots",
       "type": "control.if",
       "pos": [
-        2800.0,
+        2828.0,
         798.0
       ],
       "params": {}
@@ -277,7 +287,7 @@
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        3024.0,
+        3052.0,
         822.0
       ],
       "params": {}
@@ -286,7 +296,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        3248.0,
+        3276.0,
         816.0
       ],
       "params": {
@@ -297,7 +307,7 @@
       "id": "save_sel",
       "type": "action.press_key",
       "pos": [
-        3611.0,
+        3639.0,
         642.0
       ],
       "params": {
@@ -313,7 +323,7 @@
       "id": "relmod1",
       "type": "action.release_modifiers",
       "pos": [
-        4044.0,
+        4072.0,
         846.0
       ],
       "params": {}
@@ -322,7 +332,7 @@
       "id": "select_b",
       "type": "action.press_key",
       "pos": [
-        4346.0,
+        4374.0,
         642.0
       ],
       "params": {
@@ -338,7 +348,7 @@
       "id": "tc",
       "type": "game.tc_count",
       "pos": [
-        3966.0,
+        3994.0,
         502.0
       ],
       "params": {
@@ -372,7 +382,7 @@
       "id": "if_tcok",
       "type": "control.if",
       "pos": [
-        4770.0,
+        4798.0,
         798.0
       ],
       "params": {}
@@ -381,7 +391,7 @@
       "id": "c_pertc",
       "type": "data.const_number",
       "pos": [
-        4009.0,
+        4037.0,
         370.0
       ],
       "params": {
@@ -392,7 +402,7 @@
       "id": "planned",
       "type": "math.arith",
       "pos": [
-        4368.0,
+        4396.0,
         454.0
       ],
       "params": {
@@ -403,7 +413,7 @@
       "id": "produce",
       "type": "game.produce_count",
       "pos": [
-        4701.0,
+        4729.0,
         532.0
       ],
       "params": {
@@ -415,7 +425,7 @@
       "id": "queue",
       "type": "action.press_key",
       "pos": [
-        5063.0,
+        5091.0,
         642.0
       ],
       "params": {
@@ -431,7 +441,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        5418.0,
+        5446.0,
         642.0
       ],
       "params": {
@@ -447,7 +457,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        5773.0,
+        5801.0,
         642.0
       ],
       "params": {
@@ -463,7 +473,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        6128.0,
+        6156.0,
         846.0
       ],
       "params": {}
@@ -472,7 +482,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        6352.0,
+        6380.0,
         846.0
       ],
       "params": {}
@@ -481,7 +491,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        6576.0,
+        6604.0,
         816.0
       ],
       "params": {
@@ -492,7 +502,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        6853.0,
+        6881.0,
         846.0
       ],
       "params": {}
