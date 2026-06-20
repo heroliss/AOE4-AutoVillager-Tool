@@ -13,17 +13,33 @@ import mss
 from PIL import Image
 import threading
 
-# 线程局部存储，每个线程有独立的mss实例
-_thread_local = threading.local()
+# 进程内共享单个 mss 实例（单例）。
+# 早期是“每线程一个实例”，但 pywebview 的 js_api 桥接会为【每一次】调用新建一个线程：
+# 试运行里每帧 run_tick 都落在新线程上 → 每帧都新建一个 mss 实例并分配整屏大小的位图，
+# 旧实例随死线程滞留，GDI 句柄/内存不断累积（表现为“走到整屏预取节点后 CPU 飙高、内存快速上升”）。
+# 改为共享单例 + 抓取串行化（mss.grab 非并发安全，用锁保护）：实例只建一次、整屏位图只分配一次。
+_sct = None
+_sct_lock = threading.Lock()
 _use_mss = True  # 是否使用mss库
 _fallback_notified = False  # 是否已通知用户回退
 
 
 def get_sct():
-    """获取当前线程的mss实例"""
-    if not hasattr(_thread_local, 'sct') or _thread_local.sct is None:
-        _thread_local.sct = mss.mss()
-    return _thread_local.sct
+    """获取进程内共享的 mss 实例（单例，懒加载，线程安全）。"""
+    global _sct
+    if _sct is None:
+        with _sct_lock:
+            if _sct is None:
+                _sct = mss.mss()
+    return _sct
+
+
+def grab(monitor):
+    """线程安全地抓取指定 monitor(dict) 区域，返回 mss 截图对象。
+    并发调用由 _sct_lock 串行化，避免共享实例被并发 grab 破坏。"""
+    sct = get_sct()
+    with _sct_lock:
+        return sct.grab(monitor)
 
 
 def _fallback_notify(error):
@@ -38,15 +54,14 @@ def _fallback_notify(error):
 
 
 def _grab_mss(left, top, right, bottom):
-    """使用mss截图，返回 (screenshot_object, success)"""
-    sct = get_sct()
+    """使用mss截图，返回 mss 截图对象（共享实例 + 锁，见 grab()）。"""
     monitor = {
         "left": left,
         "top": top,
         "width": right - left,
         "height": bottom - top
     }
-    return sct.grab(monitor)
+    return grab(monitor)
 
 
 def capture_region(left, top, right, bottom):

@@ -1444,6 +1444,7 @@ const ED = (function () {
   function drawRunOverlay(ctx) {
     if (!runSession || !graph) return;
     const nodes = graph._nodes || [];
+    const byId = new Map(); for (const n of nodes) byId.set(n._id, n);   // 本帧建一次，省掉路径循环里的线性查找
     const active = (id) => runPath.has(id) || runDataNodes.has(id);
     const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
     // ① 聚光灯：压暗未参与本帧的节点，让走过/取数的节点凸显
@@ -1457,7 +1458,7 @@ const ED = (function () {
     ctx.restore();
     // ② 走过的执行连线：流动亮点（沿样条移动）
     for (let i = 0; i < runPathArr.length - 1; i++) {
-      const A = nodeByOurId(runPathArr[i]), B = nodeByOurId(runPathArr[i + 1]);
+      const A = byId.get(runPathArr[i]), B = byId.get(runPathArr[i + 1]);
       if (!A || !B) continue;
       const oi = outSlotIndex(A, runPorts[A._id]); if (oi < 0) continue;
       const p0 = A.getConnectionPos(false, oi, _t0), p1 = B.getConnectionPos(true, execInSlotIndex(B), _t1);
@@ -1511,11 +1512,22 @@ const ED = (function () {
     }
   }
 
+  // 试运行动画刷新上限：运行中 120fps、暂停 20fps（暂停画面基本静止，只留呼吸感）。
+  // 多屏观战：即使切到游戏、编辑器在后台仍照常刷新（rAF 在窗口真正最小化/隐藏时会自动降频）。
+  const RUN_FPS = 120, PAUSE_FPS = 20;
+  const PHASE_SPEED = 1.8;            // 相位每秒推进量，与帧率解耦——改上限不会让动画忽快忽慢
+  function animInterval() { return 1000 / (running ? RUN_FPS : PAUSE_FPS); }
   function startRunAnim() {
     if (runAnimRAF) return;
+    _runAnimLast = 0;
     const step = (ts) => {
       if (!runSession) { runAnimRAF = null; return; }
-      if (ts - _runAnimLast > 32) { _runAnimLast = ts; runPhase += 0.06; if (canvas) canvas.setDirty(true, false); }
+      const gap = _runAnimLast ? (ts - _runAnimLast) : 999;
+      if (gap >= animInterval()) {
+        runPhase += PHASE_SPEED * Math.min(gap, 200) / 1000;   // 按真实时间步进，掉帧也不变速
+        _runAnimLast = ts;
+        if (canvas) canvas.setDirty(true, false);
+      }
       runAnimRAF = requestAnimationFrame(step);
     };
     runAnimRAF = requestAnimationFrame(step);
@@ -1529,15 +1541,41 @@ const ED = (function () {
     const lp = document.getElementById("logpanel");
     if (lp) lp.style.display = runSession ? "block" : "none";
   }
-  function renderLog() {
+  // —— 运行日志面板：增量追加，避免每帧重建整面板（800 行 × 4fps 的 DOM 抖动是“一分钟后变卡”的元凶之一）——
+  const LOG_CAP = 800;
+  function logRowHTML(l) {
+    return `<div class="lp-row"><span class="lp-tick">[${l.tick}]</span> <span class="lv-${esc(l.level)}">${esc(l.msg)}</span></div>`;
+  }
+  function logHeadHTML() {
+    return `运行日志（干跑：只识别、不发按键鼠标）· ${runLogs.length} 条 ` +
+           `<span class="lp-clear" onclick="ED.clearLog()">清空</span>`;
+  }
+  function ensureLogDom() {
     const lp = document.getElementById("logpanel");
-    if (!lp) return;
-    let h = `<div class="lp-head">运行日志（干跑：只识别、不发按键鼠标）· ${runLogs.length} 条 ` +
-            `<span class="lp-clear" onclick="ED.clearLog()">清空</span></div>`;
-    for (const l of runLogs)
-      h += `<div class="lp-row"><span class="lp-tick">[${l.tick}]</span> <span class="lv-${esc(l.level)}">${esc(l.msg)}</span></div>`;
-    lp.innerHTML = h;
-    lp.scrollTop = lp.scrollHeight;
+    if (!lp) return null;
+    let head = lp.querySelector(".lp-head"), rows = lp.querySelector(".lp-rows");
+    if (!head || !rows) {
+      lp.innerHTML = `<div class="lp-head"></div><div class="lp-rows"></div>`;
+      head = lp.querySelector(".lp-head"); rows = lp.querySelector(".lp-rows");
+    }
+    return { lp, head, rows };
+  }
+  function renderLog() {            // 全量重建：清空 / 会话开始 / 回到前台补全 时调用
+    const d = ensureLogDom(); if (!d) return;
+    d.head.innerHTML = logHeadHTML();
+    let h = ""; for (const l of runLogs) h += logRowHTML(l);
+    d.rows.innerHTML = h;
+    d.lp.scrollTop = d.lp.scrollHeight;
+  }
+  function appendLogRows(rows) {    // 每帧只追加本帧新增行（前台时才动 DOM）
+    const d = ensureLogDom(); if (!d) return;
+    if (rows && rows.length) {
+      let h = ""; for (const l of rows) h += logRowHTML(l);
+      d.rows.insertAdjacentHTML("beforeend", h);
+      while (d.rows.childElementCount > LOG_CAP) d.rows.removeChild(d.rows.firstChild);
+    }
+    d.head.innerHTML = logHeadHTML();
+    d.lp.scrollTop = d.lp.scrollHeight;
   }
   async function ensureRunSession() {
     if (runSession) return true;
@@ -1556,11 +1594,12 @@ const ED = (function () {
     runPorts = t.ports || {};
     runData = t.data || {};
     runDataNodes = new Set(Object.keys(runData).map((k) => k.split("")[0]));
-    for (const l of (t.logs || [])) runLogs.push({ tick: t.tick, level: l.level, msg: l.msg, node: l.node });
-    if (runLogs.length > 800) runLogs = runLogs.slice(-800);
-    renderLog();
+    const added = (t.logs || []).map((l) => ({ tick: t.tick, level: l.level, msg: l.msg, node: l.node }));
+    for (const l of added) runLogs.push(l);
+    if (runLogs.length > LOG_CAP) runLogs.splice(0, runLogs.length - LOG_CAP);   // 原地裁剪，免得每帧新建长数组
+    appendLogRows(added);                          // 增量追加本帧新增日志行（不再每帧重建整面板）
     setStatus(`试运行 · 第 ${t.tick} 帧 · 经过 ${(t.path || []).length} 个节点`);
-    if (canvas) canvas.setDirty(true, true);
+    if (canvas) canvas.setDirty(true, false);      // 背景(网格/分组)不随帧变 → 只刷前景，省一半重绘
   }
   async function runOneTick() {
     if (!(await ensureRunSession())) return;

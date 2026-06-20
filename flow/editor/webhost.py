@@ -41,6 +41,10 @@ def _fmt_value(v):
     s = str(v)
     return s if len(s) <= 48 else s[:48] + "…"
 
+# 试运行日志在内存中的封顶条数：长时间逐帧运行也不会无限增长占内存
+# （本帧新增的日志会先单独取出回传前端，再裁剪历史）。
+_RUN_LOG_CAP = 4000
+
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 # 内置流程目录（只读模板，随程序分发）与 用户自定义流程目录（用户的另存到这里）。
 BUILTIN_FLOWS_DIR = os.path.abspath("flows")
@@ -85,13 +89,20 @@ def node_defs() -> list[dict]:
     return defs
 
 
+_PORT_KIND_CACHE: Optional[dict] = None
+
+
 def _port_kind_map() -> dict:
-    """(type_id, out_port_name) -> 'exec'|'data'，用于把前端连线归类到 exec/data。"""
-    m = {}
-    for type_id, cls in registry().items():
-        for p in cls.outputs:
-            m[(type_id, p.name)] = p.kind.value
-    return m
+    """(type_id, out_port_name) -> 'exec'|'data'，用于把前端连线归类到 exec/data。
+    注册表在运行期是静态的，缓存一次即可——run_update 在交互中会被频繁调用，别每次重建。"""
+    global _PORT_KIND_CACHE
+    if _PORT_KIND_CACHE is None:
+        m = {}
+        for type_id, cls in registry().items():
+            for p in cls.outputs:
+                m[(type_id, p.name)] = p.kind.value
+        _PORT_KIND_CACHE = m
+    return _PORT_KIND_CACHE
 
 
 # ==================== 参数值 <-> 前端 ====================
@@ -314,6 +325,10 @@ class Api:
                 self._run_exec.run_tick(self._run_ctx, dt=0.0)
             except Exception as e:  # 单帧异常不致命：报到日志，让前端继续/停止
                 self._run_logs.append({"level": "ERROR", "msg": f"运行异常：{e}", "node": None})
+            new_logs = self._run_logs[before:]
+            # 本帧新增日志已取出；历史只保留最近 N 条，避免长时间运行无限增长占内存
+            if len(self._run_logs) > _RUN_LOG_CAP:
+                del self._run_logs[: len(self._run_logs) - _RUN_LOG_CAP]
             data = {}
             for (nid, port), val in self._run_ctx.memo_snapshot().items():
                 data[nid + "" + port] = _fmt_value(val)   # 用 0x01 分隔 node_id 与 port

@@ -94,11 +94,11 @@ class ExecutionContext:
         """整屏截图并缓存（按帧只抓一次）。之后 capture_region 会直接切片复用。"""
         if self._full_frame is None:
             import numpy as np
-            from screenshot_util import get_sct
+            from screenshot_util import get_sct, grab
             sct = get_sct()
             mon = sct.monitors[1]  # 主显示器
             self._full_origin = (mon["left"], mon["top"])
-            shot = sct.grab(mon)
+            shot = grab(mon)       # 共享实例 + 锁：不再每帧新建 mss、泄漏整屏位图
             self._full_frame = np.array(shot)[:, :, :3]  # BGRA -> BGR
         return self._full_frame
 
