@@ -1037,18 +1037,21 @@ const ED = (function () {
         lastErr = (nd && nd.type) + " → " + (err && (err.stack || err.message) || err);
       }
     }
+    // 真正的“执行扇入”用载荷判定：同一执行入口被多条执行线汇入(kind=exec)。
+    // 不能靠 LiteGraph 连完后的状态判断——它每输入口只留一条，反而会误报(普通出农本是线性，曾被误报)。
+    const execIn = {};
+    for (const e of (flow.edges || []))
+      if (e.kind === "exec") { const k = e.dst + "→" + e.dst_port; execIn[k] = (execIn[k] || 0) + 1; }
     let faninDropped = 0;
+    for (const k in execIn) if (execIn[k] > 1) faninDropped += execIn[k] - 1;
+
     for (const e of flow.edges || []) {
       try {
         const a = idMap[e.src], b = idMap[e.dst];
         if (!a || !b) continue;
         const so = a.findOutputSlot(e.src_port);
         const si = b.findInputSlot(e.dst_port);
-        if (so >= 0 && si >= 0) {
-          // LiteGraph 每个输入口只接一条线：若该执行输入已被占用，再连就会把前一条挤掉(汇入丢失)。
-          if (b.inputs[si] && b.inputs[si].type === "exec" && b.inputs[si].link != null) faninDropped++;
-          a.connect(so, b, si);
-        }
+        if (so >= 0 && si >= 0) a.connect(so, b, si);
       } catch (err) { /* 单条连线失败不致命 */ }
     }
     if (faninDropped)
