@@ -465,6 +465,7 @@ const ED = (function () {
   // 画“分组框”（在节点后面，随成员节点自动包裹）。onDrawBackground 在画布变换内调用，用图坐标。
   const GROUP_PAD = 16, GROUP_TOP = 14;   // 四周留白（顶部留少许，组名做成“标签页”放在框上沿之上，不挤占内部）
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
+  function groupTabText(g) { return "⠿ " + (g.title || "分组"); }   // 标签页带抓手图标，提示这一小块可拖动整组
   // 依据背景色亮度选黑/白文字，保证标题在分组色上清晰可读。
   function contrastText(hex) {
     const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
@@ -486,7 +487,32 @@ const ED = (function () {
     if (!any) return null;
     return [x0 - GROUP_PAD, y0 - GROUP_TOP, (x1 - x0) + 2 * GROUP_PAD, (y1 - y0) + GROUP_TOP + GROUP_PAD];
   }
+  // 补画 LiteGraph 漏掉的“汇入同一入口”的执行连线：它的 drawConnections 每个输入口只画 input.link 那一条，
+  // 而我们允许 exec 输入多条汇入(见 vendor 改动)，这里把其余 exec 连线按相同样条补上，保证都可见。
+  function drawExtraExecLinks(ctx) {
+    if (!graph) return;
+    const links = graph.links || {};
+    for (const k in links) {
+      const l = links[k];
+      if (!l || l.type !== "exec") continue;
+      const b = graph.getNodeById(l.target_id);
+      if (!b || !b.inputs || !b.inputs[l.target_slot]) continue;
+      if (b.inputs[l.target_slot].link === l.id) continue;     // 这条 LiteGraph 已画，跳过避免重叠
+      const a = graph.getNodeById(l.origin_id);
+      if (!a || !a.outputs || !a.outputs[l.origin_slot]) continue;
+      let pa, pb;
+      try { pa = a.getConnectionPos(false, l.origin_slot, [0, 0]); pb = b.getConnectionPos(true, l.target_slot, [0, 0]); }
+      catch (e) { continue; }
+      const cc = linkCtrlPts([pa[0], pa[1]], [pb[0], pb[1]]);
+      ctx.save();
+      ctx.strokeStyle = "#8b94a3"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
+      ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], pb[0], pb[1]); ctx.stroke();
+      ctx.restore();
+    }
+  }
   function drawGroups(ctx) {
+    drawExtraExecLinks(ctx);     // 先补画 LiteGraph 漏掉的“汇入”执行连线（与分组无关，总要画）
     if (!groupDefs.length) return;
     ctx.save();
     groupDefs.forEach((g, i) => {
@@ -1037,14 +1063,8 @@ const ED = (function () {
         lastErr = (nd && nd.type) + " → " + (err && (err.stack || err.message) || err);
       }
     }
-    // 真正的“执行扇入”用载荷判定：同一执行入口被多条执行线汇入(kind=exec)。
-    // 不能靠 LiteGraph 连完后的状态判断——它每输入口只留一条，反而会误报(普通出农本是线性，曾被误报)。
-    const execIn = {};
-    for (const e of (flow.edges || []))
-      if (e.kind === "exec") { const k = e.dst + "→" + e.dst_port; execIn[k] = (execIn[k] || 0) + 1; }
-    let faninDropped = 0;
-    for (const k in execIn) if (execIn[k] > 1) faninDropped += execIn[k] - 1;
-
+    // 执行(exec)输入已支持多条汇入(见 vendor litegraph.js 改动 + drawExtraExecLinks 补画)，
+    // 直接按载荷连线即可；多段流程“跳过/完成”汇到同一入口也能正确显示与保存/运行。
     for (const e of flow.edges || []) {
       try {
         const a = idMap[e.src], b = idMap[e.dst];
@@ -1054,10 +1074,6 @@ const ED = (function () {
         if (so >= 0 && si >= 0) a.connect(so, b, si);
       } catch (err) { /* 单条连线失败不致命 */ }
     }
-    if (faninDropped)
-      showError("⚠ 有 " + faninDropped + " 条“汇入同一入口”的执行连线无法显示，也不会被保存/运行" +
-                "（LiteGraph 每个输入口只接一条线）。\n请改成线性结构：每个检查不通过就让出口空着(=本帧结束)，" +
-                "不要让多条执行线汇到同一个入口。");
     graph.setDirtyCanvas(true, true);
     const miss = Object.keys(missing);
     if (miss.length)
@@ -2307,6 +2323,11 @@ const ED = (function () {
         const ids = new Set(graph._nodes.map((n) => n._id));
         breakpoints = new Set([...breakpoints].filter((id) => ids.has(id)));   // 删节点连带移除其断点
         if (runUntil && !ids.has(runUntil)) runUntil = null;
+        // 清理悬空连线：删节点时，其“多条汇入 exec 输入”里 LiteGraph 没自动清的那些会变悬空，手动剔除
+        for (const k in graph.links) {
+          const l = graph.links[k];
+          if (l && (!graph.getNodeById(l.origin_id) || !graph.getNodeById(l.target_id))) delete graph.links[k];
+        }
         for (const g of groupDefs) g.members = (g.members || []).filter((m) => ids.has(m));
         groupDefs = groupDefs.filter((g) => g.members.length);   // 空组自动消失
         renderPanel();

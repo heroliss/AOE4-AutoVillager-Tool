@@ -554,6 +554,10 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     import webview
     if graph is None and path is None:          # 未指定文件 → 自动载入上次打开的流程（开机即用）
         last = _load_last_flow()
+        if not last:                            # 没有上次记录 → 默认打开内置“统一生产”组合流程
+            cand = os.path.join(BUILTIN_FLOWS_DIR, "combined.flow.json")
+            if os.path.exists(cand):
+                last = cand
         if last:
             try:
                 graph, path = Graph.load(last), last

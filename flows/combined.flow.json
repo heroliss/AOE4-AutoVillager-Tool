@@ -106,8 +106,7 @@
         "c_per_v",
         "plan_v",
         "prod_v",
-        "queue_v",
-        "esc_v"
+        "queue_v"
       ]
     },
     {
@@ -122,8 +121,7 @@
         "c_per_x",
         "plan_x",
         "prod_x",
-        "queue_x",
-        "esc_x"
+        "queue_x"
       ]
     },
     {
@@ -139,8 +137,7 @@
         "c_one",
         "plan_cart",
         "prod_cart",
-        "queue_cart",
-        "esc_cart"
+        "queue_cart"
       ]
     },
     {
@@ -397,7 +394,7 @@
       "id": "c_one",
       "type": "data.const_number",
       "pos": [
-        6911.5,
+        6223.5,
         1016.0
       ],
       "params": {
@@ -571,24 +568,10 @@
       "note": "按 Q 排队生产村民（按实际产量次数）。"
     },
     {
-      "id": "esc_v",
-      "type": "action.press_key",
-      "pos": [
-        4761.0,
-        40.0
-      ],
-      "params": {
-        "key": "esc",
-        "modifiers": "",
-        "repeat": 1
-      },
-      "note": "按 ESC 取消选中（排完村民后清掉选择，避免影响后续）。"
-    },
-    {
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
-        5139.5,
+        4795.5,
         232.0
       ],
       "params": {
@@ -600,7 +583,7 @@
       "id": "if_sw_xq",
       "type": "control.if",
       "pos": [
-        5174.5,
+        4830.5,
         40.0
       ],
       "params": {},
@@ -610,7 +593,7 @@
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
-        5105.0,
+        4761.0,
         412.0
       ],
       "params": {
@@ -632,7 +615,7 @@
       "id": "if_qxq",
       "type": "control.if",
       "pos": [
-        5527.5,
+        5183.5,
         40.0
       ],
       "params": {},
@@ -642,7 +625,7 @@
       "id": "sel_tc_x",
       "type": "action.press_key",
       "pos": [
-        5828.0,
+        5484.0,
         40.0
       ],
       "params": {
@@ -656,7 +639,7 @@
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
-        5139.5,
+        4795.5,
         836.0
       ],
       "params": {
@@ -668,7 +651,7 @@
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
-        5484.0,
+        5140.0,
         216.0
       ],
       "params": {
@@ -680,7 +663,7 @@
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
-        5811.0,
+        5467.0,
         328.0
       ],
       "params": {
@@ -693,7 +676,7 @@
       "id": "queue_x",
       "type": "action.press_key",
       "pos": [
-        6189.0,
+        5845.0,
         40.0
       ],
       "params": {
@@ -704,24 +687,10 @@
       "note": "按 W 排队生产乡骑。"
     },
     {
-      "id": "esc_x",
-      "type": "action.press_key",
-      "pos": [
-        6533.0,
-        40.0
-      ],
-      "params": {
-        "key": "esc",
-        "modifiers": "",
-        "repeat": 1
-      },
-      "note": "按 ESC 取消选中。"
-    },
-    {
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
-        6911.5,
+        6223.5,
         232.0
       ],
       "params": {
@@ -733,7 +702,7 @@
       "id": "if_sw_cart",
       "type": "control.if",
       "pos": [
-        6946.5,
+        6258.5,
         40.0
       ],
       "params": {},
@@ -743,7 +712,7 @@
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
-        6877.0,
+        6189.0,
         412.0
       ],
       "params": {
@@ -765,7 +734,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        7299.5,
+        6611.5,
         40.0
       ],
       "params": {},
@@ -775,7 +744,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        7600.0,
+        6912.0,
         40.0
       ],
       "params": {
@@ -789,7 +758,7 @@
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        6911.5,
+        6223.5,
         836.0
       ],
       "params": {
@@ -801,7 +770,7 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        7256.0,
+        6568.0,
         216.0
       ],
       "params": {
@@ -813,7 +782,7 @@
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        7583.0,
+        6895.0,
         328.0
       ],
       "params": {
@@ -826,7 +795,7 @@
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        7961.0,
+        7273.0,
         40.0
       ],
       "params": {
@@ -837,24 +806,10 @@
       "note": "按 Q 排队生产商队。"
     },
     {
-      "id": "esc_cart",
-      "type": "action.press_key",
-      "pos": [
-        8305.0,
-        40.0
-      ],
-      "params": {
-        "key": "esc",
-        "modifiers": "",
-        "repeat": 1
-      },
-      "note": "按 ESC 取消选中。"
-    },
-    {
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        8649.0,
+        7617.0,
         40.0
       ],
       "params": {
@@ -868,7 +823,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        8993.0,
+        7961.0,
         40.0
       ],
       "params": {
@@ -882,7 +837,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        9337.0,
+        8305.0,
         40.0
       ],
       "params": {},
@@ -892,7 +847,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        9577.0,
+        8545.0,
         40.0
       ],
       "params": {},
@@ -902,7 +857,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        9817.0,
+        8785.0,
         40.0
       ],
       "params": {
@@ -914,7 +869,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        10110.0,
+        9078.0,
         40.0
       ],
       "params": {},
@@ -1015,12 +970,6 @@
     [
       "queue_v",
       "out",
-      "esc_v",
-      "in"
-    ],
-    [
-      "esc_v",
-      "out",
       "if_sw_xq",
       "in"
     ],
@@ -1057,12 +1006,6 @@
     [
       "queue_x",
       "out",
-      "esc_x",
-      "in"
-    ],
-    [
-      "esc_x",
-      "out",
       "if_sw_cart",
       "in"
     ],
@@ -1098,12 +1041,6 @@
     ],
     [
       "queue_cart",
-      "out",
-      "esc_cart",
-      "in"
-    ],
-    [
-      "esc_cart",
       "out",
       "restore",
       "in"

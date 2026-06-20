@@ -4405,7 +4405,11 @@
         }
 
         //if there is something already plugged there, disconnect
-        if (target_node.inputs[target_slot] && target_node.inputs[target_slot].link != null) {
+        // —— 本项目改动：允许“执行(exec)”输入口接收多条汇入连线（多段流程的“跳过/完成”要汇到下一段入口）。
+        //    仅对 type==="exec" 的输入放行；数据输入仍保持“单条”原行为不变。多余的 exec 连线由
+        //    editor.js 的 drawExtraExecLinks 补画（LiteGraph 的 drawConnections 只画 input.link 那一条）。
+        var _isExecIn = target_node.inputs[target_slot] && target_node.inputs[target_slot].type === "exec";
+        if (!_isExecIn && target_node.inputs[target_slot] && target_node.inputs[target_slot].link != null) {
 			this.graph.beforeChange();
             target_node.disconnectInput(target_slot, {doProcessChange: false});
 			changed = true;
