@@ -406,7 +406,7 @@ class Api:
 
     def open_dialog(self):
         import webview
-        res = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=False,
+        res = self._window.create_file_dialog(webview.FileDialog.OPEN, allow_multiple=False,
                                               file_types=("Flow (*.json)",))
         if res:
             return self.open_path(res[0])
@@ -422,7 +422,7 @@ class Api:
         import webview
         os.makedirs(TEMPLATES_DIR, exist_ok=True)
         res = self._window.create_file_dialog(
-            webview.OPEN_DIALOG, allow_multiple=bool(multiple),
+            webview.FileDialog.OPEN, allow_multiple=bool(multiple),
             directory=TEMPLATES_DIR,   # 默认定位到模板目录（模板大多放这里）
             file_types=("图片 (*.png;*.jpg;*.jpeg;*.bmp;*.gif)",))
         if not res:
@@ -514,7 +514,7 @@ class Api:
         os.makedirs(USER_FLOWS_DIR, exist_ok=True)
         # 默认存到用户目录、用原文件名（内置改名另存就不会动到内置）。
         default_name = os.path.basename(self._path) if self._path else "我的流程.flow.json"
-        res = self._window.create_file_dialog(webview.SAVE_DIALOG, directory=USER_FLOWS_DIR,
+        res = self._window.create_file_dialog(webview.FileDialog.SAVE, directory=USER_FLOWS_DIR,
                                               save_filename=default_name, file_types=("Flow (*.json)",))
         if res:
             path = res if isinstance(res, str) else res[0]
