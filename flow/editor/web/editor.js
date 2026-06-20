@@ -25,6 +25,7 @@ const ED = (function () {
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
   let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
+  let simpleMode = false;                       // 使用模式：折叠节点图，只留控制面板+运行+日志（成品工具视图）
   let runAnimRAF = null, runPhase = 0, _runAnimLast = 0;   // 动画（脉冲发光 / 连线流动）
   const RUNSEP = String.fromCharCode(1);        // run_tick 里 data 的键 = nodeId + RUNSEP + port（与 Python \x01 一致）
   // 撤销/重做（快照式）
@@ -1279,7 +1280,13 @@ const ED = (function () {
     if (!el) return;
     el.innerHTML = "";
     const live = panelPins.filter((p) => nodeByOurId(p[0]));
-    if (!live.length) { el.style.display = "none"; return; }
+    if (!live.length) {
+      if (simpleMode) {   // 使用模式下即使没有面板项也给提示，别一片空白
+        el.style.display = "flex";
+        el.innerHTML = "<span class='phint'>这个流程还没有“控制面板项”。切到「编辑模式」，在节点右下角说明里勾选要显示到面板的开关/数值。</span>";
+      } else { el.style.display = "none"; }
+      return;
+    }
     el.style.display = "flex";
     const title = document.createElement("span");
     title.className = "ptitle"; title.textContent = "控制面板";
@@ -1345,6 +1352,21 @@ const ED = (function () {
     sel.selectedIndex = idx;
   }
 
+  // 使用模式（简单模式）：折叠节点图，只留控制面板 + 运行 + 日志
+  function applySimpleMode() {
+    document.body.classList.toggle("simple", simpleMode);
+    const b = document.getElementById("modebtn");
+    if (b) b.textContent = simpleMode ? "编辑模式" : "使用模式";
+    renderPanel();
+    if (!simpleMode && canvas) { canvas.resize(); canvas.setDirty(true, true); }   // 回到编辑模式重算画布尺寸
+  }
+  function toggleSimple() {
+    simpleMode = !simpleMode;
+    try { localStorage.setItem("flow.simpleMode", simpleMode ? "1" : "0"); } catch (e) {}
+    applySimpleMode();
+    setStatus(simpleMode ? "已进入使用模式（只看控制面板）" : "已回到编辑模式");
+  }
+
   // ---- 启动：优先用 Python push 进来的数据 ----
   function boot(data) {
     if (booted) return;
@@ -1354,6 +1376,8 @@ const ED = (function () {
       fillFlowList(data.builtin || []);
       if (data.flow) load(data.flow);
       else setStatus(`已就绪 ｜ 已注册 ${okN} 种节点（右键空白处添加）`);
+      try { simpleMode = localStorage.getItem("flow.simpleMode") === "1"; } catch (e) {}
+      applySimpleMode();   // 恢复上次的模式（使用/编辑）
     } catch (err) {
       showError("启动失败：\n" + (err && (err.stack || err.message) || err));
     }
@@ -1820,7 +1844,7 @@ const ED = (function () {
   }
 
   const self = {
-    toggleRun, dryRun, step: stepRun, stopRun,
+    toggleRun, dryRun, step: stepRun, stopRun, toggleSimple,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {

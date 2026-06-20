@@ -39,6 +39,13 @@
                 padding: 6px 16px; font-size: 13px; font-weight: bold; z-index: 210;
                 box-shadow: 0 4px 18px #000a; }
   #realbanner.show { display: block; }
+  /* 使用模式（简单模式）：折叠节点图，只留控制面板 + 运行 + 日志，给“只想跑”的用户 */
+  body.simple .edit-only { display: none !important; }
+  body.simple #wrap { display: none; }
+  body.simple #panel { max-height: none; flex: 1 1 auto; align-content: flex-start; }
+  #panel .phint { color: var(--fg-dim); font-size: 13px; padding: 8px 4px; line-height: 1.7; }
+  #modebtn { background: #314a6b; border-color: #3f5f88; }
+  #modebtn:hover { background: #395681; }
   #toolbar button:focus-visible, #toolbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #toolbar select { max-width: 220px; }
   #toolbar .sep { flex: none; width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
@@ -105,20 +112,22 @@
 </head>
 <body>
   <div id="toolbar">
-    <button onclick="ED.save()">保存</button>
-    <button onclick="ED.saveAs()">另存为</button>
+    <button id="modebtn" onclick="ED.toggleSimple()" title="在“使用模式（只留控制面板+运行）”和“编辑模式（节点图）”之间切换">使用模式</button>
+    <span class="sep edit-only"></span>
+    <button class="edit-only" onclick="ED.save()">保存</button>
+    <button class="edit-only" onclick="ED.saveAs()">另存为</button>
     <button onclick="ED.open()">打开</button>
     <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="" disabled selected>打开内置流程…</option></select>
     <span class="sep"></span>
     <button id="runbtn" class="accent" onclick="ED.toggleRun()" title="运行：真正向游戏发送按键/鼠标（开始前会二次确认）">▶ 运行</button>
     <button id="dryrunbtn" onclick="ED.dryRun()" title="试运行（干跑）：只识别、不发送任何输入，用于调试">试运行</button>
-    <button id="stepbtn" onclick="ED.step()" title="只跑一帧（默认干跑调试）">单步</button>
+    <button id="stepbtn" class="edit-only" onclick="ED.step()" title="只跑一帧（默认干跑调试）">单步</button>
     <button id="stopbtn" onclick="ED.stopRun()" disabled>停止</button>
+    <span class="sep edit-only"></span>
+    <button class="edit-only" onclick="ED.autolayout()">自动排版</button>
+    <button class="edit-only" onclick="ED.fit()">适应窗口</button>
     <span class="sep"></span>
-    <button onclick="ED.autolayout()">自动排版</button>
-    <button onclick="ED.fit()">适应窗口</button>
-    <span class="sep"></span>
-    <button onclick="ED.editFlowInfo()">流程信息…</button>
+    <button class="edit-only" onclick="ED.editFlowInfo()">流程信息…</button>
     <button onclick="ED.help()">帮助</button>
     <span class="sep"></span>
     <span id="flowmeta"></span>

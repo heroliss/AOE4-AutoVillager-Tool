@@ -51,6 +51,29 @@ BUILTIN_FLOWS_DIR = os.path.abspath("flows")
 USER_FLOWS_DIR = os.path.abspath("user_flows")
 # 截模板的保存目录（与内置模板同目录，节点里按相对路径 templates/xxx.png 读取）。
 TEMPLATES_DIR = os.path.abspath("templates")
+# 记住上次打开的流程，下次启动自动载入（让编辑器更像“成品工具”：开机即用）。
+_STATE_FILE = os.path.abspath(".editor_state.json")
+
+
+def _save_last_flow(path):
+    try:
+        import json
+        if not path:
+            return
+        with open(_STATE_FILE, "w", encoding="utf-8") as fp:
+            json.dump({"last_flow": os.path.abspath(path)}, fp)
+    except Exception:
+        pass
+
+
+def _load_last_flow():
+    try:
+        import json
+        with open(_STATE_FILE, "r", encoding="utf-8") as fp:
+            p = json.load(fp).get("last_flow")
+        return p if p and os.path.exists(p) else None
+    except Exception:
+        return None
 
 
 # ==================== 注册表 -> 前端类型定义 ====================
@@ -401,6 +424,7 @@ class Api:
         if path and os.path.exists(path):
             self._graph = Graph.load(path)
             self._path = path
+            _save_last_flow(path)
             return self._payload(self._graph)
         return None
 
@@ -506,6 +530,7 @@ class Api:
         if not self._path or self._is_builtin(self._path):
             return self.save_as(payload)
         self._graph.save(self._path)
+        _save_last_flow(self._path)
         return self._path
 
     def save_as(self, payload):
@@ -520,12 +545,20 @@ class Api:
             path = res if isinstance(res, str) else res[0]
             self._graph.save(path)
             self._path = path
+            _save_last_flow(path)
             return path
         return None
 
 
 def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     import webview
+    if graph is None and path is None:          # 未指定文件 → 自动载入上次打开的流程（开机即用）
+        last = _load_last_flow()
+        if last:
+            try:
+                graph, path = Graph.load(last), last
+            except Exception:
+                graph, path = None, None
     api = Api()
     api._graph = graph
     api._path = path
