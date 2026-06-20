@@ -23,6 +23,8 @@ const ED = (function () {
   let running = false, runSession = false, runTimer = null, runSpeed = 250;
   let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
+  let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
+  let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
   let runAnimRAF = null, runPhase = 0, _runAnimLast = 0;   // 动画（脉冲发光 / 连线流动）
   const RUNSEP = String.fromCharCode(1);        // run_tick 里 data 的键 = nodeId + RUNSEP + port（与 Python \x01 一致）
   // 撤销/重做（快照式）
@@ -711,6 +713,14 @@ const ED = (function () {
       content: gi >= 0 ? `分组：${groupDefs[gi].title}…` : "分组…",
       callback: () => assignGroupDialog(targets),
     });
+    // —— 试运行调试：断点 / 运行到此节点 ——
+    options.push(null, {
+      content: breakpoints.has(node._id) ? "取消断点 ⭕" : "设为断点 🔴",
+      callback: () => toggleBreakpoint(node._id),
+    }, {
+      content: "运行到此节点 ⏭",
+      callback: () => runToNode(node._id),
+    });
   }
   function editNote(node) {
     document.getElementById("notedlg")?.remove();
@@ -1122,7 +1132,7 @@ const ED = (function () {
       path: ("path" in flow) ? flow.path : flowMeta.path,
       readonly: ("readonly" in flow) ? !!flow.readonly : flowMeta.readonly,
     };
-    if (!keepHistory) { undoStack = []; redoStack = []; }   // 新流程：清空撤销历史（排版除外）
+    if (!keepHistory) { undoStack = []; redoStack = []; breakpoints = new Set(); runUntil = null; }   // 新流程：清空撤销历史与断点（排版除外）
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
     groupDefs = Array.isArray(flow.groups)
       ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
@@ -1462,7 +1472,22 @@ const ED = (function () {
     ctx.beginPath(); ctx.arc(p[0], p[1], 5.5, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   }
+  // 断点标记：节点左上角一个红点（始终可见，不依赖是否在试运行）
+  function drawBreakpoints(ctx) {
+    if (!breakpoints.size || !graph) return;
+    const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
+    for (const n of (graph._nodes || [])) {
+      if (!breakpoints.has(n._id)) continue;
+      const x = n.pos[0] - 8, y = n.pos[1] - th + 9;
+      ctx.save();
+      ctx.fillStyle = "#ff4d4d"; ctx.shadowColor = "#ff0000"; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.restore();
+    }
+  }
   function drawRunOverlay(ctx) {
+    drawBreakpoints(ctx);                 // 断点红点：与是否试运行无关，始终显示
     if (!runSession || !graph) return;
     const nodes = graph._nodes || [];
     const byId = new Map(); for (const n of nodes) byId.set(n._id, n);   // 本帧建一次，省掉路径循环里的线性查找
@@ -1653,7 +1678,18 @@ const ED = (function () {
     for (const l of added) runLogs.push(l);
     if (runLogs.length > LOG_CAP) runLogs.splice(0, runLogs.length - LOG_CAP);   // 原地裁剪，免得每帧新建长数组
     appendLogRows(added);                          // 增量追加本帧新增日志行（不再每帧重建整面板）
-    setStatus(`试运行 · 第 ${t.tick} 帧 · 经过 ${(t.path || []).length} 个节点`);
+    // 断点 / 运行到此节点：命中（出现在本帧执行路径）即暂停在这一帧
+    let bpHit = null;
+    if (runUntil && runPath.has(runUntil)) bpHit = runUntil;
+    else { for (const id of runPathArr) if (breakpoints.has(id)) { bpHit = id; break; } }
+    if (runUntil && runPath.has(runUntil)) runUntil = null;   // 一次性目标命中即清除
+    if (bpHit && running) {
+      pauseRun();
+      const n = nodeByOurId(bpHit);
+      setStatus("⏸ 命中断点：" + (n ? n.title : bpHit) + " · 第 " + t.tick + " 帧");
+    } else {
+      setStatus(`试运行 · 第 ${t.tick} 帧 · 经过 ${(t.path || []).length} 个节点`);
+    }
     if (canvas) canvas.setDirty(true, false);      // 背景(网格/分组)不随帧变 → 只刷前景，省一半重绘
   }
   async function runOneTick() {
@@ -1674,6 +1710,16 @@ const ED = (function () {
     runLoop();
   }
   function pauseRun() { running = false; clearTimeout(runTimer); setRunUI(); }
+  function toggleBreakpoint(id) {
+    if (breakpoints.has(id)) breakpoints.delete(id); else breakpoints.add(id);
+    if (canvas) canvas.setDirty(true, true);
+    setStatus(breakpoints.has(id) ? "已设断点 🔴（试运行命中即暂停）" : "已取消断点");
+  }
+  function runToNode(id) {              // 连续运行直到该节点被执行到，然后暂停（一次性）
+    runUntil = id;
+    setStatus("运行到此节点…（命中即暂停）");
+    if (!running) startRun(); else setRunUI();
+  }
   function toggleRun() { if (running) pauseRun(); else startRun(); }
   async function stepRun() {
     pauseRun();
@@ -2002,6 +2048,12 @@ const ED = (function () {
       "上方标出组名，框也会自动包住它们。一个节点只属于一个组。<br>" +
       "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
+      "<b style='color:#e6c07b'>试运行（干跑调试）</b>　顶部 ▶试运行 / 单步 / 停止 + 速度<br>" +
+      "· 干跑只识别、<b>不发按键鼠标</b>，安全；走过的节点高亮、连线流动、出口显示数据值、底部出日志。<br>" +
+      "· 执行<b>走到头</b>的出口标「⏹ 结束」——一眼看出本帧从哪停的（含选了某分支但没接下游）。<br>" +
+      "· <b>断点</b>：右键节点→「设为断点 🔴」，连续运行命中它就自动暂停；「运行到此节点 ⏭」= 跑到它再停。<br>" +
+      "· 底部日志可<b>拖上边沿调高度</b>、可<b>选中复制</b>；上滚查看时不会被新日志拽回底部。</div>" +
+      "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>在游戏画面上直接采集</b>（节点里相应参数下方的按钮）<br>" +
       "· <b>框选区域…</b>：按住左键拖出矩形，Enter 确认（区域参数）<br>" +
       "· <b>取点…/吸色…</b>：移动有放大镜，点一下取坐标/颜色（吸色会顺带回填配套坐标）<br>" +
@@ -2133,6 +2185,8 @@ const ED = (function () {
       graph.onNodeRemoved = () => {
         panelPins = panelPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));   // 删节点连带移除其面板项
         const ids = new Set(graph._nodes.map((n) => n._id));
+        breakpoints = new Set([...breakpoints].filter((id) => ids.has(id)));   // 删节点连带移除其断点
+        if (runUntil && !ids.has(runUntil)) runUntil = null;
         for (const g of groupDefs) g.members = (g.members || []).filter((m) => ids.has(m));
         groupDefs = groupDefs.filter((g) => g.members.length);   // 空组自动消失
         renderPanel();
