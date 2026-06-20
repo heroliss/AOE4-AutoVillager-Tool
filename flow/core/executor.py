@@ -41,7 +41,8 @@ class Executor:
         outputs = node.evaluate(ctx, inputs)
         for out_name, val in outputs.items():
             ctx.memo_set((node_id, out_name), val)
-        node.live.update({"outputs": outputs})
+        # 不再把 outputs 存进 node.live：该字段从不被读取，却会让每个数据节点常驻持有上一帧的
+        # 输出（截图节点＝一整屏 numpy 图），白白占内存。值已记忆化在 ctx._memo（按帧清空）。
         return ctx.memo_get(key)
 
     def _resolve_inputs(self, ctx: ExecutionContext, node_id: str, node: Node) -> dict[str, Any]:

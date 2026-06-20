@@ -255,8 +255,9 @@ class Api:
         return True
 
     # ==================== 运行可视化（干跑，逐帧）====================
-    def run_begin(self, payload):
-        """用当前编辑器里的图开一次“试运行”（干跑：不发按键/鼠标，只做识别与逻辑）。"""
+    def run_begin(self, payload, real=False):
+        """用当前编辑器里的图开一次运行。
+        real=False(默认)＝干跑：只识别、不发任何输入；real=True＝真跑：真正发按键/鼠标。"""
         with self._run_lock:
             self._run_graph = payload_to_graph(payload)
             self._run_logs = []
@@ -264,9 +265,14 @@ class Api:
             def _log(level, message, node_id=None):
                 self._run_logs.append({"level": level, "msg": message, "node": node_id})
 
-            self._run_ctx = ExecutionContext(on_log=_log, dry_run=True)
+            self._run_ctx = ExecutionContext(on_log=_log, dry_run=(not real))
             self._run_exec = TraceExecutor(self._run_graph)
-            return {"ok": True, "nodes": len(self._run_graph.nodes)}
+            self._run_logs.append({
+                "level": "WARN" if real else "INFO",
+                "msg": ("⚠ 真跑模式：将真正向游戏发送按键/鼠标操作" if real
+                        else "干跑模式：只识别、不发送任何输入"),
+                "node": None})
+            return {"ok": True, "nodes": len(self._run_graph.nodes), "real": bool(real)}
 
     def run_update(self, payload):
         """运行中热更新：参数改值【且】结构(增删节点/改连线)也实时同步——

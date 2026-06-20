@@ -20,7 +20,7 @@ const ED = (function () {
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // —— 试运行（干跑）可视化状态 ——
-  let running = false, runSession = false, runTimer = null, runSpeed = 250;
+  let running = false, runSession = false, runTimer = null, realRun = false;   // realRun: true=真跑(真发输入)
   let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
@@ -1593,12 +1593,20 @@ const ED = (function () {
 
   function setRunUI() {
     const btn = document.getElementById("runbtn"), stop = document.getElementById("stopbtn");
-    if (btn) { btn.textContent = running ? "⏸ 暂停" : (runSession ? "▶ 继续" : "▶ 试运行"); btn.classList.toggle("running", running); }
+    const startLabel = realRun ? "▶ 真跑" : "▶ 试运行";
+    if (btn) {
+      btn.textContent = running ? "⏸ 暂停" : (runSession ? "▶ 继续" : startLabel);
+      btn.classList.toggle("running", running);
+      btn.classList.toggle("danger", realRun && !running);   // 真跑用红色按钮提示
+    }
     if (stop) stop.disabled = !runSession;
+    const rr = document.getElementById("realrun");
+    if (rr) { rr.disabled = runSession; rr.checked = realRun; }   // 会话进行中不可切换干跑/真跑
     const lp = document.getElementById("logpanel");
     if (lp) lp.style.display = runSession ? "block" : "none";
     const lr = document.getElementById("logresize");
     if (lr) lr.style.display = runSession ? "block" : "none";
+    updateRealBanner();
   }
   // —— 运行日志面板：增量追加，避免每帧重建整面板（800 行 × 4fps 的 DOM 抖动是“一分钟后变卡”的元凶之一）——
   const LOG_CAP = 800;
@@ -1659,13 +1667,49 @@ const ED = (function () {
   }
   async function ensureRunSession() {
     if (runSession) return true;
+    if (realRun && !(await confirmRealRun())) return false;   // 真跑前二次确认
     try {
-      const r = await api().run_begin(collect());
+      const r = await api().run_begin(collect(), realRun);
       runSession = !!(r && r.ok);
       runLogs = []; renderLog();
       if (runSession) startRunAnim();   // 启动脉冲/流动动画
+      updateRealBanner();
       return runSession;
-    } catch (e) { showError("启动试运行失败：" + (e && (e.stack || e.message) || e)); return false; }
+    } catch (e) { showError("启动运行失败：" + (e && (e.stack || e.message) || e)); return false; }
+  }
+  // 真跑确认弹窗（返回 Promise<bool>）
+  function confirmRealRun() {
+    return new Promise((resolve) => {
+      document.getElementById("realdlg")?.remove();
+      const box = document.createElement("div");
+      box.id = "realdlg";
+      box.style.cssText = "position:absolute;left:50%;top:80px;transform:translateX(-50%);width:min(470px,92vw);" +
+        "background:#2a1d1d;color:#f0d8d8;border:1px solid #b04a4a;border-radius:10px;padding:16px 18px;z-index:240;" +
+        "box-shadow:0 10px 36px #000b;font:13px/1.7 'Microsoft YaHei',sans-serif;";
+      box.innerHTML = "<b style='color:#ff8a8a;font-size:15px'>⚠ 确认进入真跑</b><br>" +
+        "真跑会<b>真正向游戏发送按键和鼠标</b>。开始前请确认：<br>" +
+        "· 游戏窗口在前台、已就绪；<br>· 各节点的区域 / 模板 / 按键已采集正确（强烈建议先干跑核对）；<br>" +
+        "· 运行中可按住 Shift/Ctrl/Alt 暂停，或点「停止」终止。<br>" +
+        "<div style='margin-top:12px;text-align:right'>" +
+        "<button id='rr_cancel' style='background:#2f343d;color:#cfd3da;border:1px solid #555;border-radius:5px;padding:4px 14px;cursor:pointer'>取消</button> " +
+        "<button id='rr_ok' style='background:#a83232;color:#fff;border:1px solid #d05a5a;border-radius:5px;padding:4px 14px;cursor:pointer'>开始真跑</button></div>";
+      document.body.appendChild(box);
+      const done = (v) => { box.remove(); resolve(v); };
+      box.querySelector("#rr_cancel").onclick = () => done(false);
+      box.querySelector("#rr_ok").onclick = () => done(true);
+      box.querySelector("#rr_cancel").focus();
+    });
+  }
+  function updateRealBanner() {
+    const b = document.getElementById("realbanner");
+    if (b) b.classList.toggle("show", !!(running && realRun));
+  }
+  // 每帧间隔：以流程「每帧触发」节点的“循环间隔(秒)”为准（面板可调），不再单列速度档
+  function loopDelayMs() {
+    if (graph) for (const n of (graph._nodes || []))
+      if (n._typeId === "event.on_tick" && n.properties)
+        return Math.max(0, (parseFloat(n.properties.interval) || 0) * 1000);
+    return 100;
   }
   function applyTrace(t) {
     if (!t) return;
@@ -1701,7 +1745,7 @@ const ED = (function () {
   }
   function runLoop() {
     if (!running) return;
-    runOneTick().finally(() => { if (running) runTimer = setTimeout(runLoop, runSpeed); });
+    runOneTick().finally(() => { if (running) runTimer = setTimeout(runLoop, loopDelayMs()); });
   }
   async function startRun() {
     if (running) return;
@@ -1738,7 +1782,7 @@ const ED = (function () {
 
   const self = {
     toggleRun, step: stepRun, stopRun,
-    setSpeed(v) { runSpeed = +v || 250; },
+    setReal(v) { if (runSession) { const rr = document.getElementById("realrun"); if (rr) rr.checked = realRun; return; } realRun = !!v; setRunUI(); },
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {
