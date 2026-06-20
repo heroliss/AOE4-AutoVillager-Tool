@@ -48,6 +48,7 @@ def build_combined_graph() -> Graph:
     add("mod", "sense.modifier_down")
     add("if_mod", "control.if")
     add("win", "sense.window_check", {"pixel": WIN_PIXEL, "color": WIN_COLOR})
+    add("and_win", "logic.and")    # 窗口激活 且 像素点检测通过 = 确实在游戏中
     add("if_win", "control.if")
     add("occ", "game.occlusion", {"region": BLOCKED_REGION, "template": "templates/blocked.png"})
     add("if_blocked", "control.if")
@@ -135,7 +136,7 @@ def build_combined_graph() -> Graph:
         # 资源/识别类传感器都放“共享前段”：每帧只识别一次、多段按需拉取（人口/空位、食物、黄金、TC），
         # 放一起对齐、视觉一致（食物虽只村民用，但与其它资源对齐更清楚）。
         {"title": "共享前段（每帧一次）", "color": "#4a8a8a",
-         "members": ["tick", "mod", "if_mod", "win", "if_win", "occ", "if_blocked", "if_trans",
+         "members": ["tick", "mod", "if_mod", "win", "and_win", "if_win", "occ", "if_blocked", "if_trans",
                      "prefetch", "pop", "slots", "food", "gold", "tc",
                      "lock", "block_begin", "save_sel", "relmod1"]},
         {"title": "村民段", "color": "#3a6ea5",
@@ -156,8 +157,9 @@ def build_combined_graph() -> Graph:
         "tick": "每帧触发：整个流程的循环入口，按「循环间隔」决定多久跑一轮。",
         "mod": "检测是否按住 Shift/Ctrl/Alt——用于“人在手动操作时自动暂停”。",
         "if_mod": "按住修饰键则本帧到此结束（走 false 才继续），相当于手动接管时让路。",
-        "win": "检测当前是否在游戏内（窗口标题 + 一个特征像素颜色）。",
-        "if_win": "不在游戏中（或没激活）就本帧结束，避免对着别的窗口乱按。",
+        "win": "游戏窗口检测：分别输出「窗口激活」(标题像游戏) 与「像素点检测通过」(特征像素颜色符合)。",
+        "and_win": "「与」：窗口激活 且 像素点检测通过 → 才算确实在游戏中。两项分开，便于按需单独使用。",
+        "if_win": "不在游戏中就本帧结束，避免对着别的窗口乱按。",
         "occ": "三态遮挡检测：生产相关区域是否被 UI 盖住 / 正在渐变。",
         "if_blocked": "被遮挡则本帧结束（这时识别/点击都不可靠）。",
         "if_trans": "UI 正在渐入渐出动画时本帧结束，避免误判。",
@@ -253,7 +255,9 @@ def build_combined_graph() -> Graph:
 
     # ==================== 数据流 ====================
     g.connect_data("mod", "down", "if_mod", "cond")
-    g.connect_data("win", "in_game", "if_win", "cond")
+    g.connect_data("win", "active", "and_win", "a")
+    g.connect_data("win", "pixel_ok", "and_win", "b")
+    g.connect_data("and_win", "result", "if_win", "cond")
     g.connect_data("occ", "blocked", "if_blocked", "cond")
     g.connect_data("occ", "in_transition", "if_trans", "cond")
 

@@ -65,10 +65,11 @@ class WindowCheck(DataNode):
     category = "感知"
     title = "游戏窗口检测"
     outputs = [
-        data_out("in_game", DataType.BOOL, label="在游戏中",
-                 help="主要输出：当前确实在游戏对局内（标题匹配【且】检测像素颜色符合）。通常只用这个。"),
-        data_out("active", DataType.BOOL, label="窗口激活", advanced=True,
-                 help="进阶：仅判断前台窗口标题是否像游戏（不看像素）。一般用「在游戏中」即可。"),
+        data_out("active", DataType.BOOL, label="窗口激活",
+                 help="前台窗口标题是否像游戏（标题包含任一关键词）。"),
+        data_out("pixel_ok", DataType.BOOL, label="像素点检测通过",
+                 help="检测像素点的颜色是否符合（只在游戏对局内该处才是这个颜色）。"
+                      "通常把它和「窗口激活」一起接到「与」节点，再接「分支」，作为“确实在游戏中”的判据。"),
     ]
     params = [
         ParamSpec("keywords", "窗口标题关键词", "str",
@@ -94,16 +95,14 @@ class WindowCheck(DataNode):
         title = ctx.foreground_title().lower()
         kws = [k.strip().lower() for k in self.values["keywords"].split(",") if k.strip()]
         active = any(k in title for k in kws)
-        in_game = False
-        if active:
-            hdr = self.values["hdr"]
-            x, y = self.values["pixel_hdr"] if hdr else self.values["pixel"]
-            exp = tuple(self.values["color_hdr"] if hdr else self.values["color"])
-            got = ctx.get_pixel(int(x), int(y))
-            tol = self.values["tolerance"]
-            in_game = all(abs(g - e) <= tol for g, e in zip(got, exp))
-        self.live = {"active": active, "in_game": in_game}
-        return {"in_game": in_game, "active": active}
+        hdr = self.values["hdr"]
+        x, y = self.values["pixel_hdr"] if hdr else self.values["pixel"]
+        exp = tuple(self.values["color_hdr"] if hdr else self.values["color"])
+        got = ctx.get_pixel(int(x), int(y))
+        tol = self.values["tolerance"]
+        pixel_ok = all(abs(g - e) <= tol for g, e in zip(got, exp))
+        self.live = {"active": active, "pixel_ok": pixel_ok}
+        return {"active": active, "pixel_ok": pixel_ok}
 
 
 # ==================== 模板匹配（单/多模板）====================

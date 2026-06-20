@@ -41,7 +41,7 @@ def run_with_stubs(build, stub_map: dict, dry_run=True) -> tuple[list[str], Exec
 
 
 HAPPY = {
-    "win": {"in_game": True, "active": True},
+    "win": {"active": True, "pixel_ok": True},
     "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02, "state": "未遮挡"},
     "vill": {"found": False, "confidence": 0.05, "which": -1},
     "pop": {"value": 50, "value2": 200, "ok": True},     # 50/200 -> 空位 150
@@ -101,7 +101,7 @@ def main() -> None:
     # ==================== 市场出商队 ====================
     print("== 市场出商队：正常路径（黄金充足，单一市场）==")
     tc_stub = {
-        "win": {"in_game": True, "active": True},
+        "win": {"active": True, "pixel_ok": True},
         "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02},
         "vill": {"found": False, "confidence": 0.05, "which": -1},
         "pop": {"value": 50, "value2": 200, "ok": True},
@@ -115,7 +115,7 @@ def main() -> None:
 
     # ==================== 金朝双出农 ====================
     JIN = {
-        "win": {"in_game": True, "active": True},
+        "win": {"active": True, "pixel_ok": True},
         "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02},
         "vill": {"found": False, "confidence": 0.05, "which": -1},  # 村民+乡骑均不在队列
         "pop": {"value": 50, "value2": 200, "ok": True},
@@ -135,7 +135,7 @@ def main() -> None:
 
     # ==================== 统一生产（含各段开关）====================
     COMBINED = {
-        "win": {"in_game": True, "active": True},
+        "win": {"active": True, "pixel_ok": True},
         "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02},
         "q_vill": {"found": False, "in_transition": False, "which": -1},
         "q_xq": {"found": False, "in_transition": False, "which": -1},

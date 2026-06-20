@@ -55,6 +55,7 @@ def build_single_type(cfg: dict) -> Graph:
     add("mod", "sense.modifier_down")          # 检测是否按住修饰键（按住＝人在手动操作）
     add("if_mod", "control.if")                # 按住则暂停（真分支不接＝结束本帧），否则继续
     add("win", "sense.window_check", {"pixel": cfg["win_pixel"], "color": cfg["win_color"]})
+    add("and_win", "logic.and")    # 窗口激活 且 像素点检测通过 = 确实在游戏中
     add("if_win", "control.if")
 
     # —— 队列占用状态 ——
@@ -141,7 +142,9 @@ def build_single_type(cfg: dict) -> Graph:
 
     # ==================== 数据流 ====================
     g.connect_data("mod", "down", "if_mod", "cond")
-    g.connect_data("win", "in_game", "if_win", "cond")
+    g.connect_data("win", "active", "and_win", "a")
+    g.connect_data("win", "pixel_ok", "and_win", "b")
+    g.connect_data("and_win", "result", "if_win", "cond")
     g.connect_data("occ", "blocked", "if_blocked", "cond")
     g.connect_data("occ", "in_transition", "or_trans", "a")
     g.connect_data("vill", "in_transition", "or_trans", "b")
