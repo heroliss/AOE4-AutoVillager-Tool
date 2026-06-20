@@ -1826,12 +1826,15 @@ const ED = (function () {
   // “修饰键被按下”），否则退而用“接到分支条件的那个检测节点”的标题，保持一句话、简短直白。
   function branchStopReason(term) {
     const note = (term._note || "").trim();
-    if (note) return note;
+    if (note) {                            // 约定：节点描述写成「短原因：详细…」——日志只取冒号/句号前那句短原因，一眼可读
+      const lead = note.split(/[：:。\n]/)[0].trim();
+      if (lead) return lead.length > 18 ? lead.slice(0, 18) + "…" : lead;
+    }
     const ci = (term.inputs || []).findIndex((p) => p.name === "cond");
     if (ci >= 0 && term.inputs[ci].link != null && graph) {
       const l = graph.links[term.inputs[ci].link];
       const src = l && graph.getNodeById(l.origin_id);
-      if (src) return "「" + (src.title || "条件") + "」未通过";
+      if (src) return "「" + (src.title || "条件") + "」" + (runPorts[term._id] === "true" ? "成立" : "不成立");
     }
     return "卡在「" + (term.title || "分支") + "」";
   }
@@ -1843,7 +1846,7 @@ const ED = (function () {
     const execOuts = (term.outputs || []).filter((o) => o.type === "exec");
     if (execOuts.length >= 2)              // 停在判断分支 = 这轮被它拦下、没执行后续操作
       return { level: "INFO", msg: "本轮未操作 · " + branchStopReason(term) };
-    return { level: "INFO", msg: "本轮已执行操作" };
+    return { level: "INFO", msg: "本轮已完成一轮" };
   }
   function applyTrace(t) {
     if (!t) return;
