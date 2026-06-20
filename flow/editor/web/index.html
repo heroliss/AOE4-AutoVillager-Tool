@@ -74,11 +74,15 @@
   #panel select { max-width: 160px; }
   #panel .ploc { cursor: pointer; font-size: 12px; opacity: 0.5; }
   #panel .ploc:hover { opacity: 1; }
-  /* 运行日志面板：试运行时从底部弹出，显示引擎日志（哪个节点说了什么） */
+  /* 日志面板与画布间的拖拽分隔条：上下拖动改变日志高度 */
+  #logresize { flex: none; display: none; height: 7px; cursor: ns-resize; background: var(--line); }
+  #logresize:hover { background: var(--accent); }
+  /* 运行日志面板：试运行时从底部弹出，显示引擎日志（哪个节点说了什么）。文本可选中复制。 */
   #logpanel { flex: none; display: none; height: 150px; overflow-y: auto; background: #15181e;
-           border-top: 1px solid var(--line); padding: 6px 10px; font: 12px/1.5 Consolas, monospace; }
+           border-top: 1px solid var(--line); padding: 6px 10px; font: 12px/1.5 Consolas, monospace;
+           user-select: text; -webkit-user-select: text; cursor: auto; }
   #logpanel .lp-head { color: var(--fg-dim); position: sticky; top: -6px; background: #15181e;
-           padding: 2px 0 4px; display: flex; align-items: center; gap: 8px; }
+           padding: 2px 0 4px; display: flex; align-items: center; gap: 8px; user-select: none; }
   #logpanel .lp-row { white-space: pre-wrap; word-break: break-word; }
   #logpanel .lv-INFO { color: #bcd; } #logpanel .lv-WARN { color: #e6c07b; }
   #logpanel .lv-ERROR { color: #ff9a9a; } #logpanel .lp-tick { color: #6c727c; }
@@ -118,6 +122,7 @@
   </div>
   <div id="panel"></div>
   <div id="wrap"><canvas id="graph"></canvas></div>
+  <div id="logresize" title="拖动调整日志高度"></div>
   <div id="logpanel"></div>
   <div id="toast"></div>
 

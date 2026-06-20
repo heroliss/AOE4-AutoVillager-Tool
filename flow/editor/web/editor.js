@@ -1406,9 +1406,14 @@ const ED = (function () {
     ctx.fillText(text, x + 6, y + 0.5);
     ctx.restore();
   }
+  // 与 LiteGraph SPLINE_LINK 完全一致的贝塞尔控制点：输出在右、输入在左，
+  // 偏移量 = 两端点欧氏距离 × 0.25（LiteGraph: distance(a,b)*0.25）。这样高亮/流动曲线与底层连线严丝合缝。
+  function linkCtrlPts(pa, pb) {
+    const d = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) * 0.25;
+    return [[pa[0] + d, pa[1]], [pb[0] - d, pb[1]]];
+  }
   function drawFlowWire(ctx, p0, p1) {
-    const dx = Math.max(30, Math.abs(p1[0] - p0[0]) * 0.3);
-    const c0 = [p0[0] + dx, p0[1]], c1 = [p1[0] - dx, p1[1]];
+    const cc = linkCtrlPts(p0, p1), c0 = cc[0], c1 = cc[1];
     const bez = (t) => { const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
       return [a * p0[0] + b * c0[0] + c * c1[0] + d * p1[0], a * p0[1] + b * c0[1] + c * c1[1] + d * p1[1]]; };
     ctx.save();
@@ -1488,12 +1493,13 @@ const ED = (function () {
       const pa = A.getConnectionPos(false, l.origin_slot, _t0);
       const pb = B.getConnectionPos(true, l.target_slot, _t1);
       const col = isExec ? "#7CFF9B" : "#6fe0ff";
-      if (!isExec) {                                   // 活动数据线：淡青高亮
+      if (!isExec) {                                   // 活动数据线：青色高亮，曲线与底层连线完全重合并盖住它
+        const cc = linkCtrlPts(pa, pb);
         ctx.save();
-        ctx.strokeStyle = "rgba(111,224,255,0.55)"; ctx.lineWidth = 2.5;
-        const dx = Math.max(30, Math.abs(pb[0] - pa[0]) * 0.3);
+        ctx.strokeStyle = "rgba(111,224,255,0.92)"; ctx.lineWidth = 5;   // 底层连线宽 3，这里 5px 完全覆盖
+        ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
-        ctx.bezierCurveTo(pa[0] + dx, pa[1], pb[0] - dx, pb[1], pb[0], pb[1]); ctx.stroke();
+        ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], pb[0], pb[1]); ctx.stroke();
         ctx.restore();
       }
       lightPort(ctx, [pa[0], pa[1]], col);   // 输出端
@@ -1540,6 +1546,8 @@ const ED = (function () {
     if (stop) stop.disabled = !runSession;
     const lp = document.getElementById("logpanel");
     if (lp) lp.style.display = runSession ? "block" : "none";
+    const lr = document.getElementById("logresize");
+    if (lr) lr.style.display = runSession ? "block" : "none";
   }
   // —— 运行日志面板：增量追加，避免每帧重建整面板（800 行 × 4fps 的 DOM 抖动是“一分钟后变卡”的元凶之一）——
   const LOG_CAP = 800;
@@ -1567,15 +1575,36 @@ const ED = (function () {
     d.rows.innerHTML = h;
     d.lp.scrollTop = d.lp.scrollHeight;
   }
-  function appendLogRows(rows) {    // 每帧只追加本帧新增行（前台时才动 DOM）
+  function appendLogRows(rows) {    // 每帧只追加本帧新增行，不重建整面板
     const d = ensureLogDom(); if (!d) return;
+    // 用户若上滚查看/选中文本，则不强行拽回底部（贴底时才自动跟随）
+    const atBottom = d.lp.scrollTop + d.lp.clientHeight >= d.lp.scrollHeight - 6;
     if (rows && rows.length) {
       let h = ""; for (const l of rows) h += logRowHTML(l);
       d.rows.insertAdjacentHTML("beforeend", h);
       while (d.rows.childElementCount > LOG_CAP) d.rows.removeChild(d.rows.firstChild);
     }
     d.head.innerHTML = logHeadHTML();
-    d.lp.scrollTop = d.lp.scrollHeight;
+    if (atBottom) d.lp.scrollTop = d.lp.scrollHeight;
+  }
+  // 拖动日志面板与画布间的分隔条改变日志高度（向上拖变高）
+  function setupLogResize() {
+    const bar = document.getElementById("logresize"), lp = document.getElementById("logpanel");
+    if (!bar || !lp) return;
+    let dragging = false, startY = 0, startH = 0;
+    bar.addEventListener("pointerdown", (e) => {
+      dragging = true; startY = e.clientY; startH = lp.offsetHeight || 150;
+      try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+      e.preventDefault();
+    });
+    bar.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      lp.style.height = Math.max(60, Math.min(window.innerHeight - 160, startH + (startY - e.clientY))) + "px";
+      if (canvas) canvas.resize();   // 画布跟随调整尺寸
+    });
+    const end = (e) => { if (dragging) { dragging = false; try { bar.releasePointerCapture(e.pointerId); } catch (_) {} } };
+    bar.addEventListener("pointerup", end);
+    bar.addEventListener("pointercancel", end);
   }
   async function ensureRunSession() {
     if (runSession) return true;
@@ -2070,6 +2099,7 @@ const ED = (function () {
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）
       canvas.onDrawForeground = drawRunOverlay;   // 在所有节点之上画“试运行”高亮/数据/连线流动
       setupHelpPanel();
+      setupLogResize();
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
       graph.onConnectionChange = scheduleSnap;
       graph.onNodeAdded = scheduleSnap;

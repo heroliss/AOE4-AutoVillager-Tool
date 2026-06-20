@@ -42,6 +42,7 @@ class ExecutionContext:
         self._region_cache: dict[tuple, Any] = {}
         self._full_frame = None                 # 按帧：整屏截图缓存
         self._full_origin = (0, 0)
+        self._sct = None                        # 本帧 mss 实例（当前线程自建、帧末关闭，见 _capture_sct）
 
         self._block_active = False              # 输入屏蔽是否生效中
         self._lock_held = False                 # 文件锁是否持有中
@@ -63,6 +64,22 @@ class ExecutionContext:
             self.block_input_stop()
         if self._lock_held:
             self.release_lock()
+        if self._sct is not None:               # 本帧 mss 实例当帧关闭：与创建在同一线程，释放 GDI/内存，不泄漏
+            try:
+                self._sct.close()
+            except Exception:
+                pass
+            self._sct = None
+
+    def _capture_sct(self):
+        """本帧用的 mss 实例：在【当前线程】惰性创建，帧末 cleanup_tick 关闭。
+        不能跨线程复用——Windows 下 mss 的 GDI DC 有线程亲和性，跨线程 grab 会 BitBlt 失败；
+        也不能用 thread-local 缓存——pywebview 每次 js_api 调用都换线程，旧实例随死线程滞留、
+        每帧泄漏整屏位图。每帧“同线程创建+关闭”：既不跨线程、又当帧释放 GDI/内存，不泄漏。"""
+        if self._sct is None:
+            import mss
+            self._sct = mss.mss()
+        return self._sct
 
     # ==================== 记忆缓存（执行器使用）====================
     def memo_has(self, key: tuple) -> bool:
@@ -94,11 +111,10 @@ class ExecutionContext:
         """整屏截图并缓存（按帧只抓一次）。之后 capture_region 会直接切片复用。"""
         if self._full_frame is None:
             import numpy as np
-            from screenshot_util import get_sct, grab
-            sct = get_sct()
+            sct = self._capture_sct()   # 当前线程自建、帧末关闭，避免 pywebview 换线程导致的泄漏/BitBlt 失败
             mon = sct.monitors[1]  # 主显示器
             self._full_origin = (mon["left"], mon["top"])
-            shot = grab(mon)       # 共享实例 + 锁：不再每帧新建 mss、泄漏整屏位图
+            shot = sct.grab(mon)
             self._full_frame = np.array(shot)[:, :, :3]  # BGRA -> BGR
         return self._full_frame
 
@@ -113,9 +129,11 @@ class ExecutionContext:
             left, top, right, bottom = region
             img = self._full_frame[top - oy:bottom - oy, left - ox:right - ox]
         else:
-            from screenshot_util import capture_region_np
+            import numpy as np
+            sct = self._capture_sct()   # 同上：本帧自有 mss，不走 thread-local（会随 pywebview 线程泄漏）
             left, top, right, bottom = region
-            img = capture_region_np(left, top, right, bottom)
+            shot = sct.grab({"left": left, "top": top, "width": right - left, "height": bottom - top})
+            img = np.array(shot)[:, :, :3]  # BGRA -> BGR
         self._region_cache[key] = img
         return img
 
