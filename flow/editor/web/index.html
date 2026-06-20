@@ -82,6 +82,10 @@
   #panel select { max-width: 160px; }
   #panel .ploc { cursor: pointer; font-size: 12px; opacity: 0.5; }
   #panel .ploc:hover { opacity: 1; }
+  /* 控制面板项的拖动柄（仅编辑模式显示）：拖动可调整顺序 */
+  #panel .pgrip { cursor: grab; color: var(--fg-dim); font-size: 12px; user-select: none; margin-right: 1px; }
+  #panel .pgrip:active { cursor: grabbing; }
+  #panel .pitem.dragging { opacity: 0.45; }
   /* 日志面板与画布间的拖拽分隔条：上下拖动改变日志高度 */
   #logresize { flex: none; display: none; height: 7px; cursor: ns-resize; background: var(--line); }
   #logresize:hover { background: var(--accent); }

@@ -17,6 +17,7 @@ const ED = (function () {
   let panelPins = [];
   // 记住每个参数填过的“面板显示名”（键= nodeId|key）：取消勾选不丢，重新勾选自动回填；清空文本即“手动删除”。
   let pinLabels = {};
+  let _panelDrag = null;                        // 控制面板项拖动调序：正在拖的项 "nodeId|key"（仅编辑模式）
   // 可视化分组：[{title, color, members:[ourNodeId...]}]，框随成员节点自动包裹（仅展示，随流程保存）。
   let groupDefs = [];
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
@@ -1361,6 +1362,18 @@ const ED = (function () {
     return wrap;
   }
 
+  // 拖动调序：把 src 项移到 dst 项的位置（顺序就是 panelPins 顺序 → 随流程保存）。仅编辑模式调用。
+  function reorderPanel(srcPk, dstPk) {
+    if (!srcPk || srcPk === dstPk) return;
+    const idx = (pk) => panelPins.findIndex((p) => p[0] + "|" + p[1] === pk);
+    const si = idx(srcPk);
+    if (si < 0) return;
+    const [m] = panelPins.splice(si, 1);
+    let di = idx(dstPk);                 // 删除后重新定位目标，插到它前面
+    if (di < 0) di = panelPins.length;
+    panelPins.splice(di, 0, m);
+    renderPanel(); scheduleSnap(); refreshDirty();
+  }
   function renderPanel() {
     const el = document.getElementById("panel");
     if (!el) return;
@@ -1382,6 +1395,19 @@ const ED = (function () {
       const w = (node.widgets || []).find((x) => x._key === key);
       if (!w) continue;
       const item = document.createElement("span"); item.className = "pitem";
+      item.dataset.pk = nid + "|" + key;
+      if (!simpleMode) {                 // 编辑模式：左侧小拖柄，拖动可调整该项在面板里的顺序（随流程保存）
+        const grip = document.createElement("span");
+        grip.className = "pgrip"; grip.textContent = "⠿"; grip.title = "拖动调整顺序"; grip.draggable = true;
+        grip.addEventListener("dragstart", (e) => {
+          _panelDrag = item.dataset.pk; item.classList.add("dragging");
+          try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", _panelDrag); } catch (_) {}
+        });
+        grip.addEventListener("dragend", () => { item.classList.remove("dragging"); _panelDrag = null; });
+        item.appendChild(grip);
+        item.addEventListener("dragover", (e) => { if (_panelDrag) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} } });
+        item.addEventListener("drop", (e) => { e.preventDefault(); reorderPanel(_panelDrag, item.dataset.pk); });
+      }
       const lab = document.createElement("label");
       lab.textContent = panelLabel(node, key);
       // 悬停才显示节点描述（描述可能很长，平时不占地方）
