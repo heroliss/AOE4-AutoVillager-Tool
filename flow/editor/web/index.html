@@ -27,6 +27,10 @@
              flex: none; white-space: nowrap; transition: background .12s, border-color .12s; }
   #toolbar button:hover, #toolbar select:hover { background: var(--btn-h); border-color: #4a5260; }
   #toolbar button:active { background: #2a303a; transform: translateY(1px); }
+  #toolbar button:disabled { opacity: .45; cursor: default; }
+  #toolbar button.accent { background: #2f6b3f; border-color: #3f8a52; color: #eafff0; }
+  #toolbar button.accent:hover { background: #357a48; }
+  #toolbar button.accent.running { background: #8a5a2f; border-color: #b07a3f; }
   #toolbar button:focus-visible, #toolbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #toolbar select { max-width: 220px; }
   #toolbar .sep { flex: none; width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
@@ -70,6 +74,15 @@
   #panel select { max-width: 160px; }
   #panel .ploc { cursor: pointer; font-size: 12px; opacity: 0.5; }
   #panel .ploc:hover { opacity: 1; }
+  /* 运行日志面板：试运行时从底部弹出，显示引擎日志（哪个节点说了什么） */
+  #logpanel { flex: none; display: none; height: 150px; overflow-y: auto; background: #15181e;
+           border-top: 1px solid var(--line); padding: 6px 10px; font: 12px/1.5 Consolas, monospace; }
+  #logpanel .lp-head { color: var(--fg-dim); position: sticky; top: -6px; background: #15181e;
+           padding: 2px 0 4px; display: flex; align-items: center; gap: 8px; }
+  #logpanel .lp-row { white-space: pre-wrap; word-break: break-word; }
+  #logpanel .lv-INFO { color: #bcd; } #logpanel .lv-WARN { color: #e6c07b; }
+  #logpanel .lv-ERROR { color: #ff9a9a; } #logpanel .lp-tick { color: #6c727c; }
+  #logpanel .lp-clear { cursor: pointer; color: #7fb0ee; }
   /* 滚动条：细、暗，融入主题 */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: #3a414c; border-radius: 6px; border: 2px solid transparent;
@@ -85,6 +98,13 @@
     <button onclick="ED.open()">打开</button>
     <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="" disabled selected>打开内置流程…</option></select>
     <span class="sep"></span>
+    <button id="runbtn" class="accent" onclick="ED.toggleRun()">▶ 试运行</button>
+    <button onclick="ED.step()" title="只跑一帧">单步</button>
+    <button id="stopbtn" onclick="ED.stopRun()" disabled>停止</button>
+    <select id="runspeed" onchange="ED.setSpeed(this.value)" title="运行速度（每帧间隔）">
+      <option value="600">慢</option><option value="250" selected>中</option><option value="80">快</option>
+    </select>
+    <span class="sep"></span>
     <button onclick="ED.autolayout()">自动排版</button>
     <button onclick="ED.fit()">适应窗口</button>
     <span class="sep"></span>
@@ -98,6 +118,7 @@
   </div>
   <div id="panel"></div>
   <div id="wrap"><canvas id="graph"></canvas></div>
+  <div id="logpanel"></div>
   <div id="toast"></div>
 
   <script src="vendor/litegraph.js"></script>

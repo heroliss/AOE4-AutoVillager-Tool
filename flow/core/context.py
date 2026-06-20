@@ -74,6 +74,10 @@ class ExecutionContext:
     def memo_set(self, key: tuple, value: Any) -> None:
         self._memo[key] = value
 
+    def memo_snapshot(self) -> dict:
+        """本帧已解析的数据输出 (node_id, port) -> value 的拷贝（供编辑器“运行可视化”显示数据线上的值）。"""
+        return dict(self._memo)
+
     # ==================== 日志 / 实时状态 ====================
     def log(self, level: str, message: str, node_id: Optional[str] = None) -> None:
         if self._on_log:

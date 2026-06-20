@@ -85,7 +85,7 @@ class Executor:
             node_id = target[0] if target else None
 
     # ==================== 主循环（headless 用）====================
-    def run(self, ctx: ExecutionContext, interval: float = 0.1, max_ticks: Optional[int] = None) -> None:
+    def run(self, ctx: ExecutionContext, interval: float = 0.1, max_ticks: Optional[int] = None) -> None:  # noqa: D401
         count = 0
         while not ctx.cancel:
             start = time.time()
@@ -96,3 +96,44 @@ class Executor:
             remaining = interval - (time.time() - start)
             if remaining > 0:
                 time.sleep(remaining)
+
+
+class TraceExecutor(Executor):
+    """带“执行轨迹记录”的执行器：供编辑器“运行可视化”用——记录本帧实际经过了哪些执行节点、
+    各自走了哪个出口。数据线上的值则在帧结束后从 ctx.memo_snapshot() 读取。"""
+
+    def __init__(self, graph: Graph) -> None:
+        super().__init__(graph)
+        self.trace_path: list[str] = []        # 本帧按顺序经过的执行节点 id
+        self.trace_ports: dict[str, str] = {}  # node_id -> 选择的出口名
+
+    def run_tick(self, ctx: ExecutionContext, dt: float = 0.0) -> None:
+        self.trace_path = []
+        self.trace_ports = {}
+        super().run_tick(ctx, dt)
+
+    def _walk(self, ctx: ExecutionContext) -> None:
+        node_id: Optional[str] = self.graph.entry_id()
+        guard = 0
+        max_steps = len(self.graph.nodes) * 4 + 16
+
+        while node_id is not None:
+            guard += 1
+            if guard > max_steps:
+                ctx.log("ERROR", f"执行步数超过上限({max_steps})，疑似存在环，已中断本帧")
+                break
+
+            node = self.graph.nodes[node_id]
+            inputs = self._resolve_inputs(ctx, node_id, node)
+            outputs, next_port = node.execute(ctx, inputs)
+            self.trace_path.append(node_id)
+            if next_port is not None:
+                self.trace_ports[node_id] = next_port
+
+            for out_name, val in outputs.items():
+                ctx.memo_set((node_id, out_name), val)
+
+            if next_port is None:
+                break
+            target = self.graph.exec_target(node_id, next_port)
+            node_id = target[0] if target else None

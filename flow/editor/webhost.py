@@ -20,6 +20,26 @@ from typing import Optional
 
 from ..core import Graph, create_node, registry
 from ..core.types import PortKind
+from ..core.context import ExecutionContext
+from ..core.executor import TraceExecutor
+
+
+def _fmt_value(v):
+    """把数据线上的值变成可在前端显示的简短形式（图像/大对象不直接传）。"""
+    if v is None or isinstance(v, (bool, int, float)):
+        return v
+    if isinstance(v, str):
+        return v if len(v) <= 48 else v[:48] + "…"
+    if isinstance(v, (list, tuple)):
+        items = [_fmt_value(x) for x in list(v)[:8]]
+        return {"_list": items, "_more": max(0, len(v) - 8)}
+    if hasattr(v, "shape"):                     # numpy 图像/数组
+        try:
+            return "<图像 " + "×".join(str(d) for d in v.shape[:2]) + ">"
+        except Exception:
+            return "<图像>"
+    s = str(v)
+    return s if len(s) <= 48 else s[:48] + "…"
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 # 内置流程目录（只读模板，随程序分发）与 用户自定义流程目录（用户的另存到这里）。
@@ -207,6 +227,11 @@ class Api:
         self._graph: Optional[Graph] = None
         self._path: Optional[str] = None
         self._dirty = False        # 前端镜像过来的“有未保存修改”，关闭窗口时据此弹确认
+        # —— 编辑器内“运行可视化”（干跑：只读屏/识别、不发按键鼠标），由前端逐帧轮询驱动 ——
+        self._run_graph: Optional[Graph] = None
+        self._run_ctx: Optional[ExecutionContext] = None
+        self._run_exec: Optional[TraceExecutor] = None
+        self._run_logs: list = []
 
     def get_defs(self):
         return node_defs()
@@ -214,6 +239,66 @@ class Api:
     def set_dirty(self, flag):
         """前端在 ●未保存 状态变化时调用，使关闭窗口能弹保存确认。"""
         self._dirty = bool(flag)
+        return True
+
+    # ==================== 运行可视化（干跑，逐帧）====================
+    def run_begin(self, payload):
+        """用当前编辑器里的图开一次“试运行”（干跑：不发按键/鼠标，只做识别与逻辑）。"""
+        self._run_graph = payload_to_graph(payload)
+        self._run_logs = []
+
+        def _log(level, message, node_id=None):
+            self._run_logs.append({"level": level, "msg": message, "node": node_id})
+
+        self._run_ctx = ExecutionContext(on_log=_log, dry_run=True)
+        self._run_exec = TraceExecutor(self._run_graph)
+        return {"ok": True, "nodes": len(self._run_graph.nodes)}
+
+    def run_update(self, payload):
+        """运行中热更新参数：就地改已存在节点的取值（保留节点内部状态/黑板/帧序号）。"""
+        if not self._run_graph:
+            return False
+        by_id = {nd["id"]: nd for nd in payload.get("nodes", [])}
+        for nid, node in self._run_graph.nodes.items():
+            nd = by_id.get(nid)
+            if not nd:
+                continue
+            specs = {s.key: s for s in node.params}
+            for k, v in (nd.get("params") or {}).items():
+                if k in specs:
+                    node.values[k] = _param_from_js(specs[k], v)
+        return True
+
+    def run_tick(self):
+        """跑一帧，返回执行轨迹 + 数据线上的值 + 本帧日志。前端据此高亮/显示。"""
+        if not (self._run_exec and self._run_ctx):
+            return None
+        before = len(self._run_logs)
+        try:
+            self._run_exec.run_tick(self._run_ctx, dt=0.0)
+        except Exception as e:  # 单帧异常不致命：报到日志，让前端继续/停止
+            self._run_logs.append({"level": "ERROR", "msg": f"运行异常：{e}", "node": None})
+        memo = self._run_ctx.memo_snapshot()
+        data = {}
+        for (nid, port), val in memo.items():
+            data[f"{nid}{port}"] = _fmt_value(val)   # \x01 分隔，避免端口名里有点
+        return {
+            "tick": self._run_ctx.tick_index,
+            "path": list(self._run_exec.trace_path),
+            "ports": dict(self._run_exec.trace_ports),
+            "data": data,
+            "logs": self._run_logs[before:],
+        }
+
+    def run_end(self):
+        """结束试运行：清理可能持有的输入屏蔽/锁（干跑下只是清标记）。"""
+        if self._run_ctx:
+            try:
+                self._run_ctx.cleanup_tick()
+            except Exception:
+                pass
+        self._run_graph = self._run_ctx = self._run_exec = None
+        self._run_logs = []
         return True
 
     def _payload(self, graph):

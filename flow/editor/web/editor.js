@@ -19,6 +19,9 @@ const ED = (function () {
   let groupDefs = [];
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
+  // —— 试运行（干跑）可视化状态 ——
+  let running = false, runSession = false, runTimer = null, runSpeed = 250;
+  let runPath = new Set(), runPorts = {}, runData = {}, runLogs = [];
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
@@ -415,6 +418,18 @@ const ED = (function () {
     }
     return out;
   }
+  // 试运行时数据端口旁的小值标签
+  function drawValuePill(ctx, x, y, text) {
+    ctx.save();
+    ctx.font = "11px Consolas, monospace";
+    const tw = ctx.measureText(text).width;
+    roundRect(ctx, x, y - 8, tw + 10, 16, 4);
+    ctx.fillStyle = "#10202e"; ctx.globalAlpha = 0.96; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#3a6f8a"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = "#bfe3ff"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillText(text, x + 5, y + 0.5);
+    ctx.restore();
+  }
   function roundRect(ctx, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -632,7 +647,37 @@ const ED = (function () {
     }
     // 节点的分组归属用“标题栏底色”表达（见 applyGroupColors）；组名只在分组框的标签页上显示一次，
     // 不在每个节点上重复，避免同名标签堆叠、保持简洁。
-    // ② 附属卡片
+    // ② 试运行可视化：经过的节点发亮边框；走过的执行出口画绿点；数据输出端口旁标出当前值。
+    if (runSession) {
+      const def = defByType[this._typeId];
+      if (runPath.has(this._id)) {
+        ctx.save();
+        const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
+        ctx.strokeStyle = "#7ad0ff"; ctx.lineWidth = 2.5;
+        ctx.shadowColor = "#7ad0ff"; ctx.shadowBlur = 12;
+        roundRect(ctx, -2, -th - 2, this.size[0] + 4, this.size[1] + th + 4, 8);
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (def) {
+        const tmp = [0, 0];
+        (def.outputs || []).forEach((p, i) => {
+          let lx, ly;
+          try { const ap = this.getConnectionPos(false, i, tmp); lx = ap[0] - this.pos[0]; ly = ap[1] - this.pos[1]; }
+          catch (e) { return; }
+          if (p.kind === "exec") {
+            if (runPorts[this._id] === p.name) {   // 本帧走的执行出口：画个绿点
+              ctx.save(); ctx.fillStyle = "#7CFF9B";
+              ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+            }
+            return;
+          }
+          const key = this._id + "" + p.name;
+          if (key in runData) drawValuePill(ctx, lx + 6, ly, fmtRunVal(runData[key]));
+        });
+      }
+    }
+    // ③ 附属卡片
     const note = this._note || "";
     const paths = nodePreviewPaths(this);
     if (!note && !paths.length) return;
@@ -1100,6 +1145,12 @@ const ED = (function () {
   }
 
   function load(flow, opts) {
+    // 载入新流程前先停掉试运行（除非是自动排版那种“原地刷新”——keepHistory 标记）
+    if (runSession && !(opts && opts.keepHistory)) {
+      running = false; clearTimeout(runTimer);
+      try { api().run_end(); } catch (e) {}
+      runSession = false; runPath = new Set(); runPorts = {}; runData = {}; setRunUI();
+    }
     const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
     const keepHistory = !!(opts && opts.keepHistory);   // 自动排版：保留撤销历史（这样排版可被 Ctrl+Z 撤销）
     flowMeta = {
@@ -1360,7 +1411,93 @@ const ED = (function () {
     return true;                       // 已保存 或 选择不保存
   }
 
+  // ============ 试运行（干跑）：逐帧轮询引擎，画出走过的节点 + 数据线上的值 + 日志 ============
+  function fmtRunVal(v) {
+    if (v === null || v === undefined) return "—";
+    if (v === true) return "真"; if (v === false) return "假";
+    if (typeof v === "number") return Number.isInteger(v) ? String(v) : (Math.round(v * 1000) / 1000) + "";
+    if (typeof v === "object" && v._list) {
+      let s = v._list.map(fmtRunVal).join(", ");
+      if (v._more) s += ", +" + v._more;
+      return "[" + s + "]";
+    }
+    return String(v);
+  }
+  function setRunUI() {
+    const btn = document.getElementById("runbtn"), stop = document.getElementById("stopbtn");
+    if (btn) { btn.textContent = running ? "⏸ 暂停" : (runSession ? "▶ 继续" : "▶ 试运行"); btn.classList.toggle("running", running); }
+    if (stop) stop.disabled = !runSession;
+    const lp = document.getElementById("logpanel");
+    if (lp) lp.style.display = runSession ? "block" : "none";
+  }
+  function renderLog() {
+    const lp = document.getElementById("logpanel");
+    if (!lp) return;
+    let h = `<div class="lp-head">运行日志（干跑：只识别、不发按键鼠标）· ${runLogs.length} 条 ` +
+            `<span class="lp-clear" onclick="ED.clearLog()">清空</span></div>`;
+    for (const l of runLogs)
+      h += `<div class="lp-row"><span class="lp-tick">[${l.tick}]</span> <span class="lv-${esc(l.level)}">${esc(l.msg)}</span></div>`;
+    lp.innerHTML = h;
+    lp.scrollTop = lp.scrollHeight;
+  }
+  async function ensureRunSession() {
+    if (runSession) return true;
+    try {
+      const r = await api().run_begin(collect());
+      runSession = !!(r && r.ok);
+      runLogs = []; renderLog();
+      return runSession;
+    } catch (e) { showError("启动试运行失败：" + (e && (e.stack || e.message) || e)); return false; }
+  }
+  function applyTrace(t) {
+    if (!t) return;
+    runPath = new Set(t.path || []);
+    runPorts = t.ports || {};
+    runData = t.data || {};
+    for (const l of (t.logs || [])) runLogs.push({ tick: t.tick, level: l.level, msg: l.msg, node: l.node });
+    if (runLogs.length > 800) runLogs = runLogs.slice(-800);
+    renderLog();
+    setStatus(`试运行 · 第 ${t.tick} 帧 · 经过 ${(t.path || []).length} 个节点`);
+    if (canvas) canvas.setDirty(true, true);
+  }
+  async function runOneTick() {
+    if (!(await ensureRunSession())) return;
+    let t;
+    try { t = await api().run_tick(); }
+    catch (e) { showError("运行失败：" + (e && (e.stack || e.message) || e)); pauseRun(); return; }
+    applyTrace(t);
+  }
+  function runLoop() {
+    if (!running) return;
+    runOneTick().finally(() => { if (running) runTimer = setTimeout(runLoop, runSpeed); });
+  }
+  async function startRun() {
+    if (running) return;
+    if (!(await ensureRunSession())) return;
+    running = true; setRunUI();
+    runLoop();
+  }
+  function pauseRun() { running = false; clearTimeout(runTimer); setRunUI(); }
+  function toggleRun() { if (running) pauseRun(); else startRun(); }
+  async function stepRun() {
+    pauseRun();
+    if (!(await ensureRunSession())) return;
+    await runOneTick();
+    setRunUI();
+  }
+  async function stopRun() {
+    running = false; clearTimeout(runTimer);
+    if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
+    runPath = new Set(); runPorts = {}; runData = {};
+    setRunUI();
+    if (canvas) canvas.setDirty(true, true);
+    setStatus("已停止试运行");
+  }
+
   const self = {
+    toggleRun, step: stepRun, stopRun,
+    setSpeed(v) { runSpeed = +v || 250; },
+    clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {
         const p = await api().save(collect());
@@ -1691,6 +1828,7 @@ const ED = (function () {
     // 选中的节点参数有改动时，同步刷新右下角“已修改”列表（橙点本就实时随重绘更新）
     if (selectedNode && helpEl && helpEl.style.display !== "none") showNodeHelp(selectedNode);
     renderPanel();   // 面板控件值与节点保持同步
+    if (runSession) { try { api().run_update(collect()); } catch (e) {} }   // 试运行中：参数热更新到引擎
   }
   function scheduleSnap() { clearTimeout(snapTimer); snapTimer = setTimeout(snapshotNow, 250); }
   function applySnapshot(s) {
