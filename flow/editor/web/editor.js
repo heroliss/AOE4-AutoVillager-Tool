@@ -1412,6 +1412,22 @@ const ED = (function () {
     const d = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) * 0.25;
     return [[pa[0] + d, pa[1]], [pb[0] - d, pb[1]]];
   }
+  // 执行路径终点的“结束”端帽：红点 + 标签，画在走到头节点选中的那个出口上。
+  function drawEndCap(ctx, p) {
+    ctx.save();
+    ctx.fillStyle = "#ff5d5d"; ctx.shadowColor = "#ff5d5d"; ctx.shadowBlur = 10;   // 端口上的红色实心点
+    ctx.beginPath(); ctx.arc(p[0], p[1], 5, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    const text = "⏹ 结束", x = p[0] + 12, y = p[1];
+    ctx.font = "bold 12px 'Microsoft YaHei', sans-serif";
+    const tw = ctx.measureText(text).width;
+    roundRect(ctx, x, y - 9, tw + 12, 18, 5);
+    ctx.fillStyle = "#7a1f1f"; ctx.fill();                                          // 暗红底
+    ctx.strokeStyle = "#ff8a8a"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = "#ffd8d8"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillText(text, x + 6, y + 0.5);
+    ctx.restore();
+  }
   function drawFlowWire(ctx, p0, p1) {
     const cc = linkCtrlPts(p0, p1), c0 = cc[0], c1 = cc[1];
     const bez = (t) => { const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
@@ -1515,6 +1531,16 @@ const ED = (function () {
         const ap = n.getConnectionPos(false, i, _t0);
         drawValPill(ctx, ap[0] + 12, ap[1], runData[key]);
       });
+    }
+    // ⑥ 本帧执行“走到头”的节点：在它选中的那个出口上标“结束”，让终点一目了然
+    //    （选了某个分支但没接下游 → 流程在此中断；这条最容易被忽略，用红色端帽点明）。
+    if (runPathArr.length) {
+      const termNode = byId.get(runPathArr[runPathArr.length - 1]);
+      if (termNode) {
+        let oi = outSlotIndex(termNode, runPorts[termNode._id]);   // 优先：本帧实际选中的出口
+        if (oi < 0) oi = (termNode.outputs || []).findIndex((o) => o.type === "exec");  // 否则：第一个执行出口
+        if (oi >= 0) drawEndCap(ctx, termNode.getConnectionPos(false, oi, _t0));
+      }
     }
   }
 
