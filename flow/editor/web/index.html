@@ -111,8 +111,8 @@
   #logpanel .lp-row.lv-ERROR .lp-dot { color: #ff7a7a; } #logpanel .lp-row.lv-ERROR .lp-msg { color: #ff9a9a; font-weight: bold; }
   #logpanel .lp-clear { cursor: pointer; color: #7fb0ee; }
   #logpanel .lp-clear:hover { text-decoration: underline; }
-  /* —— 资源监控小窗：画布右下角常驻迷你曲线 + 简要数字，点击展开详情/配置（放在画布内，运行时随日志面板上移、不被遮）—— */
-  #sysmon { position: absolute; bottom: 10px; right: 10px; z-index: 60; display: flex; flex-direction: column;
+  /* —— 资源监控：迷你小窗在画布【右上角】常驻，点击展开右下角详情（两者分处不同角，互不遮挡）—— */
+  #sysmon { position: absolute; top: 10px; right: 10px; z-index: 60; display: flex; flex-direction: column;
             gap: 2px; background: #1d212bdd; border: 1px solid var(--line); border-radius: 8px;
             padding: 5px 8px 4px; cursor: pointer; opacity: .82; user-select: none;
             transition: opacity .15s, border-color .15s; box-shadow: 0 3px 12px #0006; }
@@ -184,6 +184,7 @@
       <canvas id="sd-cpuchart"></canvas>
       <div class="sd-row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="sd-mem">--</b></div>
       <canvas id="sd-memchart"></canvas>
+      <div class="sd-row"><span style="color:#e6a06a">游戏 CPU / 内存</span><span class="spacer"></span><b id="sd-game">--</b></div>
       <div class="sd-row"><span style="color:#8b929e">系统 CPU / 可用内存</span><span class="spacer"></span><b id="sd-sys">--</b></div>
       <div class="sd-cfg">
         采样间隔 <input id="sd-interval" type="number" min="200" max="10000" step="100"> ms<br>

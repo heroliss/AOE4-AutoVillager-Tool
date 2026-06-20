@@ -1969,7 +1969,7 @@ const ED = (function () {
   // 维护环形缓冲画曲线。轮询是唯一的常驻定时器，无 DOM 抖动，不影响试运行性能。
   const SYS_DOT = "#2a2f38";
   let sysCfg = { interval: 1000, minutes: 5 };       // 采样间隔(ms) / 保留时长(分钟)
-  let sysHist = { cpu: [], mem: [] }, sysLast = null, sysTimer = null, sysDetailOpen = false;
+  let sysHist = { cpu: [], mem: [], gcpu: [], gmem: [] }, sysLast = null, sysTimer = null, sysDetailOpen = false;
   function sysCap() { return Math.max(30, Math.round(sysCfg.minutes * 60000 / sysCfg.interval)); }
   function sysLoadCfg() {
     try {
@@ -1980,11 +1980,11 @@ const ED = (function () {
   }
   function sysSaveCfg() { try { localStorage.setItem("flow.sysmon", JSON.stringify(sysCfg)); } catch (e) {} }
   function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(2) + " GB" : Math.round(mb) + " MB"; }
-  // 在画布上画一条填充折线（data 为数值数组，maxv 为纵轴上限）
-  function drawSeries(cv, data, maxv, color, fill) {
+  // 在画布上画一条填充折线（data 为数值数组，maxv 为纵轴上限）。noClear=true 用于在同一图上叠第二条线。
+  function drawSeries(cv, data, maxv, color, fill, noClear) {
     if (!cv) return;
     const ctx = cv.getContext("2d"), w = cv.width, h = cv.height;
-    ctx.clearRect(0, 0, w, h);
+    if (!noClear) ctx.clearRect(0, 0, w, h);
     if (!data.length) return;
     const n = data.length, dx = n > 1 ? w / (n - 1) : w, top = 2, bot = h - 2;
     const y = (v) => bot - Math.max(0, Math.min(1, v / maxv)) * (bot - top);
@@ -1998,8 +1998,10 @@ const ED = (function () {
     }
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.stroke();
   }
-  function memMax() {                              // 内存纵轴上限：随峰值动态抬升，至少 256MB，留 20% 余量
-    let m = 256; for (const v of sysHist.mem) if (v > m) m = v;
+  function memMax() {                              // 内存纵轴上限：随峰值动态抬升（本工具+游戏），至少 256MB，留 20% 余量
+    let m = 256;
+    for (const v of sysHist.mem) if (v > m) m = v;
+    for (const v of sysHist.gmem) if (v > m) m = v;
     return Math.ceil(m * 1.2 / 64) * 64;
   }
   function drawSysMini() {
@@ -2021,11 +2023,18 @@ const ED = (function () {
   function drawSysDetail() {
     if (!sysDetailOpen || !sysLast) return;
     syncDetailCanvasSize();                        // 跟随窗口尺寸（CSS 拉伸）对齐位图，曲线才清晰
-    drawSeries(document.getElementById("sd-cpuchart"), sysHist.cpu, 100, "#7fb0ee", "#7fb0ee22");
-    drawSeries(document.getElementById("sd-memchart"), sysHist.mem, memMax(), "#6fcf97", "#6fcf9722");
+    const mm = memMax();
+    const cpuCv = document.getElementById("sd-cpuchart"), memCv = document.getElementById("sd-memchart");
+    drawSeries(cpuCv, sysHist.cpu, 100, "#7fb0ee", "#7fb0ee22");          // 本工具 CPU（蓝）
+    drawSeries(cpuCv, sysHist.gcpu, 100, "#e6a06a", null, true);          // 游戏 CPU（橙，叠加）
+    drawSeries(memCv, sysHist.mem, mm, "#6fcf97", "#6fcf9722");           // 本工具 内存（绿）
+    drawSeries(memCv, sysHist.gmem, mm, "#e6a06a", null, true);          // 游戏 内存（橙，叠加）
     const set = (id, txt) => { const e = document.getElementById(id); if (e) e.textContent = txt; };
-    set("sd-cpu", sysLast.tool_cpu + "%  （整机 " + sysLast.ncpu + " 核）");
-    set("sd-mem", fmtMB(sysLast.tool_mem) + "  （峰值上限 " + fmtMB(memMax()) + "）");
+    set("sd-cpu", sysLast.tool_cpu + "%  （整机 " + sysLast.ncpu + " 核 · 蓝线）");
+    set("sd-mem", fmtMB(sysLast.tool_mem) + "  （峰值上限 " + fmtMB(mm) + "）");
+    set("sd-game", sysLast.game_running
+      ? (sysLast.game_cpu + "%  /  " + fmtMB(sysLast.game_mem) + "（橙线）")
+      : "未运行");
     set("sd-sys", sysLast.sys_cpu + "%  /  " + fmtMB(sysLast.sys_avail) + " 可用");
   }
   // 详情画布是 CSS 拉伸的，绘制前把位图尺寸对齐显示尺寸，曲线才不糊
@@ -2044,8 +2053,8 @@ const ED = (function () {
       sysLast = s;
       const cap = sysCap();
       sysHist.cpu.push(s.tool_cpu); sysHist.mem.push(s.tool_mem);
-      while (sysHist.cpu.length > cap) sysHist.cpu.shift();
-      while (sysHist.mem.length > cap) sysHist.mem.shift();
+      sysHist.gcpu.push(s.game_cpu || 0); sysHist.gmem.push(s.game_mem || 0);
+      for (const k of ["cpu", "mem", "gcpu", "gmem"]) while (sysHist[k].length > cap) sysHist[k].shift();
       drawSysMini();
       drawSysDetail();
     }
@@ -2069,17 +2078,15 @@ const ED = (function () {
         sysCfg.minutes = Math.max(1, Math.min(120, parseInt(wn.value) || 5));
         wn.value = sysCfg.minutes; sysSaveCfg();
         const cap = sysCap();                                     // 收紧时立即裁掉超出的历史
-        while (sysHist.cpu.length > cap) sysHist.cpu.shift();
-        while (sysHist.mem.length > cap) sysHist.mem.shift();
+        for (const k of ["cpu", "mem", "gcpu", "gmem"]) while (sysHist[k].length > cap) sysHist[k].shift();
       };
     }
     sysPoll();
   }
   function toggleSysMon() {
     sysDetailOpen = !sysDetailOpen;
-    const d = document.getElementById("sysdetail"), m = document.getElementById("sysmon");
-    if (d) d.classList.toggle("show", sysDetailOpen);
-    if (m) m.style.display = sysDetailOpen ? "none" : "flex";
+    const d = document.getElementById("sysdetail");
+    if (d) d.classList.toggle("show", sysDetailOpen);   // 迷你窗在右上角常驻不隐藏；详情在右下角独立开合
     if (sysDetailOpen) { syncDetailCanvasSize(); drawSysDetail(); }
   }
 

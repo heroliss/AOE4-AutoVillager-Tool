@@ -283,6 +283,8 @@ class Api:
         self._pending_logs: list = []        # 自上次轮询以来的新日志（取走即清）
         self._bp_hit: Optional[str] = None   # 本次暂停命中的断点节点（供前端提示）
         self._sysmon_proc = None             # 资源监控：缓存本进程的 psutil.Process（cpu_percent 需要复用同一对象建基准）
+        self._sysmon_game = {}               # 游戏进程监控：pid -> psutil.Process（找到即缓存复用，省 process_iter）
+        self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
 
     def get_defs(self):
         return node_defs()
@@ -308,10 +310,35 @@ class Api:
             tool_cpu = self._sysmon_proc.cpu_percent(None) / ncpu   # 归一到「占整机」0~100%
             tool_mem = self._sysmon_proc.memory_info().rss / 1048576.0
             vm = psutil.virtual_memory()
+            # —— 游戏进程 CPU/内存（沿用经典版：按 exe 名匹配 AOE4，缓存进程对象复用）——
+            game_names = ("ageofempires4.exe", "age4_x64.exe", "reliccardinal.exe")
+            now = time.time()
+            if now - self._sysmon_game_scan > 2.0:   # 每~2s 重扫一次新进程；已知的继续复用，避免每次 process_iter
+                self._sysmon_game_scan = now
+                known = set(self._sysmon_game)
+                for pr in psutil.process_iter(["name"]):
+                    try:
+                        if (pr.info.get("name") or "").lower() in game_names and pr.pid not in known:
+                            pr.cpu_percent(None)            # 预热：首次返回 0
+                            self._sysmon_game[pr.pid] = pr
+                    except Exception:
+                        pass
+            game_cpu, game_mem, alive = 0.0, 0.0, {}
+            for pid, pr in self._sysmon_game.items():
+                try:
+                    game_cpu += pr.cpu_percent(None) / ncpu
+                    game_mem += pr.memory_info().rss / 1048576.0
+                    alive[pid] = pr
+                except Exception:
+                    pass                                    # 进程已退出 → 丢弃
+            self._sysmon_game = alive
             return {
                 "ok": True,
                 "tool_cpu": round(tool_cpu, 1),
                 "tool_mem": round(tool_mem, 1),
+                "game_cpu": round(game_cpu, 1),
+                "game_mem": round(game_mem, 1),
+                "game_running": bool(alive),
                 "sys_cpu": round(psutil.cpu_percent(None), 1),
                 "sys_used_pct": round(vm.percent, 1),
                 "sys_avail": round(vm.available / 1048576.0, 1),
