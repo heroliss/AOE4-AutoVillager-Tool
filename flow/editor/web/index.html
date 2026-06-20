@@ -31,13 +31,9 @@
   #toolbar button.accent { background: #2f6b3f; border-color: #3f8a52; color: #eafff0; }
   #toolbar button.accent:hover { background: #357a48; }
   #toolbar button.accent.running { background: #8a5a2f; border-color: #b07a3f; }
-  /* 真跑：开关与按钮用红色强提示，提醒此时会真的发输入 */
+  /* 真跑（运行）主按钮：空闲时用红色强提示，提醒点下去会真的发输入 */
   #toolbar button.danger { background: #8a2f2f; border-color: #b04a4a; color: #ffe9e9; }
   #toolbar button.danger:hover { background: #a03636; }
-  #realrun-wrap { display: flex; align-items: center; gap: 4px; color: var(--fg); font-size: 12px;
-                  flex: none; cursor: pointer; user-select: none; padding: 0 4px; }
-  #realrun-wrap input { cursor: pointer; }
-  #realrun:checked + span { color: #ff7a7a; font-weight: bold; }
   #realbanner { position: absolute; left: 50%; top: 48px; transform: translateX(-50%); display: none;
                 background: #7a1f1f; color: #ffe0e0; border: 1px solid #ff6a6a; border-radius: 8px;
                 padding: 6px 16px; font-size: 13px; font-weight: bold; z-index: 210;
@@ -114,12 +110,10 @@
     <button onclick="ED.open()">打开</button>
     <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="" disabled selected>打开内置流程…</option></select>
     <span class="sep"></span>
-    <button id="runbtn" class="accent" onclick="ED.toggleRun()">▶ 试运行</button>
-    <button onclick="ED.step()" title="只跑一帧">单步</button>
+    <button id="runbtn" class="accent" onclick="ED.toggleRun()" title="运行：真正向游戏发送按键/鼠标（开始前会二次确认）">▶ 运行</button>
+    <button id="dryrunbtn" onclick="ED.dryRun()" title="试运行（干跑）：只识别、不发送任何输入，用于调试">试运行</button>
+    <button id="stepbtn" onclick="ED.step()" title="只跑一帧（默认干跑调试）">单步</button>
     <button id="stopbtn" onclick="ED.stopRun()" disabled>停止</button>
-    <label id="realrun-wrap" title="勾选后“试运行”变为真跑：真正向游戏发送按键/鼠标（开始前会二次确认）">
-      <input type="checkbox" id="realrun" onchange="ED.setReal(this.checked)"> <span>真跑</span>
-    </label>
     <span class="sep"></span>
     <button onclick="ED.autolayout()">自动排版</button>
     <button onclick="ED.fit()">适应窗口</button>

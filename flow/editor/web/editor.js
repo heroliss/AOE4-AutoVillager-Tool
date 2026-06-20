@@ -1622,16 +1622,15 @@ const ED = (function () {
   function stopRunAnim() { if (runAnimRAF) cancelAnimationFrame(runAnimRAF); runAnimRAF = null; }
 
   function setRunUI() {
-    const btn = document.getElementById("runbtn"), stop = document.getElementById("stopbtn");
-    const startLabel = realRun ? "▶ 真跑" : "▶ 试运行";
+    const btn = document.getElementById("runbtn"), stop = document.getElementById("stopbtn"),
+          dry = document.getElementById("dryrunbtn");
     if (btn) {
-      btn.textContent = running ? "⏸ 暂停" : (runSession ? "▶ 继续" : startLabel);
+      btn.textContent = running ? "⏸ 暂停" : (runSession ? "▶ 继续" : "▶ 运行");
       btn.classList.toggle("running", running);
-      btn.classList.toggle("danger", realRun && !running);   // 真跑用红色按钮提示
+      btn.classList.toggle("danger", !running && !runSession);   // 空闲时主按钮＝真跑，红色提示点下去会发输入
     }
     if (stop) stop.disabled = !runSession;
-    const rr = document.getElementById("realrun");
-    if (rr) { rr.disabled = runSession; rr.checked = realRun; }   // 会话进行中不可切换干跑/真跑
+    if (dry) dry.disabled = runSession;     // 会话进行/暂停中不能再起一个干跑
     const lp = document.getElementById("logpanel");
     if (lp) lp.style.display = runSession ? "block" : "none";
     const lr = document.getElementById("logresize");
@@ -1794,9 +1793,19 @@ const ED = (function () {
     setStatus("运行到此节点…（命中即暂停）");
     if (!running) startRun(); else setRunUI();
   }
-  function toggleRun() { if (running) pauseRun(); else startRun(); }
+  function toggleRun() {                 // 主按钮：默认真跑（向游戏发输入，开始前二次确认）
+    if (running) { pauseRun(); return; }
+    if (!runSession) realRun = true;     // 新会话＝真跑；暂停中点「继续」则沿用原会话模式
+    startRun();
+  }
+  function dryRun() {                     // 次按钮：试运行（干跑，只识别不发输入）
+    if (runSession) return;              // 已有会话时按钮已禁用，这里兜底
+    realRun = false;
+    startRun();
+  }
   async function stepRun() {
     pauseRun();
+    if (!runSession) realRun = false;    // 单步默认干跑调试；已在某会话中则沿用该会话模式
     if (!(await ensureRunSession())) return;
     await runOneTick();
     setRunUI();
@@ -1807,12 +1816,11 @@ const ED = (function () {
     runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set();
     setRunUI();
     if (canvas) canvas.setDirty(true, true);
-    setStatus("已停止试运行");
+    setStatus("已停止运行");
   }
 
   const self = {
-    toggleRun, step: stepRun, stopRun,
-    setReal(v) { if (runSession) { const rr = document.getElementById("realrun"); if (rr) rr.checked = realRun; return; } realRun = !!v; setRunUI(); },
+    toggleRun, dryRun, step: stepRun, stopRun,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {
@@ -2122,10 +2130,12 @@ const ED = (function () {
       "上方标出组名，框也会自动包住它们。一个节点只属于一个组。<br>" +
       "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
-      "<b style='color:#e6c07b'>试运行（干跑调试）</b>　顶部 ▶试运行 / 单步 / 停止 + 速度<br>" +
-      "· 干跑只识别、<b>不发按键鼠标</b>，安全；走过的节点高亮、连线流动、出口显示数据值、底部出日志。<br>" +
-      "· 执行<b>走到头</b>的出口标「⏹ 结束」——一眼看出本帧从哪停的（含选了某分支但没接下游）。<br>" +
-      "· <b>断点</b>：右键节点→「设为断点 🔴」，连续运行命中它就自动暂停；「运行到此节点 ⏭」= 跑到它再停。<br>" +
+      "<b style='color:#e6c07b'>运行 / 试运行</b>　顶部 <b style='color:#ff8a8a'>▶运行</b>(真跑) / 试运行(干跑) / 单步 / 停止<br>" +
+      "· <b style='color:#ff8a8a'>运行＝真跑</b>：<b>真正向游戏发按键/鼠标</b>，点下去会二次确认，运行中顶部有红色提示条。<br>" +
+      "· <b>试运行＝干跑</b>：只识别、<b>不发任何输入</b>，安全；走过的节点高亮、连线流动、出口显示数据值、底部出日志。<br>" +
+      "· 每帧间隔＝流程「每帧触发」节点的「循环间隔(秒)」(面板可调)；单步默认按干跑只跑一帧。<br>" +
+      "· 走过的<b>分支</b>节点标「真/假」=走了哪条线；执行<b>走到头</b>的出口标「⏹ 结束」(出口空接=本帧到此)。<br>" +
+      "· <b>断点</b>：右键节点→「设为断点 🔴」，运行命中它就自动暂停；「运行到此节点 ⏭」= 跑到它再停。<br>" +
       "· 底部日志可<b>拖上边沿调高度</b>、可<b>选中复制</b>；上滚查看时不会被新日志拽回底部。</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>在游戏画面上直接采集</b>（节点里相应参数下方的按钮）<br>" +
