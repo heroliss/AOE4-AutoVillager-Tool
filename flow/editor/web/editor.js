@@ -1422,6 +1422,22 @@ const ED = (function () {
     const d = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) * 0.25;
     return [[pa[0] + d, pa[1]], [pb[0] - d, pb[1]]];
   }
+  // 分支结果小标签：画在“本帧实际走的那个出口”上，标明这一支走了真/假（成功/占用…）。
+  // 它只是把“沿哪条连线走的”显式标出来——并没有任何“跳过”的特殊操作，全是节点+连线。
+  function drawBranchTag(ctx, p, label, pname) {
+    const yes = (pname === "true" || pname === "ok" || pname === "due");
+    const bg = yes ? "#1f8a47" : "#9a4a2f", fg = yes ? "#eafff0" : "#ffe7d8";
+    ctx.save();
+    ctx.font = "bold 11px 'Microsoft YaHei', sans-serif";
+    const tw = ctx.measureText(label).width;
+    const x = p[0] + 12, y = p[1] - 13;          // 端口右上方，避开端口光点与数据值标签
+    roundRect(ctx, x, y - 8, tw + 10, 16, 4);
+    ctx.fillStyle = bg; ctx.fill();
+    ctx.strokeStyle = "#0006"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = fg; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillText(label, x + 5, y);
+    ctx.restore();
+  }
   // 执行路径终点的“结束”端帽：红点 + 标签，画在走到头节点选中的那个出口上。
   function drawEndCap(ctx, p) {
     ctx.save();
@@ -1557,10 +1573,24 @@ const ED = (function () {
         drawValPill(ctx, ap[0] + 12, ap[1], runData[key]);
       });
     }
-    // ⑥ 本帧执行“走到头”的节点：在它选中的那个出口上标“结束”，让终点一目了然
+    // ⑥ 走过的“分支/多出口”节点：在它本帧实际走的那个出口上标结果（真/假、成功/占用…）。
+    //    我们的逻辑全是节点+连线：开关为“假”时，只是沿“假”这条线走到作者接的下一个节点（这里接到下一段入口），
+    //    并不存在“跳过”这种特殊操作。标出真/假，只是让“到底沿哪条线走的”一目了然。终点除外(它有 ⏹ 结束)。
+    const termId = runPathArr.length ? runPathArr[runPathArr.length - 1] : null;
+    for (const id of runPathArr) {
+      if (id === termId) continue;                       // 终点节点交给 ⑦ 的“结束”端帽
+      const n = byId.get(id); if (!n) continue;
+      const execOuts = (n.outputs || []).filter((o) => o.type === "exec");
+      if (execOuts.length < 2) continue;                 // 只标“有分叉”的节点（如「分支」/获取锁/定时门）
+      const pname = runPorts[id]; if (!pname) continue;
+      const oi = outSlotIndex(n, pname); if (oi < 0) continue;
+      const out = n.outputs[oi];
+      drawBranchTag(ctx, n.getConnectionPos(false, oi, _t0), (out && out.label) || pname, pname);
+    }
+    // ⑦ 本帧执行“走到头”的节点：在它选中的那个出口上标“结束”，让终点一目了然
     //    （选了某个分支但没接下游 → 流程在此中断；这条最容易被忽略，用红色端帽点明）。
-    if (runPathArr.length) {
-      const termNode = byId.get(runPathArr[runPathArr.length - 1]);
+    if (termId) {
+      const termNode = byId.get(termId);
       if (termNode) {
         let oi = outSlotIndex(termNode, runPorts[termNode._id]);   // 优先：本帧实际选中的出口
         if (oi < 0) oi = (termNode.outputs || []).findIndex((o) => o.type === "exec");  // 否则：第一个执行出口

@@ -135,6 +135,8 @@ def build_combined_graph() -> Graph:
 
     # ==================== 可视化分组：把三段(+共享/收尾)框起来，一眼看清结构 ====================
     g.groups = [
+        # 资源/识别类传感器都放“共享前段”：每帧只识别一次、多段按需拉取（人口/空位、食物、黄金、TC），
+        # 放一起对齐、视觉一致（食物虽只村民用，但与其它资源对齐更清楚）。
         {"title": "共享前段（每帧一次）", "color": "#4a8a8a",
          "members": ["tick", "mod", "if_mod", "win", "if_win", "occ", "if_blocked", "if_trans",
                      "prefetch", "pop", "slots", "food", "gold", "tc",
