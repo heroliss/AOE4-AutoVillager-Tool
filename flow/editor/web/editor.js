@@ -24,6 +24,7 @@ const ED = (function () {
   let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let runAnimRAF = null, runPhase = 0, _runAnimLast = 0;   // 动画（脉冲发光 / 连线流动）
+  const RUNSEP = String.fromCharCode(1);        // run_tick 里 data 的键 = nodeId + RUNSEP + port（与 Python \x01 一致）
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
@@ -1426,6 +1427,20 @@ const ED = (function () {
     const ch = (n.flags && n.flags.collapsed) ? 0 : cardHeightOf(n, ctx);
     return [n.pos[0], n.pos[1] - th, n.size[0], n.size[1] + th + ch];
   }
+  // 点亮“本帧活动”的端口：呼吸光环 + 实心亮点 + 白圈，明显区别于普通“已连线但未激活”的端口小点。
+  function lightPort(ctx, p, color) {
+    const pulse = 0.5 + 0.5 * Math.sin(runPhase * 3.0);
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.45 - 0.28 * pulse;                       // 外圈呼吸光环
+    ctx.beginPath(); ctx.arc(p[0], p[1], 9 + 4 * pulse, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = color; ctx.shadowBlur = 14;                // 实心点 + 强光晕
+    ctx.beginPath(); ctx.arc(p[0], p[1], 5.5, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.lineWidth = 2; ctx.strokeStyle = "#ffffff";   // 白圈（与普通端口点拉开差距）
+    ctx.beginPath(); ctx.arc(p[0], p[1], 5.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
   function drawRunOverlay(ctx) {
     if (!runSession || !graph) return;
     const nodes = graph._nodes || [];
@@ -1458,25 +1473,44 @@ const ED = (function () {
       roundRect(ctx, n.pos[0] - 2, n.pos[1] - th - 2, n.size[0] + 4, n.size[1] + th + 4, 9); ctx.stroke();
       ctx.restore();
     }
-    // ④ 数据输出值（彩色标签）+ 走过的执行出口（绿点）
+    // ④ 点亮“本帧活动”的连线两端端口（输入+输出都醒目）：执行=绿、数据=青；
+    //    活动数据线再描一条淡青高亮（执行线已有流动点），与“已连线但未激活”的端口拉开差距。
+    for (const k in (graph.links || {})) {
+      const l = graph.links[k]; if (!l) continue;
+      const A = graph.getNodeById(l.origin_id), B = graph.getNodeById(l.target_id);
+      if (!A || !B) continue;
+      const oslot = A.outputs && A.outputs[l.origin_slot]; if (!oslot) continue;
+      const isExec = oslot.type === "exec";
+      const on = isExec ? (runPath.has(A._id) && runPorts[A._id] === oslot.name)
+                        : ((A._id + RUNSEP + oslot.name) in runData);
+      if (!on) continue;
+      const pa = A.getConnectionPos(false, l.origin_slot, _t0);
+      const pb = B.getConnectionPos(true, l.target_slot, _t1);
+      const col = isExec ? "#7CFF9B" : "#6fe0ff";
+      if (!isExec) {                                   // 活动数据线：淡青高亮
+        ctx.save();
+        ctx.strokeStyle = "rgba(111,224,255,0.55)"; ctx.lineWidth = 2.5;
+        const dx = Math.max(30, Math.abs(pb[0] - pa[0]) * 0.3);
+        ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
+        ctx.bezierCurveTo(pa[0] + dx, pa[1], pb[0] - dx, pb[1], pb[0], pb[1]); ctx.stroke();
+        ctx.restore();
+      }
+      lightPort(ctx, [pa[0], pa[1]], col);   // 输出端
+      lightPort(ctx, [pb[0], pb[1]], col);   // 输入端
+    }
+    // ⑤ 数据输出值（彩色标签）
     for (const n of nodes) {
       const def = defByType[n._typeId]; if (!def) continue;
       (def.outputs || []).forEach((p, i) => {
-        if (p.kind === "exec") {
-          if (runPath.has(n._id) && runPorts[n._id] === p.name) {
-            const ap = n.getConnectionPos(false, i, _t0);
-            ctx.save(); ctx.fillStyle = "#7CFF9B"; ctx.shadowColor = "#7CFF9B"; ctx.shadowBlur = 9;
-            ctx.beginPath(); ctx.arc(ap[0], ap[1], 4.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-          }
-          return;
-        }
-        const key = n._id + "" + p.name;
+        if (p.kind === "exec") return;
+        const key = n._id + RUNSEP + p.name;
         if (!(key in runData)) return;
         const ap = n.getConnectionPos(false, i, _t0);
-        drawValPill(ctx, ap[0] + 8, ap[1], runData[key]);
+        drawValPill(ctx, ap[0] + 12, ap[1], runData[key]);
       });
     }
   }
+
   function startRunAnim() {
     if (runAnimRAF) return;
     const step = (ts) => {
