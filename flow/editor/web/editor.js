@@ -490,27 +490,37 @@ const ED = (function () {
   }
   // 补画 LiteGraph 漏掉的“汇入同一入口”的执行连线：它的 drawConnections 每个输入口只画 input.link 那一条，
   // 而我们允许 exec 输入多条汇入(见 vendor 改动)，这里把其余 exec 连线按相同样条补上，保证都可见。
+  const EXEC_FANIN_PAL = ["#e6a23c", "#9b8cff", "#5ad1a0", "#e36a9e", "#5ab0e6"];  // 汇入线配色，便于分清
   function drawExtraExecLinks(ctx) {
     if (!graph) return;
     const links = graph.links || {};
+    // 按“目标入口”分组：同一入口的多条汇入线分别配色 + 纵向错开弯曲，避免挤在一起分不清。
+    const byTarget = {};
     for (const k in links) {
       const l = links[k];
       if (!l || l.type !== "exec") continue;
       const b = graph.getNodeById(l.target_id);
       if (!b || !b.inputs || !b.inputs[l.target_slot]) continue;
-      if (b.inputs[l.target_slot].link === l.id) continue;     // 这条 LiteGraph 已画，跳过避免重叠
-      const a = graph.getNodeById(l.origin_id);
-      if (!a || !a.outputs || !a.outputs[l.origin_slot]) continue;
-      let pa, pb;
-      try { pa = a.getConnectionPos(false, l.origin_slot, [0, 0]); pb = b.getConnectionPos(true, l.target_slot, [0, 0]); }
-      catch (e) { continue; }
-      const cc = linkCtrlPts([pa[0], pa[1]], [pb[0], pb[1]]);
-      ctx.save();
-      ctx.strokeStyle = "#8b94a3"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
-      ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], pb[0], pb[1]); ctx.stroke();
-      ctx.restore();
+      if (b.inputs[l.target_slot].link === l.id) continue;     // 这条 LiteGraph 已画
+      const key = l.target_id + "" + l.target_slot;
+      (byTarget[key] = byTarget[key] || []).push(l);
     }
+    ctx.save();
+    for (const key in byTarget) {
+      byTarget[key].forEach((l, j) => {
+        const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
+        if (!a || !b || !a.outputs || !a.outputs[l.origin_slot]) return;
+        let pa, pb;
+        try { pa = a.getConnectionPos(false, l.origin_slot, [0, 0]); pb = b.getConnectionPos(true, l.target_slot, [0, 0]); }
+        catch (e) { return; }
+        const cc = linkCtrlPts([pa[0], pa[1]], [pb[0], pb[1]]);
+        const bow = ((j % 2 === 0) ? 1 : -1) * (Math.floor(j / 2) + 1) * 24;   // 交错上下弯，错开各条线
+        ctx.strokeStyle = EXEC_FANIN_PAL[j % EXEC_FANIN_PAL.length]; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
+        ctx.bezierCurveTo(cc[0][0], cc[0][1] + bow, cc[1][0], cc[1][1] + bow, pb[0], pb[1]); ctx.stroke();
+      });
+    }
+    ctx.restore();
   }
   function drawGroups(ctx) {
     drawExtraExecLinks(ctx);     // 先补画 LiteGraph 漏掉的“汇入”执行连线（与分组无关，总要画）
