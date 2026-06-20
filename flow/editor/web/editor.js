@@ -26,6 +26,7 @@ const ED = (function () {
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
   let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
   let simpleMode = false;                       // 使用模式：折叠节点图，只留控制面板+运行+日志（成品工具视图）
+  let _lastRunStatus = "";                       // 上一条“本轮结果/原因”状态，变化时才记日志，避免刷屏
   let runAnimRAF = null, runPhase = 0, _runAnimLast = 0;   // 动画（脉冲发光 / 连线流动）
   const RUNSEP = String.fromCharCode(1);        // run_tick 里 data 的键 = nodeId + RUNSEP + port（与 Python \x01 一致）
   // 撤销/重做（快照式）
@@ -518,7 +519,7 @@ const ED = (function () {
     groupDefs.forEach((g, i) => {
       const box = groupBox(g, ctx);
       if (!box) return;
-      const [x, y, w, h] = box, col = groupColor(g, i), name = g.title || "分组";
+      const [x, y, w, h] = box, col = groupColor(g, i), name = groupTabText(g);
       roundRect(ctx, x, y, w, h, 10);
       ctx.fillStyle = col + "22"; ctx.fill();          // 半透明填充
       ctx.strokeStyle = col + "cc"; ctx.lineWidth = 2; ctx.stroke();
@@ -1752,7 +1753,7 @@ const ED = (function () {
     try {
       const r = await api().run_begin(collect(), realRun);
       runSession = !!(r && r.ok);
-      runLogs = []; renderLog();
+      runLogs = []; _lastRunStatus = ""; renderLog();
       if (runSession) startRunAnim();   // 启动脉冲/流动动画
       updateRealBanner();
       return runSession;
@@ -1792,6 +1793,18 @@ const ED = (function () {
         return Math.max(0, (parseFloat(n.properties.interval) || 0) * 1000);
     return 100;
   }
+  // 用“本帧走到头的节点”说明这一轮的结果/原因，给正式运行时的用户看懂当前状态。
+  function runStatusLine() {
+    if (!runPathArr.length) return null;
+    const term = nodeByOurId(runPathArr[runPathArr.length - 1]);
+    if (!term) return null;
+    const execOuts = (term.outputs || []).filter((o) => o.type === "exec");
+    if (execOuts.length >= 2) {            // 在某个检查分支处走到头 = 这轮被它拦下，没执行操作
+      const note = (term._note || "").trim();
+      return { level: "INFO", msg: "⏸ 本轮未操作 · " + (note || ("卡在「" + (term.title || "分支") + "」")) };
+    }
+    return { level: "INFO", msg: "✅ 本轮执行了操作（选建筑→排队→恢复选择）" };
+  }
   function applyTrace(t) {
     if (!t) return;
     runPathArr = t.path || [];
@@ -1800,6 +1813,8 @@ const ED = (function () {
     runData = t.data || {};
     runDataNodes = new Set(Object.keys(runData).map((k) => k.split("")[0]));
     const added = (t.logs || []).map((l) => ({ tick: t.tick, level: l.level, msg: l.msg, node: l.node }));
+    const st = runStatusLine();   // 合成“本轮结果/为什么没动作”，变化时才记一行，避免刷屏
+    if (st && st.msg !== _lastRunStatus) { _lastRunStatus = st.msg; added.push({ tick: t.tick, level: st.level, msg: st.msg }); }
     for (const l of added) runLogs.push(l);
     if (runLogs.length > LOG_CAP) runLogs.splice(0, runLogs.length - LOG_CAP);   // 原地裁剪，免得每帧新建长数组
     appendLogRows(added);                          // 增量追加本帧新增日志行（不再每帧重建整面板）
@@ -2299,6 +2314,49 @@ const ED = (function () {
     }
   }
 
+  // —— 拖动“分组标签页”整体移动组内节点（可拖区域只有那个小标签，避免误触画布/节点）——
+  let _groupDrag = null;
+  function _measCtx() { return (canvas && canvas.canvas) ? canvas.canvas.getContext("2d") : null; }
+  function groupTabRect(g) {
+    const ctx = _measCtx(); if (!ctx) return null;
+    const box = groupBox(g, ctx); if (!box) return null;
+    ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
+    const tw = ctx.measureText(groupTabText(g)).width;
+    return [box[0], box[1] - 18, tw + 18, 20];   // 与 drawGroups 标签页几何一致
+  }
+  function onGroupDragDown(e) {
+    if (e.button !== 0 || !graph || !canvas) return;
+    let off; try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
+    if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;   // 在节点上交给 LiteGraph
+    for (let i = 0; i < groupDefs.length; i++) {
+      const r = groupTabRect(groupDefs[i]); if (!r) continue;
+      if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        const members = (groupDefs[i].members || []).map(nodeByOurId).filter(Boolean);
+        _groupDrag = { last: off, members, moved: false };
+        window.addEventListener("pointermove", onGroupDragMove, true);
+        window.addEventListener("pointerup", onGroupDragUp, true);
+        return;
+      }
+    }
+  }
+  function onGroupDragMove(e) {
+    if (!_groupDrag) return;
+    let off; try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
+    const dx = off[0] - _groupDrag.last[0], dy = off[1] - _groupDrag.last[1];
+    if (dx || dy) {
+      for (const n of _groupDrag.members) { n.pos[0] += dx; n.pos[1] += dy; }
+      _groupDrag.last = off; _groupDrag.moved = true;
+      if (canvas) canvas.setDirty(true, true);
+    }
+  }
+  function onGroupDragUp() {
+    window.removeEventListener("pointermove", onGroupDragMove, true);
+    window.removeEventListener("pointerup", onGroupDragUp, true);
+    if (_groupDrag && _groupDrag.moved) scheduleSnap();
+    _groupDrag = null;
+  }
+
   function start() {
     try {
       setupColors();
@@ -2336,6 +2394,7 @@ const ED = (function () {
       canvas.onNodeMoved = scheduleSnap;
       // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
       canvas.canvas.addEventListener("pointerdown", onRightDown, true);
+      canvas.canvas.addEventListener("pointerdown", onGroupDragDown, true);   // 左键拖“分组标签页”整体移动该组
       // 兜底：任何鼠标交互结束后尝试快照（snapshotNow 用 JSON 比对去重，无变化不入栈）
       canvas.canvas.addEventListener("pointerup", scheduleSnap);
       // Ctrl+Z 撤销 / Ctrl+Y 或 Ctrl+Shift+Z 重做（编辑输入框内已 stopPropagation，不会误触）
