@@ -13,8 +13,10 @@ const ED = (function () {
   let booted = false;
   // 当前流程的元信息：名称/说明/文件路径/是否内置只读（保存时内置会被改为另存）
   let flowMeta = { name: "", desc: "", path: null, readonly: false };
-  // 控制面板置顶项：有序的 [nodeId, paramKey]（随流程保存）。
+  // 控制面板置顶项：有序的 [nodeId, paramKey, 自定义显示名?]（随流程保存）。
   let panelPins = [];
+  // 记住每个参数填过的“面板显示名”（键= nodeId|key）：取消勾选不丢，重新勾选自动回填；清空文本即“手动删除”。
+  let pinLabels = {};
   // 可视化分组：[{title, color, members:[ourNodeId...]}]，框随成员节点自动包裹（仅展示，随流程保存）。
   let groupDefs = [];
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
@@ -209,6 +211,9 @@ const ED = (function () {
       return _origDisOut.apply(this, arguments);
     };
 
+    // 去掉“节点折叠”功能：折叠后运行高亮(金框/端口)的几何没适配、价值也不大，统一禁用（点折叠圈无效）。
+    LGraphNode.prototype.collapse = function () {};
+
     // 分组节点的标题栏是分组色（偏亮），默认灰色标题字会被冲淡 -> 按底色亮度临时换成黑/白标题字。
     const _origDrawNode = LGraphCanvas.prototype.drawNode;
     LGraphCanvas.prototype.drawNode = function (node, ctx) {
@@ -264,13 +269,19 @@ const ED = (function () {
       document.head.appendChild(st);
     }
 
-    // 编辑值的浮动输入框：点击其外部即关闭（符合"所有弹窗点外部关闭"的预期）
+    // 所有弹窗“点外部即关闭”：值编辑框(.graphdialog) + 编辑类弹窗(.popdlg：分组/流程信息/帮助/描述/图片列表/取键)。
+    // 点在任一 .popdlg 内则全部保留（支持嵌套，如分组弹窗里再开“改名”框）；点在外部则一起收起。
     if (!window.__dlgCloseHooked) {
       window.__dlgCloseHooked = true;
       document.addEventListener("pointerdown", (e) => {
         document.querySelectorAll(".graphdialog").forEach((d) => {
           if (!d.contains(e.target) && typeof d.close === "function") d.close();
         });
+        const inPop = e.target && e.target.closest && e.target.closest(".popdlg");
+        if (!inPop && document.querySelector(".popdlg")) {
+          document.querySelectorAll(".popdlg").forEach((d) => d.remove());
+          groupDlgRender = null; helpModal = null;
+        }
       }, true);
     }
   }
@@ -398,7 +409,7 @@ const ED = (function () {
   function specialKeyMenu(onPick) {
     document.getElementById("speckey")?.remove();
     const box = document.createElement("div");
-    box.id = "speckey";
+    box.id = "speckey"; box.className = "popdlg";
     box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(360px,92vw);" +
       "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:12px 14px;z-index:140;" +
       "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
@@ -572,7 +583,7 @@ const ED = (function () {
     return new Promise((resolve) => {
       document.getElementById("askdlg")?.remove();
       const box = document.createElement("div");
-      box.id = "askdlg";
+      box.id = "askdlg"; box.className = "popdlg";
       box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(360px,90vw);" +
         "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:150;" +
         "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
@@ -628,7 +639,7 @@ const ED = (function () {
     const ids = nodes.map((n) => n._id);
     document.getElementById("grpdlg")?.remove();
     const box = document.createElement("div");
-    box.id = "grpdlg";
+    box.id = "grpdlg"; box.className = "popdlg";
     box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(460px,92vw);" +
       "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
       "padding:14px 16px;z-index:150;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
@@ -652,7 +663,7 @@ const ED = (function () {
              `<button data-del="${i}" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:1px 7px;cursor:pointer">解散</button></label>`;
       });
       h += "<div style='margin-top:10px'><button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ 新建分组（含选中节点）</button>" +
-        "<button id='grp_close' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer;float:right'>关闭</button></div>";
+        "<span style='float:right;color:#6b727d;font-size:12px;padding-top:5px'>点窗口外关闭</span></div>";
       box.innerHTML = h;
       box.querySelectorAll("input[name='grp']").forEach((r) =>
         r.onchange = () => { const v = +r.value; setNodesGroup(ids, v < 0 ? null : v); render(); });
@@ -678,7 +689,6 @@ const ED = (function () {
         groupDefs.push({ title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], members: [] });
         setNodesGroup(ids, groupDefs.length - 1); render();
       };
-      box.querySelector("#grp_close").onclick = () => { box.remove(); groupDlgRender = null; };
     };
     groupDlgRender = render;   // 撤销/重做后若弹窗仍开着，据此刷新
     render();
@@ -785,7 +795,7 @@ const ED = (function () {
   function editNote(node) {
     document.getElementById("notedlg")?.remove();
     const box = document.createElement("div");
-    box.id = "notedlg";
+    box.id = "notedlg"; box.className = "popdlg";
     box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(420px,90vw);" +
       "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:130;" +
       "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
@@ -814,7 +824,7 @@ const ED = (function () {
     document.getElementById("imglist")?.remove();
     let paths = String(widget.value || "").split(",").map((s) => s.trim()).filter(Boolean);
     const box = document.createElement("div");
-    box.id = "imglist";
+    box.id = "imglist"; box.className = "popdlg";
     box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(520px,94vw);" +
       "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
       "padding:14px 16px;z-index:140;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
@@ -1200,6 +1210,7 @@ const ED = (function () {
     };
     if (!keepHistory) { undoStack = []; redoStack = []; breakpoints = new Set(); runUntil = null; }   // 新流程：清空撤销历史与断点（排版除外）
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
+    for (const p of panelPins) if (p[2]) pinLabels[p[0] + "|" + p[1]] = p[2];   // 把已保存的显示名种进记忆
     groupDefs = Array.isArray(flow.groups)
       ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
       : [];
@@ -1263,16 +1274,23 @@ const ED = (function () {
   function isPinned(nid, key) { return panelPins.some((p) => p[0] === nid && p[1] === key); }
   function pinEntry(nid, key) { return panelPins.find((p) => p[0] === nid && p[1] === key); }
   function togglePin(nid, key) {
+    const lk = nid + "|" + key;
     const i = panelPins.findIndex((p) => p[0] === nid && p[1] === key);
-    if (i >= 0) panelPins.splice(i, 1); else panelPins.push([nid, key, ""]);
+    if (i >= 0) {
+      if (panelPins[i][2]) pinLabels[lk] = panelPins[i][2];   // 取消勾选：记住已填的显示名，重新勾选时回填
+      panelPins.splice(i, 1);
+    } else {
+      panelPins.push([nid, key, pinLabels[lk] || ""]);        // 重新勾选：恢复上次填过的显示名
+    }
     renderPanel(); scheduleSnap(); refreshDirty();
     if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
   }
-  // 设置某置顶项“在面板上显示的名称”（空＝用默认名）。
+  // 设置某置顶项“在面板上显示的名称”（空＝用默认名）。同步记进 pinLabels，取消勾选后仍保留。
   function setPinLabel(nid, key, name) {
     const e = pinEntry(nid, key);
     if (!e) return;
     e[2] = String(name || "").trim();
+    pinLabels[nid + "|" + key] = e[2];
     renderPanel(); scheduleSnap(); refreshDirty();
   }
   // 默认显示名：「节点标题 · 参数标签」——自带节点上下文，多个节点置顶同名参数（区域/阈值/间隔(秒)…）也不混淆，
@@ -1420,11 +1438,27 @@ const ED = (function () {
     sel.selectedIndex = idx;
   }
 
-  // 使用模式（简单模式）：折叠节点图，只留控制面板 + 运行 + 日志
+  // 关掉所有“编辑相关”的浮层（分组/流程信息/帮助/描述/图片列表/取键 等弹窗 + 右键菜单 + 值编辑框）。
+  // 进只读模式、或点击弹窗外部时调用。这些弹窗统一带 class="popdlg"。
+  function closeEditPopups() {
+    document.querySelectorAll(".popdlg").forEach((d) => d.remove());
+    groupDlgRender = null; helpModal = null;
+    try { LiteGraph.closeAllContextMenus(window); } catch (e) {}
+    document.querySelectorAll(".graphdialog").forEach((d) => { if (typeof d.close === "function") d.close(); });
+  }
+
+  // 使用模式（简单模式）：画布只读，只用控制面板 + 运行 + 日志
   function applySimpleMode() {
     document.body.classList.toggle("simple", simpleMode);
     const b = document.getElementById("modebtn");
-    if (b) b.textContent = simpleMode ? "编辑模式" : "使用模式";
+    if (b) {
+      b.textContent = simpleMode ? "🔒 使用模式" : "✎ 编辑模式";   // 显示“当前”模式（不再显示要切到的模式，消除歧义）
+      b.classList.toggle("inuse", simpleMode);
+      b.title = simpleMode
+        ? "当前：使用模式（画布只读，只用控制面板调参 + 运行）。点击切换到「编辑模式」可改节点/连线/参数。"
+        : "当前：编辑模式（可改节点图：增删改节点/连线/参数）。点击切换到「使用模式」只读运行，适合日常使用。";
+    }
+    if (simpleMode) closeEditPopups();                         // 进只读模式：关掉所有编辑相关的弹窗/右键菜单
     if (simpleMode && helpEl) helpEl.style.display = "none";   // 使用模式不显示可编辑的节点说明
     renderPanel();
     if (canvas) { canvas.resize(); canvas.setDirty(true, true); }   // 两种模式都显示画布：切换后重算尺寸
@@ -1440,7 +1474,9 @@ const ED = (function () {
     try { localStorage.setItem("flow.simpleMode", simpleMode ? "1" : "0"); } catch (e) {}
     applySimpleMode();
     refreshDirty();
-    setStatus(simpleMode ? "已进入使用模式（画布只读 · 调参/拖动不会改动已保存的流程）" : "已回到编辑模式");
+    setStatus(simpleMode
+      ? "已进入使用模式：画布只读，用控制面板调参并运行（改动不会动到已保存的流程）；想改流程点左上角切回编辑模式"
+      : "已进入编辑模式：可增删改节点/连线/参数，改完记得保存");
   }
 
   // ---- 启动：优先用 Python push 进来的数据 ----
@@ -1452,8 +1488,9 @@ const ED = (function () {
       fillFlowList(data.builtin || []);
       if (data.flow) load(data.flow);
       else setStatus(`已就绪 ｜ 已注册 ${okN} 种节点（右键空白处添加）`);
-      try { simpleMode = localStorage.getItem("flow.simpleMode") === "1"; } catch (e) {}
-      applySimpleMode();   // 恢复上次的模式（使用/编辑）
+      try { const v = localStorage.getItem("flow.simpleMode"); simpleMode = (v === null) ? true : v === "1"; }
+      catch (e) { simpleMode = true; }   // 默认进【使用模式】（成品工具默认只读运行）；之后记住用户的选择
+      applySimpleMode();
       if (simpleMode) simpleEntrySig = JSON.stringify(collect());   // 开机即处于使用模式：记下“退出时还原”的基线
       startSysMon();       // 启动右下角资源监控小窗（轮询后端 sys_stats）
     } catch (err) {
@@ -2261,7 +2298,7 @@ const ED = (function () {
   function editFlowInfo() {
     document.getElementById("flowdlg")?.remove();
     const box = document.createElement("div");
-    box.id = "flowdlg";
+    box.id = "flowdlg"; box.className = "popdlg";
     box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(480px,92vw);" +
       "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
       "padding:14px 16px;z-index:130;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
@@ -2276,8 +2313,7 @@ const ED = (function () {
                 : (flowMeta.path ? "我的流程" : "未保存的新流程");
       const cats = Object.keys(s.cats).sort().map((c) => `${c} ${s.cats[c]}`).join(" · ") || "（空）";
       box.innerHTML =
-        "<div style='display:flex;align-items:center'><b style='color:#e6c07b;flex:1;font-size:14px'>流程信息</b>" +
-        "<span id='fi_close' style='cursor:pointer;color:#8b909a;font-size:18px;padding:0 4px'>✕</span></div>" +
+        "<b style='color:#e6c07b;font-size:14px'>流程信息</b><span style='color:#6b727d;font-size:12px'>（点窗口外关闭）</span>" +
         `<div style='margin-top:8px'><span style='color:#9aa3af'>名称：</span><b>${esc(flowMeta.name || "未命名流程")}</b></div>` +
         `<div><span style='color:#9aa3af'>来源：</span>${src}</div>` +
         `<div style='margin-top:6px;color:#9aa3af'>说明：</div>` +
@@ -2286,9 +2322,7 @@ const ED = (function () {
         `<div style='margin-top:4px;color:#cdd3db'>节点 ${s.nodes} · 连线 执行${s.execE}/数据${s.dataE} · 分组 ${s.groups} · 控制面板项 ${s.pins}</div>` +
         `<div style='margin-top:4px'><span style='color:#9aa3af'>节点构成：</span>${esc(cats)}</div></div>` +
         "<div style='margin-top:12px;text-align:right'>" +
-        `<button id='fi_edit' style='${btn}'>编辑</button> <button id='fi_ok' style='${btn}'>关闭</button></div>`;
-      box.querySelector("#fi_close").onclick = () => box.remove();
-      box.querySelector("#fi_ok").onclick = () => box.remove();
+        `<button id='fi_edit' style='${btn}'>编辑名称/说明</button></div>`;
       box.querySelector("#fi_edit").onclick = () => { editing = true; renderEdit(); };
     };
     const renderEdit = () => {
@@ -2320,6 +2354,7 @@ const ED = (function () {
   function toggleHelp() {
     if (helpModal) { helpModal.remove(); helpModal = null; return; }
     helpModal = document.createElement("div");
+    helpModal.className = "popdlg";
     helpModal.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);" +
       "width:min(640px,92vw);max-height:80%;overflow:auto;background:#23272f;color:#cfd3da;" +
       "border:1px solid #3a404a;border-radius:8px;padding:14px 18px;z-index:100;" +
@@ -2331,7 +2366,7 @@ const ED = (function () {
     helpModal.innerHTML =
       "<div style='display:flex;align-items:center;margin-bottom:6px'>" +
       "<b style='font-size:15px;color:#e6e9ee;flex:1'>编辑器帮助</b>" +
-      "<span id='helpclose' style='cursor:pointer;color:#8b909a;font-size:18px;padding:0 4px'>✕</span></div>" +
+      "<span style='color:#6b727d;font-size:12px'>点窗口外关闭</span></div>" +
       "<div style='color:#9aa3af'><b style='color:#e6c07b'>连线模型（类虚幻蓝图）</b><br>" +
       "· <b style='color:#fff'>白线＝执行流</b>：决定先做什么、再做什么、走哪条路。入口是「每帧触发」；" +
       "某个出口不接任何节点，就表示那种情况下<b>本帧到此结束</b>（无需专门的“结束”节点）。<br>" +
@@ -2349,7 +2384,7 @@ const ED = (function () {
       "· 右键空白处：添加节点　· 滚轮：缩放　· 拖动空白：平移<br>" +
       "· 拖动节点标题：移动　· Ctrl+拖动空白：框选多个　· 选中多个后可整体拖动<br>" +
       "· 单击参数输入框：直接编辑，<b>实时生效</b>（无需确认按钮）<br>" +
-      "· 右键连线（线上任意处）：删除连线　· 双击节点标题：折叠/展开<br>" +
+      "· 右键连线（线上任意处）：删除连线<br>" +
       "· Ctrl+Z 撤销　· Ctrl+Y 或 Ctrl+Shift+Z 重做<br>" +
       "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存<br>" +
       "· 选中节点→右下角说明里勾选「显示到控制面板」，把常用开关/数值置顶到顶部面板，" +
@@ -2376,7 +2411,6 @@ const ED = (function () {
       "· <b>选择图片…</b>：从已有图片文件选模板　· <b>捕获按键…</b>：按一下记下按键<br>" +
       "<span style='color:#7f8895'>点按钮后编辑器会自动最小化让开、截到游戏画面，采完自动恢复；Esc 取消。</span></div>";
     document.body.appendChild(helpModal);
-    helpModal.querySelector("#helpclose").onclick = toggleHelp;
   }
 
   // ---- 撤销/重做（对整图做 JSON 快照；buildGraph/applySnapshot 期间抑制）----
