@@ -1037,15 +1037,24 @@ const ED = (function () {
         lastErr = (nd && nd.type) + " → " + (err && (err.stack || err.message) || err);
       }
     }
+    let faninDropped = 0;
     for (const e of flow.edges || []) {
       try {
         const a = idMap[e.src], b = idMap[e.dst];
         if (!a || !b) continue;
         const so = a.findOutputSlot(e.src_port);
         const si = b.findInputSlot(e.dst_port);
-        if (so >= 0 && si >= 0) a.connect(so, b, si);
+        if (so >= 0 && si >= 0) {
+          // LiteGraph 每个输入口只接一条线：若该执行输入已被占用，再连就会把前一条挤掉(汇入丢失)。
+          if (b.inputs[si] && b.inputs[si].type === "exec" && b.inputs[si].link != null) faninDropped++;
+          a.connect(so, b, si);
+        }
       } catch (err) { /* 单条连线失败不致命 */ }
     }
+    if (faninDropped)
+      showError("⚠ 有 " + faninDropped + " 条“汇入同一入口”的执行连线无法显示，也不会被保存/运行" +
+                "（LiteGraph 每个输入口只接一条线）。\n请改成线性结构：每个检查不通过就让出口空着(=本帧结束)，" +
+                "不要让多条执行线汇到同一个入口。");
     graph.setDirtyCanvas(true, true);
     const miss = Object.keys(missing);
     if (miss.length)
