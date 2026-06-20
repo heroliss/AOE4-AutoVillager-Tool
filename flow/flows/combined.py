@@ -137,7 +137,7 @@ def build_combined_graph() -> Graph:
     g.groups = [
         {"title": "共享前段（每帧一次）", "color": "#4a8a8a",
          "members": ["tick", "mod", "if_mod", "win", "if_win", "occ", "if_blocked", "if_trans",
-                     "prefetch", "pop", "slots", "food", "gold", "tc", "c_one",
+                     "prefetch", "pop", "slots", "food", "gold", "tc",
                      "lock", "block_begin", "save_sel", "relmod1"]},
         {"title": "村民段", "color": "#3a6ea5",
          "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v",
@@ -147,7 +147,7 @@ def build_combined_graph() -> Graph:
                      "c_per_x", "plan_x", "prod_x", "queue_x", "esc_x"]},
         {"title": "商队段（市场）", "color": "#a5793a",
          "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market",
-                     "c_per_cart", "plan_cart", "prod_cart", "queue_cart", "esc_cart"]},
+                     "c_per_cart", "c_one", "plan_cart", "prod_cart", "queue_cart", "esc_cart"]},
         {"title": "收尾（整批一次）", "color": "#5a9367",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
     ]

@@ -17,6 +17,7 @@ const ED = (function () {
   let panelPins = [];
   // 可视化分组：[{title, color, members:[ourNodeId...]}]，框随成员节点自动包裹（仅展示，随流程保存）。
   let groupDefs = [];
+  let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
@@ -453,7 +454,7 @@ const ED = (function () {
   }
 
   // 画“分组框”（在节点后面，随成员节点自动包裹）。onDrawBackground 在画布变换内调用，用图坐标。
-  const GROUP_PAD = 16, GROUP_TOP = 28;   // 四周留白 / 顶部给标题留的高度
+  const GROUP_PAD = 16, GROUP_TOP = 14;   // 四周留白（顶部留少许，组名做成“标签页”放在框上沿之上，不挤占内部）
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
   // 依据背景色亮度选黑/白文字，保证标题在分组色上清晰可读。
   function contrastText(hex) {
@@ -482,13 +483,18 @@ const ED = (function () {
     groupDefs.forEach((g, i) => {
       const box = groupBox(g, ctx);
       if (!box) return;
-      const [x, y, w, h] = box, col = groupColor(g, i);
+      const [x, y, w, h] = box, col = groupColor(g, i), name = g.title || "分组";
       roundRect(ctx, x, y, w, h, 10);
       ctx.fillStyle = col + "22"; ctx.fill();          // 半透明填充
       ctx.strokeStyle = col + "cc"; ctx.lineWidth = 2; ctx.stroke();
-      ctx.fillStyle = col; ctx.font = "bold 14px 'Microsoft YaHei',sans-serif";
+      // 组名做成“标签页”贴在框的左上沿之上——不会和框内第一个节点重叠
+      ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
       ctx.textBaseline = "alphabetic";
-      ctx.fillText("▦ " + (g.title || "分组"), x + 10, y + 19);
+      const tw = ctx.measureText(name).width;
+      roundRect(ctx, x, y - 18, tw + 18, 20, 5);
+      ctx.fillStyle = col; ctx.fill();
+      ctx.fillStyle = contrastText(col);
+      ctx.fillText(name, x + 9, y - 4);
     });
     ctx.restore();
   }
@@ -570,7 +576,7 @@ const ED = (function () {
         const col = groupColor(g, i);
         h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0">` +
              `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` +
-             `<span style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
+             `<span data-swatch="${i}" style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
              `<span style="flex:1">${esc(g.title || "分组")}</span>` +
              `<span style="color:#7f8895">${(g.members || []).length}个</span>` +
              `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
@@ -583,7 +589,13 @@ const ED = (function () {
       box.querySelectorAll("input[name='grp']").forEach((r) =>
         r.onchange = () => { const v = +r.value; setNodesGroup(ids, v < 0 ? null : v); render(); });
       box.querySelectorAll("[data-color]").forEach((c) =>
-        c.oninput = () => { groupDefs[+c.getAttribute("data-color")].color = c.value; refreshGroups(); });
+        c.oninput = () => {
+          const i = +c.getAttribute("data-color");
+          groupDefs[i].color = c.value;
+          const sw = box.querySelector(`[data-swatch="${i}"]`);
+          if (sw) sw.style.background = c.value;     // 弹窗里的色块也实时跟随
+          refreshGroups();                            // 画布上的节点标题色/分组框实时跟随
+        });
       box.querySelectorAll("[data-ren]").forEach((b) => b.onclick = async () => {
         const i = +b.getAttribute("data-ren");
         const name = await askText("分组改名", groupDefs[i].title || "");
@@ -598,8 +610,9 @@ const ED = (function () {
         groupDefs.push({ title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], members: [] });
         setNodesGroup(ids, groupDefs.length - 1); render();
       };
-      box.querySelector("#grp_close").onclick = () => box.remove();
+      box.querySelector("#grp_close").onclick = () => { box.remove(); groupDlgRender = null; };
     };
+    groupDlgRender = render;   // 撤销/重做后若弹窗仍开着，据此刷新
     render();
   }
 
@@ -617,21 +630,9 @@ const ED = (function () {
         ctx.restore();
       }
     }
-    // ②所属分组标记：标题栏左上方画一个小色块+组名（标题栏底色已是分组色，这里补“名称”，一眼可辨）。
-    const gi = nodeGroupIndex(this._id);
-    if (gi >= 0) {
-      const g = groupDefs[gi], col = groupColor(g, gi), name = g.title || "分组";
-      ctx.save();
-      ctx.font = "10px 'Microsoft YaHei',sans-serif";
-      const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
-      const tw = ctx.measureText(name).width, cy = -th - 15;
-      roundRect(ctx, 0, cy, tw + 12, 14, 3);
-      ctx.fillStyle = col; ctx.globalAlpha = 0.9; ctx.fill(); ctx.globalAlpha = 1;
-      ctx.fillStyle = "#fff"; ctx.textBaseline = "alphabetic";
-      ctx.fillText(name, 6, cy + 10.5);
-      ctx.restore();
-    }
-    // ③ 附属卡片
+    // 节点的分组归属用“标题栏底色”表达（见 applyGroupColors）；组名只在分组框的标签页上显示一次，
+    // 不在每个节点上重复，避免同名标签堆叠、保持简洁。
+    // ② 附属卡片
     const note = this._note || "";
     const paths = nodePreviewPaths(this);
     if (!note && !paths.length) return;
@@ -1706,6 +1707,7 @@ const ED = (function () {
       ? data.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
       : [];   // 分组随撤销/重做恢复
     applyGroupColors();
+    if (groupDlgRender && document.getElementById("grpdlg")) groupDlgRender();   // 分组弹窗开着则刷新
     attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
     canvas.setDirty(true, true);

@@ -11,6 +11,8 @@
     --fg: #d4d8e0; --fg-dim: #8b929e; --accent: #5a93d4; --warn: #e6a23c;
     --btn: #2b313b; --btn-h: #353c48; --btn-line: #3c434f;
   }
+  /* 让原生控件(数字微调箭头/颜色选择器/下拉)走深色，不再是白色割裂感 */
+  html { color-scheme: dark; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
                font-family: "Microsoft YaHei", "SimHei", sans-serif; overflow: hidden;
                -webkit-font-smoothing: antialiased; }

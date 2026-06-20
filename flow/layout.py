@@ -296,7 +296,21 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: flo
             if m in col and col[m] < col[n] + 1:
                 col[m] = col[n] + 1
 
-    # —— 数据节点：列 = 其(数据)消费者最左列 - 1（来源在前），链式逐级再左移 ——
+    # —— 分组感知：把“有归属分组”的数据节点限制在其分组(脊柱)所在的列区间内 ——
+    # 否则一个只被很靠后的段消费的共享数据节点（如商队用的常量）会被甩到很右，
+    # 导致它所在分组的外框横跨整张图、与其它分组框相互重叠（分组就失去意义了）。
+    gindex = {}                          # node_id -> 分组下标
+    for gi, gr in enumerate(getattr(graph, "groups", []) or []):
+        for m in (gr.get("members", []) if isinstance(gr, dict) else []):
+            gindex[m] = gi
+    gspan = {}                           # 分组下标 -> (脊柱最小列, 脊柱最大列)
+    for m in spine_set:
+        gi = gindex.get(m)
+        if gi is not None:
+            lo, hi = gspan.get(gi, (col[m], col[m]))
+            gspan[gi] = (min(lo, col[m]), max(hi, col[m]))
+
+    # —— 数据节点：列 = 其(数据)消费者最左列 - 1（来源在前），链式逐级再左移；按分组列区间钳制 ——
     dcons = {n: [] for n in nodes}      # 数据来源 -> 其数据消费者列表
     for e in graph.data_edges:
         if e.src_id in dcons and e.dst_id in graph.nodes:
@@ -310,8 +324,12 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: flo
             return cmemo[n]
         cmemo[n] = 0                    # 防御环：先占位
         cs = dcons.get(n, [])
-        cmemo[n] = min((dcol(c) for c in cs), default=1) - 1
-        return cmemo[n]
+        c = min((dcol(c2) for c2 in cs), default=1) - 1
+        span = gspan.get(gindex.get(n))   # 有归属分组且该组有脊柱节点 -> 钳制到该组列区间内
+        if span:
+            c = max(span[0], min(span[1], c))
+        cmemo[n] = c
+        return c
 
     for n in nodes:
         if n not in spine_set:
