@@ -232,6 +232,8 @@ class Api:
         self._run_ctx: Optional[ExecutionContext] = None
         self._run_exec: Optional[TraceExecutor] = None
         self._run_logs: list = []
+        import threading
+        self._run_lock = threading.RLock()   # run_tick / run_update / begin / end 互斥（前端不同线程过桥）
 
     def get_defs(self):
         return node_defs()
@@ -244,62 +246,96 @@ class Api:
     # ==================== 运行可视化（干跑，逐帧）====================
     def run_begin(self, payload):
         """用当前编辑器里的图开一次“试运行”（干跑：不发按键/鼠标，只做识别与逻辑）。"""
-        self._run_graph = payload_to_graph(payload)
-        self._run_logs = []
+        with self._run_lock:
+            self._run_graph = payload_to_graph(payload)
+            self._run_logs = []
 
-        def _log(level, message, node_id=None):
-            self._run_logs.append({"level": level, "msg": message, "node": node_id})
+            def _log(level, message, node_id=None):
+                self._run_logs.append({"level": level, "msg": message, "node": node_id})
 
-        self._run_ctx = ExecutionContext(on_log=_log, dry_run=True)
-        self._run_exec = TraceExecutor(self._run_graph)
-        return {"ok": True, "nodes": len(self._run_graph.nodes)}
+            self._run_ctx = ExecutionContext(on_log=_log, dry_run=True)
+            self._run_exec = TraceExecutor(self._run_graph)
+            return {"ok": True, "nodes": len(self._run_graph.nodes)}
 
     def run_update(self, payload):
-        """运行中热更新参数：就地改已存在节点的取值（保留节点内部状态/黑板/帧序号）。"""
+        """运行中热更新：参数改值【且】结构(增删节点/改连线)也实时同步——
+
+        - 仍存在且类型不变的节点：复用原节点对象（保留其内部状态/记忆，如三态遮挡的历史）。
+        - 新增的节点：新建；删除的：移除。
+        - 连线整体按载荷重建（连线无状态）。黑板变量(ctx.vars)与帧序号(tick_index)保持不变。
+        与 run_tick 用同一把锁，避免跑帧中途结构被改而读到半成品。
+        """
         if not self._run_graph:
             return False
-        by_id = {nd["id"]: nd for nd in payload.get("nodes", [])}
-        for nid, node in self._run_graph.nodes.items():
-            nd = by_id.get(nid)
-            if not nd:
-                continue
-            specs = {s.key: s for s in node.params}
-            for k, v in (nd.get("params") or {}).items():
-                if k in specs:
-                    node.values[k] = _param_from_js(specs[k], v)
+        with self._run_lock:
+            g = self._run_graph
+            if g is None:                       # 期间被 run_end 结束了
+                return False
+            reg = registry()
+            want = {nd["id"]: nd for nd in payload.get("nodes", []) if nd.get("type") in reg}
+            # 删除：图里有、载荷里没有的节点
+            for nid in [n for n in g.nodes if n not in want]:
+                g.nodes.pop(nid, None)
+                g.positions.pop(nid, None)
+            # 新增 / 复用并更新参数
+            for nid, nd in want.items():
+                node = g.nodes.get(nid)
+                if node is None or node.type_id != nd["type"]:
+                    node = create_node(nd["type"])
+                    g.nodes[nid] = node
+                    pos = nd.get("pos", [0, 0])
+                    g.positions[nid] = (pos[0], pos[1])
+                specs = {s.key: s for s in node.params}
+                for k, v in (nd.get("params") or {}).items():
+                    if k in specs:
+                        node.values[k] = _param_from_js(specs[k], v)
+            # 连线整体重建（exec/data 由注册表端口种类判定，与 payload_to_graph 一致）
+            g.exec_edges = []
+            g.data_edges = []
+            kinds = _port_kind_map()
+            type_of = {nd["id"]: nd.get("type") for nd in payload.get("nodes", [])}
+            for e in payload.get("edges", []):
+                if e["src"] not in g.nodes or e["dst"] not in g.nodes:
+                    continue
+                kind = e.get("kind") or kinds.get((type_of.get(e["src"]), e["src_port"]), "data")
+                if kind == "exec":
+                    g.connect_exec(e["src"], e["src_port"], e["dst"], e["dst_port"])
+                else:
+                    g.connect_data(e["src"], e["src_port"], e["dst"], e["dst_port"])
         return True
 
     def run_tick(self):
         """跑一帧，返回执行轨迹 + 数据线上的值 + 本帧日志。前端据此高亮/显示。"""
-        if not (self._run_exec and self._run_ctx):
-            return None
-        before = len(self._run_logs)
-        try:
-            self._run_exec.run_tick(self._run_ctx, dt=0.0)
-        except Exception as e:  # 单帧异常不致命：报到日志，让前端继续/停止
-            self._run_logs.append({"level": "ERROR", "msg": f"运行异常：{e}", "node": None})
-        memo = self._run_ctx.memo_snapshot()
-        data = {}
-        for (nid, port), val in memo.items():
-            data[f"{nid}{port}"] = _fmt_value(val)   # \x01 分隔，避免端口名里有点
-        return {
-            "tick": self._run_ctx.tick_index,
-            "path": list(self._run_exec.trace_path),
-            "ports": dict(self._run_exec.trace_ports),
-            "data": data,
-            "logs": self._run_logs[before:],
-        }
+        with self._run_lock:
+            if not (self._run_exec and self._run_ctx):   # 还没开始 / 期间被 run_end 结束了
+                return None
+            before = len(self._run_logs)
+            try:
+                self._run_exec.run_tick(self._run_ctx, dt=0.0)
+            except Exception as e:  # 单帧异常不致命：报到日志，让前端继续/停止
+                self._run_logs.append({"level": "ERROR", "msg": f"运行异常：{e}", "node": None})
+            data = {}
+            for (nid, port), val in self._run_ctx.memo_snapshot().items():
+                data[nid + "" + port] = _fmt_value(val)   # 用 0x01 分隔 node_id 与 port
+            return {
+                "tick": self._run_ctx.tick_index,
+                "path": list(self._run_exec.trace_path),
+                "ports": dict(self._run_exec.trace_ports),
+                "data": data,
+                "logs": self._run_logs[before:],
+            }
 
     def run_end(self):
         """结束试运行：清理可能持有的输入屏蔽/锁（干跑下只是清标记）。"""
-        if self._run_ctx:
-            try:
-                self._run_ctx.cleanup_tick()
-            except Exception:
-                pass
-        self._run_graph = self._run_ctx = self._run_exec = None
-        self._run_logs = []
-        return True
+        with self._run_lock:
+            if self._run_ctx:
+                try:
+                    self._run_ctx.cleanup_tick()
+                except Exception:
+                    pass
+            self._run_graph = self._run_ctx = self._run_exec = None
+            self._run_logs = []
+            return True
 
     def _payload(self, graph):
         """流程载荷 + 元信息（当前文件路径、是否内置只读），供前端显示文件来源与只读提示。"""
