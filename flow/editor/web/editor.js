@@ -176,6 +176,15 @@ const ED = (function () {
       finally { for (const s of saved) s[0].value = s[1]; }
     };
 
+    // 分组节点的标题栏是分组色（偏亮），默认灰色标题字会被冲淡 -> 按底色亮度临时换成黑/白标题字。
+    const _origDrawNode = LGraphCanvas.prototype.drawNode;
+    LGraphCanvas.prototype.drawNode = function (node, ctx) {
+      const saved = this.node_title_color;
+      if (node._titleTextColor) this.node_title_color = node._titleTextColor;
+      try { return _origDrawNode.call(this, node, ctx); }
+      finally { this.node_title_color = saved; }
+    };
+
     // 右键菜单过高时"内部滚动"而非整体平移：LiteGraph 给菜单根加了 wheel 监听把整个菜单
     // top 上下移动，这里在菜单构造期吞掉 wheel/mousewheel 监听，并设最大高度+overflow，
     // 让滚轮滚动内容。（用临时替换 addEventListener 实现，构造结束即还原。）
@@ -446,6 +455,13 @@ const ED = (function () {
   // 画“分组框”（在节点后面，随成员节点自动包裹）。onDrawBackground 在画布变换内调用，用图坐标。
   const GROUP_PAD = 16, GROUP_TOP = 28;   // 四周留白 / 顶部给标题留的高度
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
+  // 依据背景色亮度选黑/白文字，保证标题在分组色上清晰可读。
+  function contrastText(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
+    if (!m) return "#ffffff";
+    const n = parseInt(m[1], 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#15181d" : "#ffffff";
+  }
   function groupBox(g, ctx) {
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
     for (const mid of (g.members || [])) {
@@ -528,7 +544,8 @@ const ED = (function () {
   function applyGroupColors() {
     for (const n of (graph && graph._nodes) || []) {
       const c = groupColorOf(n._id);
-      if (c) { n.color = c; n.bgcolor = c + "1f"; } else { delete n.color; delete n.bgcolor; }
+      if (c) { n.color = c; n.bgcolor = c + "1f"; n._titleTextColor = contrastText(c); }
+      else { delete n.color; delete n.bgcolor; delete n._titleTextColor; }
     }
   }
 
@@ -542,10 +559,10 @@ const ED = (function () {
       "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
       "padding:14px 16px;z-index:150;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
     document.body.appendChild(box);
-    // 当前节点们所属的分组（多选时若不一致则不预选）
-    const curIdx = ids.map(nodeGroupIndex);
-    const same = curIdx.every((x) => x === curIdx[0]) ? curIdx[0] : -2;
     const render = () => {
+      // 每次重绘都重算“当前所属分组”，使单选框跟着实时变化（多选不一致则不预选）
+      const curIdx = ids.map(nodeGroupIndex);
+      const same = curIdx.every((x) => x === curIdx[0]) ? curIdx[0] : -2;
       let h = `<b style='color:#e6c07b'>分组</b>（已选 ${ids.length} 个节点）` +
               "<div style='color:#7f8895;margin:2px 0 8px'>一个节点只属于一个分组；选择即生效。</div>";
       h += `<label style="display:block;cursor:pointer;padding:4px 0"><input type="radio" name="grp" value="-1" ${same === -1 ? "checked" : ""}> 不分组</label>`;
@@ -896,10 +913,18 @@ const ED = (function () {
         "<button id='us_cancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:4px 14px;cursor:pointer'>取消</button></div>";
       box.innerHTML = h;
       document.body.appendChild(box);
-      const done = (v) => { box.remove(); resolve(v); };
+      const done = (v) => { box.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
       box.querySelector("#us_save").onclick = () => done("save");
       box.querySelector("#us_discard").onclick = () => done("discard");
       box.querySelector("#us_cancel").onclick = () => done("cancel");
+      // 默认焦点放在“取消”（最安全）：直接回车不会误触发保存/丢弃；Esc 也等于取消
+      const cancelBtn = box.querySelector("#us_cancel");
+      setTimeout(() => cancelBtn.focus(), 0);
+      const onKey = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done("cancel"); }
+        else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); document.activeElement && document.activeElement.click(); }
+      };
+      document.addEventListener("keydown", onKey, true);
     });
   }
   function labelOf(node, key) {
@@ -1760,6 +1785,7 @@ const ED = (function () {
       canvas.show_info = false;          // 隐藏左下角 T/I/N/V/FPS 调试信息（对普通用户无意义）
       canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
+      canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）
       setupHelpPanel();
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
