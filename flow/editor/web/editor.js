@@ -1417,6 +1417,7 @@ const ED = (function () {
       else setStatus(`已就绪 ｜ 已注册 ${okN} 种节点（右键空白处添加）`);
       try { simpleMode = localStorage.getItem("flow.simpleMode") === "1"; } catch (e) {}
       applySimpleMode();   // 恢复上次的模式（使用/编辑）
+      startSysMon();       // 启动右上角资源监控小窗（轮询后端 sys_stats）
     } catch (err) {
       showError("启动失败：\n" + (err && (err.stack || err.message) || err));
     }
@@ -1690,7 +1691,6 @@ const ED = (function () {
     if (btn) {
       btn.textContent = running ? "⏸ 暂停" : (runSession ? "▶ 继续" : "▶ 运行");
       btn.classList.toggle("running", running);
-      btn.classList.toggle("danger", !running && !runSession);   // 空闲时主按钮＝真跑，红色提示点下去会发输入
     }
     if (stop) stop.disabled = !runSession;
     if (dry) dry.disabled = runSession;     // 会话进行/暂停中不能再起一个干跑
@@ -1698,16 +1698,26 @@ const ED = (function () {
     if (lp) lp.style.display = runSession ? "block" : "none";
     const lr = document.getElementById("logresize");
     if (lr) lr.style.display = runSession ? "block" : "none";
-    updateRealBanner();
   }
   // —— 运行日志面板：增量追加，避免每帧重建整面板（800 行 × 4fps 的 DOM 抖动是“一分钟后变卡”的元凶之一）——
   const LOG_CAP = 800;
+  const LOG_DOT = { INFO: "•", WARN: "▲", ERROR: "✕" };
+  function nowHMS() {
+    const d = new Date(), p = (n) => (n < 10 ? "0" : "") + n;
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
   function logRowHTML(l) {
-    return `<div class="lp-row"><span class="lp-tick">[${l.tick}]</span> <span class="lv-${esc(l.level)}">${esc(l.msg)}</span></div>`;
+    const lv = (l.level === "WARN" || l.level === "ERROR") ? l.level : "INFO";
+    return `<div class="lp-row lv-${lv}" title="第 ${l.tick} 帧">` +
+           `<span class="lp-time">${esc(l.ts || "")}</span>` +
+           `<span class="lp-dot">${LOG_DOT[lv]}</span>` +
+           `<span class="lp-msg">${esc(l.msg)}</span></div>`;
   }
   function logHeadHTML() {
-    return `运行日志（干跑：只识别、不发按键鼠标）· ${runLogs.length} 条 ` +
-           `<span class="lp-clear" onclick="ED.clearLog()">清空</span>`;
+    const mode = realRun ? "<span style='color:#e6c07b'>● 正式运行（向游戏发送操作）</span>"
+                         : "<span style='color:#7fb0ee'>● 试运行（只识别，不发送输入）</span>";
+    return `<span class="lp-title">运行日志</span>${mode}<span class="lp-count">· ${runLogs.length} 条</span>` +
+           `<span class="spacer"></span><span class="lp-clear" onclick="ED.clearLog()">清空</span>`;
   }
   function ensureLogDom() {
     const lp = document.getElementById("logpanel");
@@ -1759,42 +1769,13 @@ const ED = (function () {
   }
   async function ensureRunSession() {
     if (runSession) return true;
-    if (realRun && !(await confirmRealRun())) return false;   // 真跑前二次确认
     try {
       const r = await api().run_begin(collect(), realRun);
       runSession = !!(r && r.ok);
       runLogs = []; _lastRunStatus = ""; renderLog();
       if (runSession) startRunAnim();   // 启动脉冲/流动动画
-      updateRealBanner();
       return runSession;
     } catch (e) { showError("启动运行失败：" + (e && (e.stack || e.message) || e)); return false; }
-  }
-  // 真跑确认弹窗（返回 Promise<bool>）
-  function confirmRealRun() {
-    return new Promise((resolve) => {
-      document.getElementById("realdlg")?.remove();
-      const box = document.createElement("div");
-      box.id = "realdlg";
-      box.style.cssText = "position:absolute;left:50%;top:80px;transform:translateX(-50%);width:min(470px,92vw);" +
-        "background:#2a1d1d;color:#f0d8d8;border:1px solid #b04a4a;border-radius:10px;padding:16px 18px;z-index:240;" +
-        "box-shadow:0 10px 36px #000b;font:13px/1.7 'Microsoft YaHei',sans-serif;";
-      box.innerHTML = "<b style='color:#ff8a8a;font-size:15px'>⚠ 确认进入真跑</b><br>" +
-        "真跑会<b>真正向游戏发送按键和鼠标</b>。开始前请确认：<br>" +
-        "· 游戏窗口在前台、已就绪；<br>· 各节点的区域 / 模板 / 按键已采集正确（强烈建议先干跑核对）；<br>" +
-        "· 运行中可按住 Shift/Ctrl/Alt 暂停，或点「停止」终止。<br>" +
-        "<div style='margin-top:12px;text-align:right'>" +
-        "<button id='rr_cancel' style='background:#2f343d;color:#cfd3da;border:1px solid #555;border-radius:5px;padding:4px 14px;cursor:pointer'>取消</button> " +
-        "<button id='rr_ok' style='background:#a83232;color:#fff;border:1px solid #d05a5a;border-radius:5px;padding:4px 14px;cursor:pointer'>开始真跑</button></div>";
-      document.body.appendChild(box);
-      const done = (v) => { box.remove(); resolve(v); };
-      box.querySelector("#rr_cancel").onclick = () => done(false);
-      box.querySelector("#rr_ok").onclick = () => done(true);
-      box.querySelector("#rr_cancel").focus();
-    });
-  }
-  function updateRealBanner() {
-    const b = document.getElementById("realbanner");
-    if (b) b.classList.toggle("show", !!(running && realRun));
   }
   // 每帧间隔：以流程「每帧触发」节点的“循环间隔(秒)”为准（面板可调），不再单列速度档
   function loopDelayMs() {
@@ -1822,9 +1803,10 @@ const ED = (function () {
     runPorts = t.ports || {};
     runData = t.data || {};
     runDataNodes = new Set(Object.keys(runData).map((k) => k.split("")[0]));
-    const added = (t.logs || []).map((l) => ({ tick: t.tick, level: l.level, msg: l.msg, node: l.node }));
+    const ts = nowHMS();
+    const added = (t.logs || []).map((l) => ({ tick: t.tick, ts, level: l.level, msg: l.msg, node: l.node }));
     const st = runStatusLine();   // 合成“本轮结果/为什么没动作”，变化时才记一行，避免刷屏
-    if (st && st.msg !== _lastRunStatus) { _lastRunStatus = st.msg; added.push({ tick: t.tick, level: st.level, msg: st.msg }); }
+    if (st && st.msg !== _lastRunStatus) { _lastRunStatus = st.msg; added.push({ tick: t.tick, ts, level: st.level, msg: st.msg }); }
     for (const l of added) runLogs.push(l);
     if (runLogs.length > LOG_CAP) runLogs.splice(0, runLogs.length - LOG_CAP);   // 原地裁剪，免得每帧新建长数组
     appendLogRows(added);                          // 增量追加本帧新增日志行（不再每帧重建整面板）
@@ -1870,22 +1852,15 @@ const ED = (function () {
     setStatus("运行到此节点…（命中即暂停）");
     if (!running) startRun(); else setRunUI();
   }
-  function toggleRun() {                 // 主按钮：默认真跑（向游戏发输入，开始前二次确认）
+  function toggleRun() {                 // 主按钮：运行（向游戏发输入）。暂停中点「继续」沿用原会话模式
     if (running) { pauseRun(); return; }
-    if (!runSession) realRun = true;     // 新会话＝真跑；暂停中点「继续」则沿用原会话模式
+    if (!runSession) realRun = true;     // 新会话＝正式运行
     startRun();
   }
-  function dryRun() {                     // 次按钮：试运行（干跑，只识别不发输入）
+  function dryRun() {                     // 次按钮：试运行（干跑，只识别不发输入），调试核对用
     if (runSession) return;              // 已有会话时按钮已禁用，这里兜底
     realRun = false;
     startRun();
-  }
-  async function stepRun() {
-    pauseRun();
-    if (!runSession) realRun = false;    // 单步默认干跑调试；已在某会话中则沿用该会话模式
-    if (!(await ensureRunSession())) return;
-    await runOneTick();
-    setRunUI();
   }
   async function stopRun() {
     running = false; clearTimeout(runTimer); stopRunAnim();
@@ -1896,8 +1871,127 @@ const ED = (function () {
     setStatus("已停止运行");
   }
 
+  // ============ 资源监控小窗：右上角常驻迷你曲线 + 数字，点开看详情/改采样配置 ============
+  // 把经典版的“内存/CPU监控”融入编辑器：定时轮询后端 sys_stats（每秒级，开销极小），
+  // 维护环形缓冲画曲线。轮询是唯一的常驻定时器，无 DOM 抖动，不影响试运行性能。
+  const SYS_DOT = "#2a2f38";
+  let sysCfg = { interval: 1000, minutes: 5 };       // 采样间隔(ms) / 保留时长(分钟)
+  let sysHist = { cpu: [], mem: [] }, sysLast = null, sysTimer = null, sysDetailOpen = false;
+  function sysCap() { return Math.max(30, Math.round(sysCfg.minutes * 60000 / sysCfg.interval)); }
+  function sysLoadCfg() {
+    try {
+      const v = JSON.parse(localStorage.getItem("flow.sysmon") || "{}");
+      if (v.interval) sysCfg.interval = Math.max(200, Math.min(10000, v.interval));
+      if (v.minutes) sysCfg.minutes = Math.max(1, Math.min(120, v.minutes));
+    } catch (e) {}
+  }
+  function sysSaveCfg() { try { localStorage.setItem("flow.sysmon", JSON.stringify(sysCfg)); } catch (e) {} }
+  function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(2) + " GB" : Math.round(mb) + " MB"; }
+  // 在画布上画一条填充折线（data 为数值数组，maxv 为纵轴上限）
+  function drawSeries(cv, data, maxv, color, fill) {
+    if (!cv) return;
+    const ctx = cv.getContext("2d"), w = cv.width, h = cv.height;
+    ctx.clearRect(0, 0, w, h);
+    if (!data.length) return;
+    const n = data.length, dx = n > 1 ? w / (n - 1) : w, top = 2, bot = h - 2;
+    const y = (v) => bot - Math.max(0, Math.min(1, v / maxv)) * (bot - top);
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) { const px = i * dx, py = y(data[i]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    if (fill) {
+      ctx.lineTo((n - 1) * dx, bot); ctx.lineTo(0, bot); ctx.closePath();
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) { const px = i * dx, py = y(data[i]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    }
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.stroke();
+  }
+  function memMax() {                              // 内存纵轴上限：随峰值动态抬升，至少 256MB，留 20% 余量
+    let m = 256; for (const v of sysHist.mem) if (v > m) m = v;
+    return Math.ceil(m * 1.2 / 64) * 64;
+  }
+  function drawSysMini() {
+    const cv = document.getElementById("sysspark");
+    if (cv) {                                      // 迷你窗只画 CPU 折线（最能反映卡顿），内存看数字
+      const ctx = cv.getContext("2d");
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.strokeStyle = SYS_DOT; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, cv.height - 1.5); ctx.lineTo(cv.width, cv.height - 1.5); ctx.stroke();
+      drawSeries(cv, sysHist.cpu, 100, "#7fb0ee", "#7fb0ee22");
+    }
+    const t = document.getElementById("systext");
+    if (t && sysLast) {
+      const c = t.querySelector(".sm-cpu"), m = t.querySelector(".sm-mem");
+      if (c) c.textContent = Math.round(sysLast.tool_cpu) + "%";
+      if (m) m.textContent = fmtMB(sysLast.tool_mem);
+    }
+  }
+  function drawSysDetail() {
+    if (!sysDetailOpen || !sysLast) return;
+    syncDetailCanvasSize();                        // 跟随窗口尺寸（CSS 拉伸）对齐位图，曲线才清晰
+    drawSeries(document.getElementById("sd-cpuchart"), sysHist.cpu, 100, "#7fb0ee", "#7fb0ee22");
+    drawSeries(document.getElementById("sd-memchart"), sysHist.mem, memMax(), "#6fcf97", "#6fcf9722");
+    const set = (id, txt) => { const e = document.getElementById(id); if (e) e.textContent = txt; };
+    set("sd-cpu", sysLast.tool_cpu + "%  （整机 " + sysLast.ncpu + " 核）");
+    set("sd-mem", fmtMB(sysLast.tool_mem) + "  （峰值上限 " + fmtMB(memMax()) + "）");
+    set("sd-sys", sysLast.sys_cpu + "%  /  " + fmtMB(sysLast.sys_avail) + " 可用");
+  }
+  // 详情画布是 CSS 拉伸的，绘制前把位图尺寸对齐显示尺寸，曲线才不糊
+  function syncDetailCanvasSize() {
+    for (const id of ["sd-cpuchart", "sd-memchart"]) {
+      const cv = document.getElementById(id);
+      if (cv && (cv.width !== cv.clientWidth || cv.height !== cv.clientHeight) && cv.clientWidth) {
+        cv.width = cv.clientWidth; cv.height = cv.clientHeight;
+      }
+    }
+  }
+  async function sysPoll() {
+    let s = null;
+    try { s = await api().sys_stats(); } catch (e) { s = null; }
+    if (s && s.ok) {
+      sysLast = s;
+      const cap = sysCap();
+      sysHist.cpu.push(s.tool_cpu); sysHist.mem.push(s.tool_mem);
+      while (sysHist.cpu.length > cap) sysHist.cpu.shift();
+      while (sysHist.mem.length > cap) sysHist.mem.shift();
+      drawSysMini();
+      drawSysDetail();
+    }
+    sysTimer = setTimeout(sysPoll, sysCfg.interval);
+  }
+  function startSysMon() {
+    if (sysTimer) return;
+    sysLoadCfg();
+    const iv = document.getElementById("sd-interval"), wn = document.getElementById("sd-window");
+    if (iv) {
+      iv.value = sysCfg.interval;
+      iv.onchange = () => {
+        sysCfg.interval = Math.max(200, Math.min(10000, parseInt(iv.value) || 1000));
+        iv.value = sysCfg.interval; sysSaveCfg();
+        clearTimeout(sysTimer); sysTimer = null; startSysMon();   // 按新间隔重排
+      };
+    }
+    if (wn) {
+      wn.value = sysCfg.minutes;
+      wn.onchange = () => {
+        sysCfg.minutes = Math.max(1, Math.min(120, parseInt(wn.value) || 5));
+        wn.value = sysCfg.minutes; sysSaveCfg();
+        const cap = sysCap();                                     // 收紧时立即裁掉超出的历史
+        while (sysHist.cpu.length > cap) sysHist.cpu.shift();
+        while (sysHist.mem.length > cap) sysHist.mem.shift();
+      };
+    }
+    sysPoll();
+  }
+  function toggleSysMon() {
+    sysDetailOpen = !sysDetailOpen;
+    const d = document.getElementById("sysdetail"), m = document.getElementById("sysmon");
+    if (d) d.classList.toggle("show", sysDetailOpen);
+    if (m) m.style.display = sysDetailOpen ? "none" : "flex";
+    if (sysDetailOpen) { syncDetailCanvasSize(); drawSysDetail(); }
+  }
+
   const self = {
-    toggleRun, dryRun, step: stepRun, stopRun, toggleSimple,
+    toggleRun, dryRun, stopRun, toggleSimple, toggleSysMon,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {
@@ -2207,13 +2301,14 @@ const ED = (function () {
       "上方标出组名，框也会自动包住它们。一个节点只属于一个组。<br>" +
       "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
-      "<b style='color:#e6c07b'>运行 / 试运行</b>　顶部 <b style='color:#ff8a8a'>▶运行</b>(真跑) / 试运行(干跑) / 单步 / 停止<br>" +
-      "· <b style='color:#ff8a8a'>运行＝真跑</b>：<b>真正向游戏发按键/鼠标</b>，点下去会二次确认，运行中顶部有红色提示条。<br>" +
-      "· <b>试运行＝干跑</b>：只识别、<b>不发任何输入</b>，安全；走过的节点高亮、连线流动、出口显示数据值、底部出日志。<br>" +
-      "· 每帧间隔＝流程「每帧触发」节点的「循环间隔(秒)」(面板可调)；单步默认按干跑只跑一帧。<br>" +
+      "<b style='color:#e6c07b'>运行 / 试运行</b>　顶部 <b style='color:#8fe0a8'>▶运行</b> / 停止；试运行(干跑)在编辑模式下可见<br>" +
+      "· <b style='color:#8fe0a8'>运行</b>：执行当前流程，<b>真正向游戏发按键/鼠标</b>（再点变「暂停」，运行中可按住 Shift/Ctrl/Alt 暂停）。<br>" +
+      "· <b>试运行＝干跑</b>：只识别、<b>不发任何输入</b>，安全；走过的节点高亮、连线流动、出口显示数据值、底部出日志，用于上线前核对。<br>" +
+      "· 每帧间隔＝流程「每帧触发」节点的「循环间隔(秒)」(面板可调)。<br>" +
       "· 走过的<b>分支</b>节点标「真/假」=走了哪条线；执行<b>走到头</b>的出口标「⏹ 结束」(出口空接=本帧到此)。<br>" +
       "· <b>断点</b>：右键节点→「设为断点 🔴」，运行命中它就自动暂停；「运行到此节点 ⏭」= 跑到它再停。<br>" +
-      "· 底部日志可<b>拖上边沿调高度</b>、可<b>选中复制</b>；上滚查看时不会被新日志拽回底部。</div>" +
+      "· 底部日志每行带<b>时间</b>与等级(• 信息 / ▲ 提醒 / ✕ 错误)，可<b>拖上边沿调高度</b>、<b>选中复制</b>；上滚查看时不会被新日志拽回底部。<br>" +
+      "· 右上角<b>资源监控</b>小窗显示本工具 CPU/内存曲线，点开可看系统占用与调采样间隔/保留时长。</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>在游戏画面上直接采集</b>（节点里相应参数下方的按钮）<br>" +
       "· <b>框选区域…</b>：按住左键拖出矩形，Enter 确认（区域参数）<br>" +

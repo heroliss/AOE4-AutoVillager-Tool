@@ -31,14 +31,6 @@
   #toolbar button.accent { background: #2f6b3f; border-color: #3f8a52; color: #eafff0; }
   #toolbar button.accent:hover { background: #357a48; }
   #toolbar button.accent.running { background: #8a5a2f; border-color: #b07a3f; }
-  /* 真跑（运行）主按钮：空闲时用红色强提示，提醒点下去会真的发输入 */
-  #toolbar button.danger { background: #8a2f2f; border-color: #b04a4a; color: #ffe9e9; }
-  #toolbar button.danger:hover { background: #a03636; }
-  #realbanner { position: absolute; left: 50%; top: 48px; transform: translateX(-50%); display: none;
-                background: #7a1f1f; color: #ffe0e0; border: 1px solid #ff6a6a; border-radius: 8px;
-                padding: 6px 16px; font-size: 13px; font-weight: bold; z-index: 210;
-                box-shadow: 0 4px 18px #000a; }
-  #realbanner.show { display: block; }
   /* 使用模式（简单模式）：折叠节点图，只留控制面板 + 运行 + 日志，给“只想跑”的用户 */
   body.simple .edit-only { display: none !important; }
   body.simple #wrap { display: none; }
@@ -92,16 +84,59 @@
   /* 日志面板与画布间的拖拽分隔条：上下拖动改变日志高度 */
   #logresize { flex: none; display: none; height: 7px; cursor: ns-resize; background: var(--line); }
   #logresize:hover { background: var(--accent); }
-  /* 运行日志面板：试运行时从底部弹出，显示引擎日志（哪个节点说了什么）。文本可选中复制。 */
-  #logpanel { flex: none; display: none; height: 150px; overflow-y: auto; background: #15181e;
-           border-top: 1px solid var(--line); padding: 6px 10px; font: 12px/1.5 Consolas, monospace;
+  /* 运行日志面板：运行时从底部弹出，显示引擎日志（哪个节点说了什么）。文本可选中复制。 */
+  #logpanel { flex: none; display: none; height: 160px; overflow-y: auto; background: #14171d;
+           border-top: 1px solid var(--line); padding: 0 0 4px; font: 12px/1.6 Consolas, "Microsoft YaHei", monospace;
            user-select: text; -webkit-user-select: text; cursor: auto; }
-  #logpanel .lp-head { color: var(--fg-dim); position: sticky; top: -6px; background: #15181e;
-           padding: 2px 0 4px; display: flex; align-items: center; gap: 8px; user-select: none; }
-  #logpanel .lp-row { white-space: pre-wrap; word-break: break-word; }
-  #logpanel .lv-INFO { color: #bcd; } #logpanel .lv-WARN { color: #e6c07b; }
-  #logpanel .lv-ERROR { color: #ff9a9a; } #logpanel .lp-tick { color: #6c727c; }
+  #logpanel .lp-head { color: var(--fg-dim); position: sticky; top: 0; z-index: 2;
+           background: linear-gradient(#1b1f27, #181c23); border-bottom: 1px solid var(--line);
+           padding: 5px 12px; display: flex; align-items: center; gap: 8px; user-select: none; font-size: 12px; }
+  #logpanel .lp-head .lp-title { font-weight: bold; color: #cdd3dc; }
+  #logpanel .lp-head .lp-count { color: var(--fg-dim); }
+  #logpanel .lp-head .spacer { flex: 1 1 auto; }
+  #logpanel .lp-rows { padding: 4px 0; }
+  /* 每条日志：时间 + 等级圆点 + 文本，按等级配色与左侧色条，便于一眼扫读 */
+  #logpanel .lp-row { display: flex; align-items: baseline; gap: 8px; padding: 1px 12px 1px 9px;
+           border-left: 3px solid transparent; white-space: pre-wrap; word-break: break-word; }
+  #logpanel .lp-row:hover { background: #1b1f27; }
+  #logpanel .lp-time { color: #6c727c; flex: none; font-variant-numeric: tabular-nums; }
+  #logpanel .lp-dot { flex: none; }
+  #logpanel .lp-msg { flex: 1 1 auto; }
+  #logpanel .lp-row.lv-INFO  { border-left-color: #3a5a7a; }
+  #logpanel .lp-row.lv-INFO  .lp-dot { color: #7fb0ee; } #logpanel .lp-row.lv-INFO  .lp-msg { color: #c3cad6; }
+  #logpanel .lp-row.lv-WARN  { border-left-color: #8a6a2f; background: #2a230f33; }
+  #logpanel .lp-row.lv-WARN  .lp-dot { color: #e6c07b; } #logpanel .lp-row.lv-WARN  .lp-msg { color: #e6c07b; }
+  #logpanel .lp-row.lv-ERROR { border-left-color: #8a2f2f; background: #2a0f0f55; }
+  #logpanel .lp-row.lv-ERROR .lp-dot { color: #ff7a7a; } #logpanel .lp-row.lv-ERROR .lp-msg { color: #ff9a9a; font-weight: bold; }
   #logpanel .lp-clear { cursor: pointer; color: #7fb0ee; }
+  #logpanel .lp-clear:hover { text-decoration: underline; }
+  /* —— 资源监控小窗：右上角常驻迷你曲线 + 简要数字，点击展开详情/配置 —— */
+  #sysmon { position: fixed; top: 48px; right: 10px; z-index: 120; display: flex; flex-direction: column;
+            gap: 2px; background: #1d212bdd; border: 1px solid var(--line); border-radius: 8px;
+            padding: 5px 8px 4px; cursor: pointer; opacity: .82; user-select: none;
+            transition: opacity .15s, border-color .15s; box-shadow: 0 3px 12px #0006; }
+  #sysmon:hover { opacity: 1; border-color: #4a5260; }
+  #sysmon canvas { display: block; }
+  #systext { font: 11px/1.3 Consolas, monospace; color: var(--fg-dim); white-space: nowrap; }
+  #systext b { color: var(--fg); font-weight: normal; }
+  #systext .sm-cpu { color: #7fb0ee; } #systext .sm-mem { color: #6fcf97; }
+  #sysdetail { position: fixed; top: 48px; right: 10px; z-index: 130; width: 320px; display: none;
+               background: #1e222add; border: 1px solid #3c434f; border-radius: 10px; padding: 12px 14px;
+               box-shadow: 0 12px 34px #000b; font: 12px/1.5 "Microsoft YaHei", sans-serif; color: var(--fg); }
+  #sysdetail.show { display: block; }
+  #sysdetail .sd-head { display: flex; align-items: center; font-weight: bold; color: #e6e9ee; margin-bottom: 8px; }
+  #sysdetail .sd-head .spacer { flex: 1 1 auto; }
+  #sysdetail .sd-close { cursor: pointer; color: var(--fg-dim); font-size: 18px; line-height: 1; padding: 0 4px; }
+  #sysdetail .sd-close:hover { color: var(--fg); }
+  #sysdetail .sd-row { display: flex; align-items: baseline; margin: 8px 0 3px; font-size: 12px; }
+  #sysdetail .sd-row .spacer { flex: 1 1 auto; }
+  #sysdetail .sd-row b { font-weight: normal; color: var(--fg); font-family: Consolas, monospace; }
+  #sysdetail canvas { display: block; width: 100%; height: 56px; background: #14171d;
+                      border: 1px solid var(--line); border-radius: 6px; }
+  #sysdetail .sd-cfg { margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--line);
+                       color: var(--fg-dim); font-size: 12px; line-height: 2; }
+  #sysdetail .sd-cfg input { width: 56px; background: #15171c; color: var(--fg); border: 1px solid var(--btn-line);
+                       border-radius: 4px; height: 22px; font-size: 12px; padding: 0 4px; }
   /* 滚动条：细、暗，融入主题 */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: #3a414c; border-radius: 6px; border: 2px solid transparent;
@@ -119,10 +154,9 @@
     <button onclick="ED.open()">打开</button>
     <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="" disabled selected>打开内置流程…</option></select>
     <span class="sep"></span>
-    <button id="runbtn" class="accent" onclick="ED.toggleRun()" title="运行：真正向游戏发送按键/鼠标（开始前会二次确认）">▶ 运行</button>
-    <button id="dryrunbtn" onclick="ED.dryRun()" title="试运行（干跑）：只识别、不发送任何输入，用于调试">试运行</button>
-    <button id="stepbtn" class="edit-only" onclick="ED.step()" title="只跑一帧（默认干跑调试）">单步</button>
+    <button id="runbtn" class="accent" onclick="ED.toggleRun()" title="运行：执行当前流程（向游戏发送按键/鼠标）">▶ 运行</button>
     <button id="stopbtn" onclick="ED.stopRun()" disabled>停止</button>
+    <button id="dryrunbtn" class="edit-only" onclick="ED.dryRun()" title="试运行（干跑）：只识别、不发送任何输入，用于调试核对">试运行</button>
     <span class="sep edit-only"></span>
     <button class="edit-only" onclick="ED.autolayout()">自动排版</button>
     <button class="edit-only" onclick="ED.fit()">适应窗口</button>
@@ -139,7 +173,23 @@
   <div id="wrap"><canvas id="graph"></canvas></div>
   <div id="logresize" title="拖动调整日志高度"></div>
   <div id="logpanel"></div>
-  <div id="realbanner">⚠ 真跑进行中：正在向游戏发送操作（按住 Shift/Ctrl/Alt 或点「停止」可中断）</div>
+  <!-- 资源监控小窗（右上角常驻）：迷你曲线 + 简要数字，点击展开详情与采样配置 -->
+  <div id="sysmon" title="资源占用 · 点击查看详情" onclick="ED.toggleSysMon()">
+    <canvas id="sysspark" width="116" height="26"></canvas>
+    <div id="systext">CPU <b class="sm-cpu">--</b> · 内存 <b class="sm-mem">--</b></div>
+  </div>
+  <div id="sysdetail">
+    <div class="sd-head">资源监控<span class="spacer"></span><span class="sd-close" onclick="ED.toggleSysMon()" title="收起">×</span></div>
+    <div class="sd-row"><span style="color:#7fb0ee">本工具 CPU</span><span class="spacer"></span><b id="sd-cpu">--</b></div>
+    <canvas id="sd-cpuchart"></canvas>
+    <div class="sd-row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="sd-mem">--</b></div>
+    <canvas id="sd-memchart"></canvas>
+    <div class="sd-row"><span style="color:#8b929e">系统 CPU / 可用内存</span><span class="spacer"></span><b id="sd-sys">--</b></div>
+    <div class="sd-cfg">
+      采样间隔 <input id="sd-interval" type="number" min="200" max="10000" step="100"> ms<br>
+      保留时长 <input id="sd-window" type="number" min="1" max="120" step="1"> 分钟
+    </div>
+  </div>
   <div id="toast"></div>
 
   <script src="vendor/litegraph.js"></script>

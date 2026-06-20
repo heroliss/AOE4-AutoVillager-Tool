@@ -268,9 +268,43 @@ class Api:
         self._run_logs: list = []
         import threading
         self._run_lock = threading.RLock()   # run_tick / run_update / begin / end 互斥（前端不同线程过桥）
+        self._sysmon_proc = None             # 资源监控：缓存本进程的 psutil.Process（cpu_percent 需要复用同一对象建基准）
 
     def get_defs(self):
         return node_defs()
+
+    # ==================== 资源监控（编辑器角落的小窗轮询）====================
+    def sys_stats(self):
+        """采样本工具进程与系统的 CPU / 内存，供编辑器角落的监控小窗显示。
+
+        前端约每秒轮询一次；cpu_percent(None) 返回「上次调用至今」的占用率（首次为 0，
+        因此构造时先预热一次建立基准点）。psutil 读的是系统性能计数器、非线程亲和资源，
+        故跨 pywebview 线程复用同一个 Process 对象是安全的（不像 mss 的 GDI DC）。
+        """
+        try:
+            import psutil
+        except Exception:
+            return {"ok": False}
+        try:
+            if self._sysmon_proc is None:
+                self._sysmon_proc = psutil.Process(os.getpid())
+                self._sysmon_proc.cpu_percent(None)   # 预热：建立基准，下次调用才有意义
+                psutil.cpu_percent(None)
+            ncpu = psutil.cpu_count() or 1
+            tool_cpu = self._sysmon_proc.cpu_percent(None) / ncpu   # 归一到「占整机」0~100%
+            tool_mem = self._sysmon_proc.memory_info().rss / 1048576.0
+            vm = psutil.virtual_memory()
+            return {
+                "ok": True,
+                "tool_cpu": round(tool_cpu, 1),
+                "tool_mem": round(tool_mem, 1),
+                "sys_cpu": round(psutil.cpu_percent(None), 1),
+                "sys_used_pct": round(vm.percent, 1),
+                "sys_avail": round(vm.available / 1048576.0, 1),
+                "ncpu": ncpu,
+            }
+        except Exception:
+            return {"ok": False}
 
     def set_dirty(self, flag):
         """前端在 ●未保存 状态变化时调用，使关闭窗口能弹保存确认。"""
@@ -291,9 +325,9 @@ class Api:
             self._run_ctx = ExecutionContext(on_log=_log, dry_run=(not real))
             self._run_exec = TraceExecutor(self._run_graph)
             self._run_logs.append({
-                "level": "WARN" if real else "INFO",
-                "msg": ("⚠ 真跑模式：将真正向游戏发送按键/鼠标操作" if real
-                        else "干跑模式：只识别、不发送任何输入"),
+                "level": "INFO",
+                "msg": ("开始运行：执行流程并向游戏发送按键/鼠标操作" if real
+                        else "开始试运行：只识别、不发送任何输入"),
                 "node": None})
             return {"ok": True, "nodes": len(self._run_graph.nodes), "real": bool(real)}
 
