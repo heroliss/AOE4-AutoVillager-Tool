@@ -21,7 +21,9 @@ const ED = (function () {
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // —— 试运行（干跑）可视化状态 ——
   let running = false, runSession = false, runTimer = null, runSpeed = 250;
-  let runPath = new Set(), runPorts = {}, runData = {}, runLogs = [];
+  let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
+  let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
+  let runAnimRAF = null, runPhase = 0, _runAnimLast = 0;   // 动画（脉冲发光 / 连线流动）
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
@@ -418,18 +420,6 @@ const ED = (function () {
     }
     return out;
   }
-  // 试运行时数据端口旁的小值标签
-  function drawValuePill(ctx, x, y, text) {
-    ctx.save();
-    ctx.font = "11px Consolas, monospace";
-    const tw = ctx.measureText(text).width;
-    roundRect(ctx, x, y - 8, tw + 10, 16, 4);
-    ctx.fillStyle = "#10202e"; ctx.globalAlpha = 0.96; ctx.fill(); ctx.globalAlpha = 1;
-    ctx.strokeStyle = "#3a6f8a"; ctx.lineWidth = 1; ctx.stroke();
-    ctx.fillStyle = "#bfe3ff"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    ctx.fillText(text, x + 5, y + 0.5);
-    ctx.restore();
-  }
   function roundRect(ctx, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -647,36 +637,7 @@ const ED = (function () {
     }
     // 节点的分组归属用“标题栏底色”表达（见 applyGroupColors）；组名只在分组框的标签页上显示一次，
     // 不在每个节点上重复，避免同名标签堆叠、保持简洁。
-    // ② 试运行可视化：经过的节点发亮边框；走过的执行出口画绿点；数据输出端口旁标出当前值。
-    if (runSession) {
-      const def = defByType[this._typeId];
-      if (runPath.has(this._id)) {
-        ctx.save();
-        const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
-        ctx.strokeStyle = "#7ad0ff"; ctx.lineWidth = 2.5;
-        ctx.shadowColor = "#7ad0ff"; ctx.shadowBlur = 12;
-        roundRect(ctx, -2, -th - 2, this.size[0] + 4, this.size[1] + th + 4, 8);
-        ctx.stroke();
-        ctx.restore();
-      }
-      if (def) {
-        const tmp = [0, 0];
-        (def.outputs || []).forEach((p, i) => {
-          let lx, ly;
-          try { const ap = this.getConnectionPos(false, i, tmp); lx = ap[0] - this.pos[0]; ly = ap[1] - this.pos[1]; }
-          catch (e) { return; }
-          if (p.kind === "exec") {
-            if (runPorts[this._id] === p.name) {   // 本帧走的执行出口：画个绿点
-              ctx.save(); ctx.fillStyle = "#7CFF9B";
-              ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-            }
-            return;
-          }
-          const key = this._id + "" + p.name;
-          if (key in runData) drawValuePill(ctx, lx + 6, ly, fmtRunVal(runData[key]));
-        });
-      }
-    }
+    // 试运行的高亮/数据值/连线流动统一画在所有节点之上（见 canvas.onDrawForeground = drawRunOverlay）。
     // ③ 附属卡片
     const note = this._note || "";
     const paths = nodePreviewPaths(this);
@@ -1147,9 +1108,9 @@ const ED = (function () {
   function load(flow, opts) {
     // 载入新流程前先停掉试运行（除非是自动排版那种“原地刷新”——keepHistory 标记）
     if (runSession && !(opts && opts.keepHistory)) {
-      running = false; clearTimeout(runTimer);
+      running = false; clearTimeout(runTimer); stopRunAnim();
       try { api().run_end(); } catch (e) {}
-      runSession = false; runPath = new Set(); runPorts = {}; runData = {}; setRunUI();
+      runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); setRunUI();
     }
     const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
     const keepHistory = !!(opts && opts.keepHistory);   // 自动排版：保留撤销历史（这样排版可被 Ctrl+Z 撤销）
@@ -1423,6 +1384,110 @@ const ED = (function () {
     }
     return String(v);
   }
+  // ---- 试运行可视化：聚光灯压暗 + 脉冲发光 + 连线流动 + 彩色值标签（画在所有节点之上）----
+  const _t0 = [0, 0], _t1 = [0, 0];
+  function outSlotIndex(n, portName) { return (n.outputs || []).findIndex((o) => o.name === portName); }
+  function execInSlotIndex(n) { const i = (n.inputs || []).findIndex((p) => p.type === "exec"); return i < 0 ? 0 : i; }
+  function drawValPill(ctx, x, y, v) {
+    const text = fmtRunVal(v);
+    let bg = "#27496b", fg = "#dff0ff";                 // 默认（数值/其它）
+    if (v === true) { bg = "#1f8a47"; fg = "#eafff0"; }
+    else if (v === false) { bg = "#a83a3a"; fg = "#ffe6e6"; }
+    else if (v && typeof v === "object" && v._list) { bg = "#5a4a85"; fg = "#efe8ff"; }
+    else if (typeof v === "string") { bg = "#3f6a4a"; fg = "#e7ffe7"; }
+    ctx.save();
+    ctx.font = "bold 12px Consolas, monospace";
+    const tw = ctx.measureText(text).width;
+    roundRect(ctx, x, y - 9, tw + 12, 18, 5);
+    ctx.shadowColor = "#000a"; ctx.shadowBlur = 5; ctx.fillStyle = bg; ctx.fill();
+    ctx.shadowBlur = 0; ctx.strokeStyle = "#0007"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = fg; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillText(text, x + 6, y + 0.5);
+    ctx.restore();
+  }
+  function drawFlowWire(ctx, p0, p1) {
+    const dx = Math.max(30, Math.abs(p1[0] - p0[0]) * 0.3);
+    const c0 = [p0[0] + dx, p0[1]], c1 = [p1[0] - dx, p1[1]];
+    const bez = (t) => { const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+      return [a * p0[0] + b * c0[0] + c * c1[0] + d * p1[0], a * p0[1] + b * c0[1] + c * c1[1] + d * p1[1]]; };
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,210,63,0.5)"; ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(p0[0], p0[1]);
+    ctx.bezierCurveTo(c0[0], c0[1], c1[0], c1[1], p1[0], p1[1]); ctx.stroke();
+    ctx.shadowColor = "#ffd23f"; ctx.shadowBlur = 9;
+    for (let k = 0; k < 4; k++) {
+      const q = bez(((runPhase * 0.18) + (k / 4)) % 1);
+      ctx.beginPath(); ctx.arc(q[0], q[1], 3.4, 0, Math.PI * 2); ctx.fillStyle = "#fff3c0"; ctx.fill();
+    }
+    ctx.restore();
+  }
+  function nodeFullRect(n, ctx) {
+    const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
+    const ch = (n.flags && n.flags.collapsed) ? 0 : cardHeightOf(n, ctx);
+    return [n.pos[0], n.pos[1] - th, n.size[0], n.size[1] + th + ch];
+  }
+  function drawRunOverlay(ctx) {
+    if (!runSession || !graph) return;
+    const nodes = graph._nodes || [];
+    const active = (id) => runPath.has(id) || runDataNodes.has(id);
+    const th = LiteGraph.NODE_TITLE_HEIGHT || 30;
+    // ① 聚光灯：压暗未参与本帧的节点，让走过/取数的节点凸显
+    ctx.save();
+    ctx.fillStyle = "rgba(11,13,18,0.62)";
+    for (const n of nodes) {
+      if (active(n._id)) continue;
+      const r = nodeFullRect(n, ctx);
+      roundRect(ctx, r[0] - 3, r[1] - 3, r[2] + 6, r[3] + 6, 9); ctx.fill();
+    }
+    ctx.restore();
+    // ② 走过的执行连线：流动亮点（沿样条移动）
+    for (let i = 0; i < runPathArr.length - 1; i++) {
+      const A = nodeByOurId(runPathArr[i]), B = nodeByOurId(runPathArr[i + 1]);
+      if (!A || !B) continue;
+      const oi = outSlotIndex(A, runPorts[A._id]); if (oi < 0) continue;
+      const p0 = A.getConnectionPos(false, oi, _t0), p1 = B.getConnectionPos(true, execInSlotIndex(B), _t1);
+      drawFlowWire(ctx, [p0[0], p0[1]], [p1[0], p1[1]]);
+    }
+    // ③ 执行节点：脉冲发光边框（醒目的琥珀色，和分组色区分开 + 会呼吸）
+    const pulse = 0.5 + 0.5 * Math.sin(runPhase * 3.0);
+    for (const n of nodes) {
+      if (!runPath.has(n._id)) continue;
+      ctx.save();
+      ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 2.5 + 2.5 * pulse;
+      ctx.shadowColor = "#ffb300"; ctx.shadowBlur = 12 + 18 * pulse;
+      roundRect(ctx, n.pos[0] - 2, n.pos[1] - th - 2, n.size[0] + 4, n.size[1] + th + 4, 9); ctx.stroke();
+      ctx.restore();
+    }
+    // ④ 数据输出值（彩色标签）+ 走过的执行出口（绿点）
+    for (const n of nodes) {
+      const def = defByType[n._typeId]; if (!def) continue;
+      (def.outputs || []).forEach((p, i) => {
+        if (p.kind === "exec") {
+          if (runPath.has(n._id) && runPorts[n._id] === p.name) {
+            const ap = n.getConnectionPos(false, i, _t0);
+            ctx.save(); ctx.fillStyle = "#7CFF9B"; ctx.shadowColor = "#7CFF9B"; ctx.shadowBlur = 9;
+            ctx.beginPath(); ctx.arc(ap[0], ap[1], 4.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          }
+          return;
+        }
+        const key = n._id + "" + p.name;
+        if (!(key in runData)) return;
+        const ap = n.getConnectionPos(false, i, _t0);
+        drawValPill(ctx, ap[0] + 8, ap[1], runData[key]);
+      });
+    }
+  }
+  function startRunAnim() {
+    if (runAnimRAF) return;
+    const step = (ts) => {
+      if (!runSession) { runAnimRAF = null; return; }
+      if (ts - _runAnimLast > 32) { _runAnimLast = ts; runPhase += 0.06; if (canvas) canvas.setDirty(true, false); }
+      runAnimRAF = requestAnimationFrame(step);
+    };
+    runAnimRAF = requestAnimationFrame(step);
+  }
+  function stopRunAnim() { if (runAnimRAF) cancelAnimationFrame(runAnimRAF); runAnimRAF = null; }
+
   function setRunUI() {
     const btn = document.getElementById("runbtn"), stop = document.getElementById("stopbtn");
     if (btn) { btn.textContent = running ? "⏸ 暂停" : (runSession ? "▶ 继续" : "▶ 试运行"); btn.classList.toggle("running", running); }
@@ -1446,14 +1511,17 @@ const ED = (function () {
       const r = await api().run_begin(collect());
       runSession = !!(r && r.ok);
       runLogs = []; renderLog();
+      if (runSession) startRunAnim();   // 启动脉冲/流动动画
       return runSession;
     } catch (e) { showError("启动试运行失败：" + (e && (e.stack || e.message) || e)); return false; }
   }
   function applyTrace(t) {
     if (!t) return;
-    runPath = new Set(t.path || []);
+    runPathArr = t.path || [];
+    runPath = new Set(runPathArr);
     runPorts = t.ports || {};
     runData = t.data || {};
+    runDataNodes = new Set(Object.keys(runData).map((k) => k.split("")[0]));
     for (const l of (t.logs || [])) runLogs.push({ tick: t.tick, level: l.level, msg: l.msg, node: l.node });
     if (runLogs.length > 800) runLogs = runLogs.slice(-800);
     renderLog();
@@ -1486,9 +1554,9 @@ const ED = (function () {
     setRunUI();
   }
   async function stopRun() {
-    running = false; clearTimeout(runTimer);
+    running = false; clearTimeout(runTimer); stopRunAnim();
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
-    runPath = new Set(); runPorts = {}; runData = {};
+    runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set();
     setRunUI();
     if (canvas) canvas.setDirty(true, true);
     setStatus("已停止试运行");
@@ -1927,6 +1995,7 @@ const ED = (function () {
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）
+      canvas.onDrawForeground = drawRunOverlay;   // 在所有节点之上画“试运行”高亮/数据/连线流动
       setupHelpPanel();
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
       graph.onConnectionChange = scheduleSnap;
