@@ -31,10 +31,8 @@
   #toolbar button.accent { background: #2f6b3f; border-color: #3f8a52; color: #eafff0; }
   #toolbar button.accent:hover { background: #357a48; }
   #toolbar button.accent.running { background: #8a5a2f; border-color: #b07a3f; }
-  /* 使用模式（简单模式）：折叠节点图，只留控制面板 + 运行 + 日志，给“只想跑”的用户 */
+  /* 使用模式（简单模式）：隐藏编辑专用按钮；画布转为只读（仍可拖动查看、运行、用控制面板调参），面向“只想用”的用户 */
   body.simple .edit-only { display: none !important; }
-  body.simple #wrap { display: none; }
-  body.simple #panel { max-height: none; flex: 1 1 auto; align-content: flex-start; }
   #panel .phint { color: var(--fg-dim); font-size: 13px; padding: 8px 4px; line-height: 1.7; }
   #modebtn { background: #314a6b; border-color: #3f5f88; }
   #modebtn:hover { background: #395681; }
@@ -110,8 +108,8 @@
   #logpanel .lp-row.lv-ERROR .lp-dot { color: #ff7a7a; } #logpanel .lp-row.lv-ERROR .lp-msg { color: #ff9a9a; font-weight: bold; }
   #logpanel .lp-clear { cursor: pointer; color: #7fb0ee; }
   #logpanel .lp-clear:hover { text-decoration: underline; }
-  /* —— 资源监控小窗：右上角常驻迷你曲线 + 简要数字，点击展开详情/配置 —— */
-  #sysmon { position: fixed; top: 48px; right: 10px; z-index: 120; display: flex; flex-direction: column;
+  /* —— 资源监控小窗：画布右下角常驻迷你曲线 + 简要数字，点击展开详情/配置（放在画布内，运行时随日志面板上移、不被遮）—— */
+  #sysmon { position: absolute; bottom: 10px; right: 10px; z-index: 60; display: flex; flex-direction: column;
             gap: 2px; background: #1d212bdd; border: 1px solid var(--line); border-radius: 8px;
             padding: 5px 8px 4px; cursor: pointer; opacity: .82; user-select: none;
             transition: opacity .15s, border-color .15s; box-shadow: 0 3px 12px #0006; }
@@ -120,7 +118,7 @@
   #systext { font: 11px/1.3 Consolas, monospace; color: var(--fg-dim); white-space: nowrap; }
   #systext b { color: var(--fg); font-weight: normal; }
   #systext .sm-cpu { color: #7fb0ee; } #systext .sm-mem { color: #6fcf97; }
-  #sysdetail { position: fixed; top: 48px; right: 10px; z-index: 130; width: 320px; display: none;
+  #sysdetail { position: absolute; bottom: 10px; right: 10px; z-index: 130; width: 320px; display: none;
                background: #1e222add; border: 1px solid #3c434f; border-radius: 10px; padding: 12px 14px;
                box-shadow: 0 12px 34px #000b; font: 12px/1.5 "Microsoft YaHei", sans-serif; color: var(--fg); }
   #sysdetail.show { display: block; }
@@ -147,7 +145,7 @@
 </head>
 <body>
   <div id="toolbar">
-    <button id="modebtn" onclick="ED.toggleSimple()" title="在“使用模式（只留控制面板+运行）”和“编辑模式（节点图）”之间切换">使用模式</button>
+    <button id="modebtn" onclick="ED.toggleSimple()" title="在“使用模式（画布只读，仅控制面板+运行）”和“编辑模式（可改节点图）”之间切换">使用模式</button>
     <span class="sep edit-only"></span>
     <button class="edit-only" onclick="ED.save()">保存</button>
     <button class="edit-only" onclick="ED.saveAs()">另存为</button>
@@ -170,26 +168,28 @@
     <span id="hint">提示：右键空白处添加节点 · 滚轮缩放 · 拖动平移 · 详见“帮助”</span>
   </div>
   <div id="panel"></div>
-  <div id="wrap"><canvas id="graph"></canvas></div>
-  <div id="logresize" title="拖动调整日志高度"></div>
-  <div id="logpanel"></div>
-  <!-- 资源监控小窗（右上角常驻）：迷你曲线 + 简要数字，点击展开详情与采样配置 -->
-  <div id="sysmon" title="资源占用 · 点击查看详情" onclick="ED.toggleSysMon()">
-    <canvas id="sysspark" width="116" height="26"></canvas>
-    <div id="systext">CPU <b class="sm-cpu">--</b> · 内存 <b class="sm-mem">--</b></div>
-  </div>
-  <div id="sysdetail">
-    <div class="sd-head">资源监控<span class="spacer"></span><span class="sd-close" onclick="ED.toggleSysMon()" title="收起">×</span></div>
-    <div class="sd-row"><span style="color:#7fb0ee">本工具 CPU</span><span class="spacer"></span><b id="sd-cpu">--</b></div>
-    <canvas id="sd-cpuchart"></canvas>
-    <div class="sd-row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="sd-mem">--</b></div>
-    <canvas id="sd-memchart"></canvas>
-    <div class="sd-row"><span style="color:#8b929e">系统 CPU / 可用内存</span><span class="spacer"></span><b id="sd-sys">--</b></div>
-    <div class="sd-cfg">
-      采样间隔 <input id="sd-interval" type="number" min="200" max="10000" step="100"> ms<br>
-      保留时长 <input id="sd-window" type="number" min="1" max="120" step="1"> 分钟
+  <div id="wrap">
+    <canvas id="graph"></canvas>
+    <!-- 资源监控小窗（画布右下角常驻）：迷你曲线 + 简要数字，点击展开详情与采样配置 -->
+    <div id="sysmon" title="资源占用 · 点击查看详情" onclick="ED.toggleSysMon()">
+      <canvas id="sysspark" width="116" height="26"></canvas>
+      <div id="systext">CPU <b class="sm-cpu">--</b> · 内存 <b class="sm-mem">--</b></div>
+    </div>
+    <div id="sysdetail">
+      <div class="sd-head">资源监控<span class="spacer"></span><span class="sd-close" onclick="ED.toggleSysMon()" title="收起">×</span></div>
+      <div class="sd-row"><span style="color:#7fb0ee">本工具 CPU</span><span class="spacer"></span><b id="sd-cpu">--</b></div>
+      <canvas id="sd-cpuchart"></canvas>
+      <div class="sd-row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="sd-mem">--</b></div>
+      <canvas id="sd-memchart"></canvas>
+      <div class="sd-row"><span style="color:#8b929e">系统 CPU / 可用内存</span><span class="spacer"></span><b id="sd-sys">--</b></div>
+      <div class="sd-cfg">
+        采样间隔 <input id="sd-interval" type="number" min="200" max="10000" step="100"> ms<br>
+        保留时长 <input id="sd-window" type="number" min="1" max="120" step="1"> 分钟
+      </div>
     </div>
   </div>
+  <div id="logresize" title="拖动调整日志高度"></div>
+  <div id="logpanel"></div>
   <div id="toast"></div>
 
   <script src="vendor/litegraph.js"></script>

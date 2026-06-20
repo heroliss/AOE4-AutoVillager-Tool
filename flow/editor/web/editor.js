@@ -25,7 +25,8 @@ const ED = (function () {
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
   let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
-  let simpleMode = false;                       // 使用模式：折叠节点图，只留控制面板+运行+日志（成品工具视图）
+  let simpleMode = false;                       // 使用模式：画布只读（仅控制面板+运行+日志），面向“只想用”的用户
+  let simpleEntrySig = null;                    // 进入使用模式时的图快照：退出时据此还原（使用模式里的拖动/调参不落盘）
   let _lastRunStatus = "";                       // 上一条“本轮结果/原因”状态，变化时才记日志，避免刷屏
   let runAnimRAF = null, runPhase = 0, _runAnimLast = 0;   // 动画（脉冲发光 / 连线流动）
   const RUNSEP = String.fromCharCode(1);        // run_tick 里 data 的键 = nodeId + RUNSEP + port（与 Python \x01 一致）
@@ -96,6 +97,7 @@ const ED = (function () {
   function installEditorTweaks() {
     // 连线中点菜单：只留"删除连线"（不再混入与空白处重复的 Add Node）
     LGraphCanvas.prototype.showLinkMenu = function (link, e) {
+      if (simpleMode) return false;   // 使用模式：连线只读，不提供“删除连线”
       const that = this;
       new LiteGraph.ContextMenu(["删除连线"], {
         event: e, title: "连线",
@@ -105,11 +107,13 @@ const ED = (function () {
     };
     // 画布空白右键：只留"添加节点"（分组操作改到“节点右键”里，更符合直觉）
     LGraphCanvas.prototype.getCanvasMenuOptions = function () {
+      if (simpleMode) return [{ content: "使用模式（画布只读）· 切到编辑模式可改图", disabled: true }];
       return [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
     };
     // 节点右键：精简到 克隆 / 删除 + 节点自定义项（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/
     // Collapse/Pin/Colors/Shapes 等堆叠项）。务必调用 node.getExtraMenuOptions，否则“添加/编辑描述”不出现。
     LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
+      if (simpleMode) return [{ content: "使用模式（画布只读）", disabled: true }];
       const opts = [];
       if (node.clonable !== false)
         opts.push({ content: "克隆", callback: LGraphCanvas.onMenuNodeClone });
@@ -185,6 +189,24 @@ const ED = (function () {
       }
       try { _origDrawWidgets.call(this, node, posY, ctx, active_widget); }
       finally { for (const s of saved) s[0].value = s[1]; }
+    };
+
+    // —— 使用模式（画布只读）的三道闸：图上控件不可编辑 / 不能新建连线 / 不能断开连线 ——
+    // （新建/删除节点、删除连线走的是上面已拦截的右键菜单；这里补上“直接在图上拖拽改图”的几条路径。）
+    const _origProcWidgets = LGraphCanvas.prototype.processNodeWidgets;
+    LGraphCanvas.prototype.processNodeWidgets = function (node, pos, e, aw) {
+      if (simpleMode) return null;   // 改参数请走顶部“控制面板”
+      return _origProcWidgets.call(this, node, pos, e, aw);
+    };
+    const _origDisIn = LGraphNode.prototype.disconnectInput;
+    LGraphNode.prototype.disconnectInput = function () {
+      if (simpleMode) return false;
+      return _origDisIn.apply(this, arguments);
+    };
+    const _origDisOut = LGraphNode.prototype.disconnectOutput;
+    LGraphNode.prototype.disconnectOutput = function () {
+      if (simpleMode) return false;
+      return _origDisOut.apply(this, arguments);
     };
 
     // 分组节点的标题栏是分组色（偏亮），默认灰色标题字会被冲淡 -> 按底色亮度临时换成黑/白标题字。
@@ -894,7 +916,8 @@ const ED = (function () {
     }
   }
   function paramChanged(w) { return !!(w && w._key && w._saved !== undefined && String(w.value) !== String(w._saved)); }
-  function refreshDirty() { showDirty(savedSig !== null && curSig() !== savedSig); }
+  // 使用模式不追踪“未保存”：里头的调参/拖动都是临时的（退出使用模式会还原），不应弹保存提示。
+  function refreshDirty() { if (simpleMode) return; showDirty(savedSig !== null && curSig() !== savedSig); }
   let _lastDirty = null;
   function showDirty(d) {
     const el = document.getElementById("dirty");
@@ -1032,6 +1055,9 @@ const ED = (function () {
         Ctor.title = def.title;
         Ctor.prototype.onDrawForeground = nodeDrawForeground;   // 节点下方画描述+模板缩略图
         Ctor.prototype.getExtraMenuOptions = nodeExtraMenu;     // 右键菜单加“编辑描述”
+        // 使用模式：拒绝用户新建/改连线（建图/还原期 building=true 时照常放行，否则会载入成“没有连线”的空图）
+        Ctor.prototype.onConnectInput = function () { return building || !simpleMode; };
+        Ctor.prototype.onConnectOutput = function () { return building || !simpleMode; };
         if (!LiteGraph.registered_node_types[key])
           LiteGraph.registerNodeType(key, Ctor);
         okN++;
@@ -1187,6 +1213,7 @@ const ED = (function () {
     snapshotNow();   // 记录初始快照，作为撤销的基线
     if (clean) markSaved();                         // 刚载入＝与磁盘一致，清除“未保存”标记
     else { attachBaselineRefs(); refreshDirty(); }  // 排版后保留原基线，重新挂上控件引用
+    if (simpleMode) simpleEntrySig = JSON.stringify(collect());   // 使用模式下载入/切换流程：刷新“退出时还原”的基线
   }
 
   // 顶部工具栏：显示当前流程名 + 来源（内置只读 / 我的流程）；说明作为悬浮提示。
@@ -1248,11 +1275,13 @@ const ED = (function () {
     e[2] = String(name || "").trim();
     renderPanel(); scheduleSnap(); refreshDirty();
   }
-  // 默认显示名：参数自身的标签（不再用整段描述——同一节点可置顶多个参数，描述会重名）。
+  // 默认显示名：「节点标题 · 参数标签」——自带节点上下文，多个节点置顶同名参数（区域/阈值/间隔(秒)…）也不混淆，
+  // 用户无需逐个起名即可看懂。仍可在节点说明里给某项填更短的“自定义显示名”（随流程一起保存）。
   function defaultPinLabel(node, key) {
     const d = defByType[node._typeId];
     const p = d && (d.params || []).find((q) => q.key === key);
-    return (p && p.label) || key;
+    const plabel = (p && p.label) || key;
+    return ((d && d.title) || node._typeId) + " · " + plabel;
   }
   function panelLabel(node, key) {
     const e = pinEntry(node._id, key);
@@ -1396,14 +1425,22 @@ const ED = (function () {
     document.body.classList.toggle("simple", simpleMode);
     const b = document.getElementById("modebtn");
     if (b) b.textContent = simpleMode ? "编辑模式" : "使用模式";
+    if (simpleMode && helpEl) helpEl.style.display = "none";   // 使用模式不显示可编辑的节点说明
     renderPanel();
-    if (!simpleMode && canvas) { canvas.resize(); canvas.setDirty(true, true); }   // 回到编辑模式重算画布尺寸
+    if (canvas) { canvas.resize(); canvas.setDirty(true, true); }   // 两种模式都显示画布：切换后重算尺寸
   }
   function toggleSimple() {
-    simpleMode = !simpleMode;
+    if (!simpleMode) {                         // 编辑 → 使用：记下此刻的图，退出使用模式时据此还原（调参/拖动不落盘）
+      simpleEntrySig = JSON.stringify(collect());
+      simpleMode = true;
+    } else {                                    // 使用 → 编辑：还原到“进入使用模式时”的样子（位置/参数都不保存）
+      simpleMode = false;
+      if (simpleEntrySig) { applySnapshot(simpleEntrySig); simpleEntrySig = null; }
+    }
     try { localStorage.setItem("flow.simpleMode", simpleMode ? "1" : "0"); } catch (e) {}
     applySimpleMode();
-    setStatus(simpleMode ? "已进入使用模式（只看控制面板）" : "已回到编辑模式");
+    refreshDirty();
+    setStatus(simpleMode ? "已进入使用模式（画布只读 · 调参/拖动不会改动已保存的流程）" : "已回到编辑模式");
   }
 
   // ---- 启动：优先用 Python push 进来的数据 ----
@@ -1417,7 +1454,8 @@ const ED = (function () {
       else setStatus(`已就绪 ｜ 已注册 ${okN} 种节点（右键空白处添加）`);
       try { simpleMode = localStorage.getItem("flow.simpleMode") === "1"; } catch (e) {}
       applySimpleMode();   // 恢复上次的模式（使用/编辑）
-      startSysMon();       // 启动右上角资源监控小窗（轮询后端 sys_stats）
+      if (simpleMode) simpleEntrySig = JSON.stringify(collect());   // 开机即处于使用模式：记下“退出时还原”的基线
+      startSysMon();       // 启动右下角资源监控小窗（轮询后端 sys_stats）
     } catch (err) {
       showError("启动失败：\n" + (err && (err.stack || err.message) || err));
     }
@@ -1784,17 +1822,28 @@ const ED = (function () {
         return Math.max(0, (parseFloat(n.properties.interval) || 0) * 1000);
     return 100;
   }
-  // 用“本帧走到头的节点”说明这一轮的结果/原因，给正式运行时的用户看懂当前状态。
+  // 这一轮“为什么没动作”：停在某个判断分支＝被它拦下。原因优先用作者写在节点上的描述（如“不在游戏中”
+  // “修饰键被按下”），否则退而用“接到分支条件的那个检测节点”的标题，保持一句话、简短直白。
+  function branchStopReason(term) {
+    const note = (term._note || "").trim();
+    if (note) return note;
+    const ci = (term.inputs || []).findIndex((p) => p.name === "cond");
+    if (ci >= 0 && term.inputs[ci].link != null && graph) {
+      const l = graph.links[term.inputs[ci].link];
+      const src = l && graph.getNodeById(l.origin_id);
+      if (src) return "「" + (src.title || "条件") + "」未通过";
+    }
+    return "卡在「" + (term.title || "分支") + "」";
+  }
+  // 用“本帧走到头的节点”一句话说明这轮结果/原因（通用，不绑定具体流程）。
   function runStatusLine() {
     if (!runPathArr.length) return null;
     const term = nodeByOurId(runPathArr[runPathArr.length - 1]);
     if (!term) return null;
     const execOuts = (term.outputs || []).filter((o) => o.type === "exec");
-    if (execOuts.length >= 2) {            // 在某个检查分支处走到头 = 这轮被它拦下，没执行操作
-      const note = (term._note || "").trim();
-      return { level: "INFO", msg: "⏸ 本轮未操作 · " + (note || ("卡在「" + (term.title || "分支") + "」")) };
-    }
-    return { level: "INFO", msg: "✅ 本轮执行了操作（选建筑→排队→恢复选择）" };
+    if (execOuts.length >= 2)              // 停在判断分支 = 这轮被它拦下、没执行后续操作
+      return { level: "INFO", msg: "本轮未操作 · " + branchStopReason(term) };
+    return { level: "INFO", msg: "本轮已执行操作" };
   }
   function applyTrace(t) {
     if (!t) return;
@@ -2064,7 +2113,7 @@ const ED = (function () {
   function setupHelpPanel() {
     helpEl = document.createElement("div");
     helpEl.id = "helpbox";
-    helpEl.style.cssText = "position:absolute;right:10px;bottom:10px;max-width:340px;max-height:50%;" +
+    helpEl.style.cssText = "position:absolute;right:10px;bottom:62px;max-width:340px;max-height:50%;" +
       "overflow:auto;background:#23272fee;color:#cfd3da;border:1px solid #3a404a;border-radius:6px;" +
       "padding:8px 10px;font:12px/1.6 'Microsoft YaHei',sans-serif;display:none;z-index:50;";
     document.body.appendChild(helpEl);
@@ -2092,6 +2141,7 @@ const ED = (function () {
 
   function showNodeHelp(node) {
     if (!helpEl) return;
+    if (simpleMode) { helpEl.style.display = "none"; return; }   // 使用模式：画布只读，不显示可编辑的节点说明
     const d = defByType[node && node._typeId];
     if (!d) { helpEl.style.display = "none"; return; }
     const sub = "color:#7f8895;border-top:1px solid #3a404a;margin-top:6px;padding-top:4px";
@@ -2299,7 +2349,9 @@ const ED = (function () {
       "普通使用时不必进节点图也能调（🎯 定位到节点）<br>" +
       "· <b>分组</b>：右键节点→「分组…」把它(或多选的若干节点)归入一个彩色分组；节点标题栏会染成分组色、" +
       "上方标出组名，框也会自动包住它们。一个节点只属于一个组。<br>" +
-      "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明</div>" +
+      "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明<br>" +
+      "· <b>使用模式</b>（顶部按钮切换）：把画布转为<b>只读</b>——仍可拖动查看、运行、用控制面板调参，但不能增删改节点/连线/参数；" +
+      "其中的调参与拖动都是临时的，<b>不会改动已保存的流程</b>，回到编辑模式即还原（适合“只想用”的场景）</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>运行 / 试运行</b>　顶部 <b style='color:#8fe0a8'>▶运行</b> / 停止；试运行(干跑)在编辑模式下可见<br>" +
       "· <b style='color:#8fe0a8'>运行</b>：执行当前流程，<b>真正向游戏发按键/鼠标</b>（再点变「暂停」，运行中可按住 Shift/Ctrl/Alt 暂停）。<br>" +
@@ -2323,6 +2375,12 @@ const ED = (function () {
   // ---- 撤销/重做（对整图做 JSON 快照；buildGraph/applySnapshot 期间抑制）----
   function snapshotNow() {
     if (suppressSnap || building || !graph) return;
+    // 使用模式：不入撤销栈、不计“未保存”（运行/调参是临时操作）；但运行中仍把改动热更新给引擎、并刷新面板。
+    if (simpleMode) {
+      renderPanel();
+      if (runSession) { try { api().run_update(collect()); } catch (e) {} }
+      return;
+    }
     const s = JSON.stringify(collect());
     if (undoStack.length && undoStack[undoStack.length - 1] === s) return;
     undoStack.push(s);
@@ -2406,6 +2464,7 @@ const ED = (function () {
   }
   function onRightDown(e) {
     if (e.button !== 2 || !graph || !canvas) return;
+    if (simpleMode) return;   // 使用模式：不弹“删除连线”，右键交给只读菜单
     let off;
     try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
     if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;  // 节点上交给 LiteGraph
