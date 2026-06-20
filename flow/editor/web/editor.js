@@ -20,7 +20,7 @@ const ED = (function () {
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // —— 试运行（干跑）可视化状态 ——
-  let running = false, runSession = false, runTimer = null, realRun = false;   // realRun: true=真跑(真发输入)
+  let running = false, runSession = false, pollTimer = null, realRun = false, _lastTick = 0;   // realRun: true=真跑(真发输入)
   let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
@@ -29,7 +29,7 @@ const ED = (function () {
   let simpleEntrySig = null;                    // 进入使用模式时的图快照：退出时据此还原（使用模式里的拖动/调参不落盘）
   let _lastRunStatus = "";                       // 上一条“本轮结果/原因”状态，变化时才记日志，避免刷屏
   let runAnimRAF = null, runPhase = 0, _runAnimLast = 0;   // 动画（脉冲发光 / 连线流动）
-  const RUNSEP = String.fromCharCode(1);        // run_tick 里 data 的键 = nodeId + RUNSEP + port（与 Python \x01 一致）
+  const RUNSEP = String.fromCharCode(1);        // 运行轨迹里 data 的键 = nodeId + RUNSEP + port（与 Python \x01 一致）
   // 撤销/重做（快照式）
   let undoStack = [], redoStack = [], snapTimer = null, suppressSnap = false, building = false;
 
@@ -1185,7 +1185,7 @@ const ED = (function () {
   function load(flow, opts) {
     // 载入新流程前先停掉试运行（除非是自动排版那种“原地刷新”——keepHistory 标记）
     if (runSession && !(opts && opts.keepHistory)) {
-      running = false; clearTimeout(runTimer); stopRunAnim();
+      running = false; stopPoll(); stopRunAnim();
       try { api().run_end(); } catch (e) {}
       runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); setRunUI();
     }
@@ -1810,18 +1810,17 @@ const ED = (function () {
     try {
       const r = await api().run_begin(collect(), realRun);
       runSession = !!(r && r.ok);
-      runLogs = []; _lastRunStatus = ""; renderLog();
-      if (runSession) startRunAnim();   // 启动脉冲/流动动画
+      runLogs = []; _lastRunStatus = ""; _lastTick = 0; renderLog();
+      if (runSession) {
+        startRunAnim();                                  // 启动脉冲/流动动画
+        try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {}   // 把断点同步给引擎
+      }
       return runSession;
     } catch (e) { showError("启动运行失败：" + (e && (e.stack || e.message) || e)); return false; }
   }
-  // 每帧间隔：以流程「每帧触发」节点的“循环间隔(秒)”为准（面板可调），不再单列速度档
-  function loopDelayMs() {
-    if (graph) for (const n of (graph._nodes || []))
-      if (n._typeId === "event.on_tick" && n.properties)
-        return Math.max(0, (parseFloat(n.properties.interval) || 0) * 1000);
-    return 100;
-  }
+  // 引擎在 Python 后台线程里按流程「每帧触发」的间隔【自行全速跑】；前端只以固定节奏轮询取最近一帧，
+  // 与引擎执行解耦——UI 再慢/暂停也不会拖慢底层逻辑的执行速度。
+  const POLL_MS = 80;
   // 这一轮“为什么没动作”：停在某个判断分支＝被它拦下。原因优先用作者写在节点上的描述（如“不在游戏中”
   // “修饰键被按下”），否则退而用“接到分支条件的那个检测节点”的标题，保持一句话、简短直白。
   function branchStopReason(term) {
@@ -1848,59 +1847,64 @@ const ED = (function () {
       return { level: "INFO", msg: "本轮未操作 · " + branchStopReason(term) };
     return { level: "INFO", msg: "本轮已完成一轮" };
   }
-  function applyTrace(t) {
-    if (!t) return;
-    runPathArr = t.path || [];
-    runPath = new Set(runPathArr);
-    runPorts = t.ports || {};
-    runData = t.data || {};
-    runDataNodes = new Set(Object.keys(runData).map((k) => k.split("")[0]));
+  // 处理一次轮询结果：刷新高亮状态 + 追加增量日志 + 命中断点则暂停（断点判定已在引擎侧精确完成）。
+  function applyPoll(r) {
+    if (!r) return;
+    const t = r.trace;
+    if (t) {
+      runPathArr = t.path || [];
+      runPath = new Set(runPathArr);
+      runPorts = t.ports || {};
+      runData = t.data || runData;       // 无人观看时引擎可能略过 data；保留上次，避免标签闪烁
+      runDataNodes = new Set(Object.keys(runData).map((k) => k.split(RUNSEP)[0]));
+      _lastTick = t.tick;
+    }
     const ts = nowHMS();
-    const added = (t.logs || []).map((l) => ({ tick: t.tick, ts, level: l.level, msg: l.msg, node: l.node }));
-    const st = runStatusLine();   // 合成“本轮结果/为什么没动作”，变化时才记一行，避免刷屏
-    if (st && st.msg !== _lastRunStatus) { _lastRunStatus = st.msg; added.push({ tick: t.tick, ts, level: st.level, msg: st.msg }); }
+    const added = (r.logs || []).map((l) => ({ tick: l.tick, ts, level: l.level, msg: l.msg, node: l.node }));
+    const st = runStatusLine();          // 合成“本轮结果/为什么没动作”，变化时才记一行，避免刷屏
+    if (st && st.msg !== _lastRunStatus) { _lastRunStatus = st.msg; added.push({ tick: _lastTick, ts, level: st.level, msg: st.msg }); }
     for (const l of added) runLogs.push(l);
-    if (runLogs.length > LOG_CAP) runLogs.splice(0, runLogs.length - LOG_CAP);   // 原地裁剪，免得每帧新建长数组
-    appendLogRows(added);                          // 增量追加本帧新增日志行（不再每帧重建整面板）
-    // 断点 / 运行到此节点：命中（出现在本帧执行路径）即暂停在这一帧
-    let bpHit = null;
-    if (runUntil && runPath.has(runUntil)) bpHit = runUntil;
-    else { for (const id of runPathArr) if (breakpoints.has(id)) { bpHit = id; break; } }
-    if (runUntil && runPath.has(runUntil)) runUntil = null;   // 一次性目标命中即清除
-    if (bpHit && running) {
-      pauseRun();
-      const n = nodeByOurId(bpHit);
-      setStatus("⏸ 命中断点：" + (n ? n.title : bpHit) + " · 第 " + t.tick + " 帧");
-    } else {
-      setStatus(`试运行 · 第 ${t.tick} 帧 · 经过 ${(t.path || []).length} 个节点`);
+    if (runLogs.length > LOG_CAP) runLogs.splice(0, runLogs.length - LOG_CAP);   // 原地裁剪，免得新建长数组
+    if (added.length) appendLogRows(added);        // 增量追加（不重建整面板）
+    if (r.bp_hit && running) {           // 引擎已自停在断点；前端同步暂停 UI
+      running = false; stopPoll(); setRunUI();
+      const n = nodeByOurId(r.bp_hit);
+      setStatus("⏸ 命中断点：" + (n ? n.title : r.bp_hit) + " · 第 " + _lastTick + " 帧");
+    } else if (t) {
+      setStatus(`运行中 · 第 ${_lastTick} 帧 · 经过 ${runPathArr.length} 个节点`);
     }
     if (canvas) canvas.setDirty(true, false);      // 背景(网格/分组)不随帧变 → 只刷前景，省一半重绘
   }
-  async function runOneTick() {
-    if (!(await ensureRunSession())) return;
-    let t;
-    try { t = await api().run_tick(); }
-    catch (e) { showError("运行失败：" + (e && (e.stack || e.message) || e)); pauseRun(); return; }
-    applyTrace(t);
+  // 轮询循环：与引擎节奏【解耦】，固定 ~POLL_MS 采样一次最近帧。run_poll 极轻量、不触发任何引擎计算。
+  function startPoll() {
+    if (pollTimer) return;
+    const tick = async () => {
+      if (!runSession || !running) { pollTimer = null; return; }
+      let r = null;
+      try { r = await api().run_poll(); } catch (e) {}
+      if (r) applyPoll(r);
+      if (runSession && running) pollTimer = setTimeout(tick, POLL_MS); else pollTimer = null;
+    };
+    pollTimer = setTimeout(tick, 0);
   }
-  function runLoop() {
-    if (!running) return;
-    runOneTick().finally(() => { if (running) runTimer = setTimeout(runLoop, loopDelayMs()); });
-  }
+  function stopPoll() { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; }
   async function startRun() {
     if (running) return;
     if (!(await ensureRunSession())) return;
+    try { await api().run_resume(); } catch (e) {}   // 让后台引擎线程开始/继续跑
     running = true; setRunUI();
-    runLoop();
+    startPoll();
   }
-  function pauseRun() { running = false; clearTimeout(runTimer); setRunUI(); }
+  function pauseRun() { running = false; stopPoll(); try { api().run_pause(); } catch (e) {} setRunUI(); }
   function toggleBreakpoint(id) {
     if (breakpoints.has(id)) breakpoints.delete(id); else breakpoints.add(id);
     if (canvas) canvas.setDirty(true, true);
-    setStatus(breakpoints.has(id) ? "已设断点 🔴（试运行命中即暂停）" : "已取消断点");
+    if (runSession) { try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {} }
+    setStatus(breakpoints.has(id) ? "已设断点 🔴（运行命中即暂停）" : "已取消断点");
   }
   function runToNode(id) {              // 连续运行直到该节点被执行到，然后暂停（一次性）
     runUntil = id;
+    if (runSession) { try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {} }
     setStatus("运行到此节点…（命中即暂停）");
     if (!running) startRun(); else setRunUI();
   }
@@ -1915,7 +1919,7 @@ const ED = (function () {
     startRun();
   }
   async function stopRun() {
-    running = false; clearTimeout(runTimer); stopRunAnim();
+    running = false; stopPoll(); stopRunAnim();
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
     runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set();
     setRunUI();

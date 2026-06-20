@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Optional
 
@@ -44,6 +45,8 @@ def _fmt_value(v):
 # 试运行日志在内存中的封顶条数：长时间逐帧运行也不会无限增长占内存
 # （本帧新增的日志会先单独取出回传前端，再裁剪历史）。
 _RUN_LOG_CAP = 4000
+# data 键里 node_id 与 port 的分隔符：与前端 String.fromCharCode(1) 一致，渲染不可见。
+_RUNSEP = "\x01"
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 # 内置流程目录（只读模板，随程序分发）与 用户自定义流程目录（用户的另存到这里）。
@@ -261,13 +264,24 @@ class Api:
         self._graph: Optional[Graph] = None
         self._path: Optional[str] = None
         self._dirty = False        # 前端镜像过来的“有未保存修改”，关闭窗口时据此弹确认
-        # —— 编辑器内“运行可视化”（干跑：只读屏/识别、不发按键鼠标），由前端逐帧轮询驱动 ——
+        # —— 编辑器内“运行可视化” —— 引擎在【常驻后台线程】里自行全速跑（不被前端节奏拖慢），
+        #    前端只轻量轮询 run_poll 取最近一帧轨迹 + 增量日志，UI 不影响底层执行速度。
         self._run_graph: Optional[Graph] = None
         self._run_ctx: Optional[ExecutionContext] = None
         self._run_exec: Optional[TraceExecutor] = None
-        self._run_logs: list = []
-        import threading
-        self._run_lock = threading.RLock()   # run_tick / run_update / begin / end 互斥（前端不同线程过桥）
+        self._run_logs: list = []            # 全量历史（封顶 _RUN_LOG_CAP），仅引擎线程写
+        self._run_lock = threading.RLock()   # 保护图结构：引擎跑帧 vs run_update 改图 互斥
+        self._snap_lock = threading.Lock()   # 保护“最近一帧快照 + 待取日志 + 断点集”，引擎/轮询短暂占用
+        self._run_thread: Optional[threading.Thread] = None
+        self._run_paused = True              # 引擎线程是否暂停（创建即暂停，等前端 run_resume）
+        self._run_stop = False               # 引擎线程退出标志
+        self._run_real = False               # 当前会话是否真跑（发输入）
+        self._run_interval = 0.1             # 每帧间隔(秒)，取自流程「每帧触发」节点；run_update 时刷新
+        self._run_bps: set = set()           # 断点节点 id 集（命中即自停，精确不依赖前端轮询）
+        self._run_until: Optional[str] = None  # “运行到此节点”一次性目标
+        self._latest: Optional[dict] = None  # 最近一帧轨迹快照（path/ports/data/tick）
+        self._pending_logs: list = []        # 自上次轮询以来的新日志（取走即清）
+        self._bp_hit: Optional[str] = None   # 本次暂停命中的断点节点（供前端提示）
         self._sysmon_proc = None             # 资源监控：缓存本进程的 psutil.Process（cpu_percent 需要复用同一对象建基准）
 
     def get_defs(self):
@@ -311,25 +325,144 @@ class Api:
         self._dirty = bool(flag)
         return True
 
-    # ==================== 运行可视化（干跑，逐帧）====================
+    # ==================== 运行可视化（引擎在后台线程自行全速跑，前端只轮询）====================
+    @staticmethod
+    def _interval_of(graph) -> float:
+        """从图里读「每帧触发」节点的循环间隔(秒)，作为引擎循环节奏。"""
+        for node in graph.nodes.values():
+            if node.type_id == "event.on_tick":
+                try:
+                    return max(0.0, float(node.values.get("interval", 0.1)))
+                except (TypeError, ValueError):
+                    return 0.1
+        return 0.1
+
+    def _stop_thread(self):
+        """停掉引擎线程并等它退出——务必【不持 _run_lock】调用，否则与线程争锁死锁。
+        线程在自己的 finally 里关 mss（与 grab 同线程），所以这里只发停止信号 + join。"""
+        th = self._run_thread
+        self._run_stop = True
+        self._run_paused = False          # 唤醒可能在暂停轮询里的循环，让它看到停止标志
+        if th and th.is_alive() and th is not threading.current_thread():
+            th.join(timeout=2.0)
+        self._run_thread = None
+
     def run_begin(self, payload, real=False):
-        """用当前编辑器里的图开一次运行。
-        real=False(默认)＝干跑：只识别、不发任何输入；real=True＝真跑：真正发按键/鼠标。"""
+        """用当前编辑器里的图开一次运行：建图 + 启动【后台引擎线程】（创建即暂停，等 run_resume）。
+        real=False(默认)＝干跑：只识别、不发任何输入；real=True＝真跑：真正发按键/鼠标。
+        引擎线程自行按「循环间隔」全速跑，UI 只通过 run_poll 取最近一帧，不拖慢底层执行。"""
+        self._stop_thread()               # 先停掉上一个会话（不持锁，避免死锁）
         with self._run_lock:
             self._run_graph = payload_to_graph(payload)
-            self._run_logs = []
+            self._run_real = bool(real)
+            self._run_interval = self._interval_of(self._run_graph)
 
             def _log(level, message, node_id=None):
                 self._run_logs.append({"level": level, "msg": message, "node": node_id})
 
             self._run_ctx = ExecutionContext(on_log=_log, dry_run=(not real))
             self._run_exec = TraceExecutor(self._run_graph)
-            self._run_logs.append({
-                "level": "INFO",
-                "msg": ("开始运行：执行流程并向游戏发送按键/鼠标操作" if real
-                        else "开始试运行：只识别、不发送任何输入"),
-                "node": None})
+            begin = {"level": "INFO", "tick": 0,
+                     "msg": ("开始运行：执行流程并向游戏发送按键/鼠标操作" if real
+                             else "开始试运行：只识别、不发送任何输入"), "node": None}
+            self._run_logs = [begin]
+            with self._snap_lock:
+                self._pending_logs = [begin]   # 让首次轮询就拿到“开始”这条
+                self._latest = None
+                self._bp_hit = None
+            self._run_stop = False
+            self._run_paused = True
+            self._run_thread = threading.Thread(target=self._run_loop, name="flow-engine", daemon=True)
+            self._run_thread.start()
             return {"ok": True, "nodes": len(self._run_graph.nodes), "real": bool(real)}
+
+    def _run_loop(self):
+        """后台引擎循环：暂停时轻睡；否则按「循环间隔」全速跑帧、把轨迹/日志发布到快照供前端轮询。
+        断点命中即在本线程自停（精确，不依赖前端轮询节奏）。退出时在【本线程】关 mss。"""
+        try:
+            while not self._run_stop:
+                if self._run_paused:
+                    time.sleep(0.02)
+                    continue
+                t0 = time.time()
+                with self._run_lock:
+                    if self._run_exec is None or self._run_ctx is None:
+                        break
+                    before = len(self._run_logs)
+                    try:
+                        self._run_exec.run_tick(self._run_ctx, dt=self._run_interval)
+                    except Exception as e:   # 单帧异常不致命：记日志，循环继续
+                        self._run_logs.append({"level": "ERROR", "msg": f"运行异常：{e}", "node": None})
+                    tick = self._run_ctx.tick_index
+                    new_logs = self._run_logs[before:]
+                    for l in new_logs:
+                        l["tick"] = tick
+                    if len(self._run_logs) > _RUN_LOG_CAP:
+                        del self._run_logs[: len(self._run_logs) - _RUN_LOG_CAP]
+                    data = {}
+                    for (nid, port), val in self._run_ctx.memo_snapshot().items():
+                        data[nid + _RUNSEP + port] = _fmt_value(val)
+                    path = list(self._run_exec.trace_path)
+                    ports = dict(self._run_exec.trace_ports)
+                    # 断点 / 运行到此节点：本帧路径命中即自停
+                    hit = None
+                    if self._run_until and self._run_until in path:
+                        hit, self._run_until = self._run_until, None
+                    elif self._run_bps:
+                        for nid in path:
+                            if nid in self._run_bps:
+                                hit = nid
+                                break
+                with self._snap_lock:        # 出 _run_lock 后再短暂占快照锁发布（轮询绝不阻塞跑帧）
+                    self._latest = {"tick": tick, "path": path, "ports": ports, "data": data}
+                    self._pending_logs.extend(new_logs)
+                    if hit:
+                        self._bp_hit = hit
+                        self._run_paused = True
+                if not self._run_paused:
+                    time.sleep(max(0.0, self._run_interval - (time.time() - t0)))
+        finally:
+            ctx = self._run_ctx
+            if ctx is not None:
+                try:
+                    ctx.cleanup_tick()       # 释放可能持有的输入屏蔽/锁（本线程，BlockInput 同线程才能解）
+                except Exception:
+                    pass
+                try:
+                    ctx.close_capture()      # 关 mss（与 grab 同线程，避免跨线程 BitBlt）
+                except Exception:
+                    pass
+
+    def run_poll(self):
+        """前端轮询：取最近一帧轨迹 + 自上次以来的新日志 + 是否暂停/命中断点。
+        极轻量——只在 _snap_lock 下读，不触发任何引擎计算，因此 UI 轮询不影响底层执行速度。"""
+        with self._snap_lock:
+            logs = self._pending_logs
+            self._pending_logs = []
+            hit = self._bp_hit
+            self._bp_hit = None
+            trace = self._latest
+            paused = self._run_paused
+        alive = bool(self._run_thread and self._run_thread.is_alive())
+        return {"trace": trace, "logs": logs, "paused": paused,
+                "running": alive and not paused, "bp_hit": hit}
+
+    def run_pause(self):
+        self._run_paused = True
+        return True
+
+    def run_resume(self):
+        if self._run_thread and self._run_thread.is_alive():
+            self._run_paused = False
+            return True
+        return False
+
+    def run_set_breakpoints(self, bps=None, run_until=None):
+        """前端切换断点 / “运行到此节点” 时同步给引擎线程（引擎据此精确自停）。"""
+        with self._snap_lock:
+            self._run_bps = set(bps or [])
+            self._run_until = run_until
+        return True
 
     def run_update(self, payload):
         """运行中热更新：参数改值【且】结构(增删节点/改连线)也实时同步——
@@ -337,7 +470,7 @@ class Api:
         - 仍存在且类型不变的节点：复用原节点对象（保留其内部状态/记忆，如三态遮挡的历史）。
         - 新增的节点：新建；删除的：移除。
         - 连线整体按载荷重建（连线无状态）。黑板变量(ctx.vars)与帧序号(tick_index)保持不变。
-        与 run_tick 用同一把锁，避免跑帧中途结构被改而读到半成品。
+        与引擎跑帧共用 _run_lock，避免跑帧中途结构被改而读到半成品（引擎会等本次改图完成）。
         """
         if not self._run_graph:
             return False
@@ -376,44 +509,22 @@ class Api:
                     g.connect_exec(e["src"], e["src_port"], e["dst"], e["dst_port"])
                 else:
                     g.connect_data(e["src"], e["src_port"], e["dst"], e["dst_port"])
+            self._run_interval = self._interval_of(g)   # 间隔可能被改（每帧触发节点），同步给引擎循环
         return True
 
-    def run_tick(self):
-        """跑一帧，返回执行轨迹 + 数据线上的值 + 本帧日志。前端据此高亮/显示。"""
-        with self._run_lock:
-            if not (self._run_exec and self._run_ctx):   # 还没开始 / 期间被 run_end 结束了
-                return None
-            before = len(self._run_logs)
-            try:
-                self._run_exec.run_tick(self._run_ctx, dt=0.0)
-            except Exception as e:  # 单帧异常不致命：报到日志，让前端继续/停止
-                self._run_logs.append({"level": "ERROR", "msg": f"运行异常：{e}", "node": None})
-            new_logs = self._run_logs[before:]
-            # 本帧新增日志已取出；历史只保留最近 N 条，避免长时间运行无限增长占内存
-            if len(self._run_logs) > _RUN_LOG_CAP:
-                del self._run_logs[: len(self._run_logs) - _RUN_LOG_CAP]
-            data = {}
-            for (nid, port), val in self._run_ctx.memo_snapshot().items():
-                data[nid + "" + port] = _fmt_value(val)   # 用 0x01 分隔 node_id 与 port
-            return {
-                "tick": self._run_ctx.tick_index,
-                "path": list(self._run_exec.trace_path),
-                "ports": dict(self._run_exec.trace_ports),
-                "data": data,
-                "logs": self._run_logs[before:],
-            }
-
     def run_end(self):
-        """结束试运行：清理可能持有的输入屏蔽/锁（干跑下只是清标记）。"""
+        """结束运行：停掉引擎线程（它在自己的 finally 里解屏蔽/锁、关 mss），再清空状态。"""
+        self._stop_thread()                  # 不持 _run_lock（线程跑帧时也要这把锁，否则 join 死锁）
         with self._run_lock:
-            if self._run_ctx:
-                try:
-                    self._run_ctx.cleanup_tick()
-                except Exception:
-                    pass
             self._run_graph = self._run_ctx = self._run_exec = None
             self._run_logs = []
-            return True
+        with self._snap_lock:
+            self._latest = None
+            self._pending_logs = []
+            self._bp_hit = None
+            self._run_bps = set()
+            self._run_until = None
+        return True
 
     def _payload(self, graph):
         """流程载荷 + 元信息（当前文件路径、是否内置只读），供前端显示文件来源与只读提示。"""

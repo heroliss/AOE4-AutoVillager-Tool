@@ -88,15 +88,18 @@ class Executor:
     # ==================== 主循环（headless 用）====================
     def run(self, ctx: ExecutionContext, interval: float = 0.1, max_ticks: Optional[int] = None) -> None:  # noqa: D401
         count = 0
-        while not ctx.cancel:
-            start = time.time()
-            self.run_tick(ctx, dt=interval)
-            count += 1
-            if max_ticks is not None and count >= max_ticks:
-                break
-            remaining = interval - (time.time() - start)
-            if remaining > 0:
-                time.sleep(remaining)
+        try:
+            while not ctx.cancel:
+                start = time.time()
+                self.run_tick(ctx, dt=interval)
+                count += 1
+                if max_ticks is not None and count >= max_ticks:
+                    break
+                remaining = interval - (time.time() - start)
+                if remaining > 0:
+                    time.sleep(remaining)
+        finally:
+            ctx.close_capture()   # 关掉本线程复用的 mss（与创建/grab 在同一线程）
 
 
 class TraceExecutor(Executor):

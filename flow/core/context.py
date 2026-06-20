@@ -59,12 +59,18 @@ class ExecutionContext:
         self._full_frame = None
 
     def cleanup_tick(self) -> None:
-        """一帧结束后的安全清理：确保输入屏蔽与文件锁不会跨帧泄漏。"""
+        """一帧结束后的安全清理：确保输入屏蔽与文件锁不会跨帧泄漏。
+        注意：mss 截图实例【不在每帧关闭】——它与执行线程绑定（GDI DC 有线程亲和性），
+        在「同一条引擎线程」上跨帧复用最省时；改由 close_capture() 在该线程退出时统一关闭。"""
         if self._block_active:
             self.block_input_stop()
         if self._lock_held:
             self.release_lock()
-        if self._sct is not None:               # 本帧 mss 实例当帧关闭：与创建在同一线程，释放 GDI/内存，不泄漏
+
+    def close_capture(self) -> None:
+        """关闭本上下文的 mss 截图实例。务必在【创建它的同一条线程】上调用
+        （mss 的 GDI DC 有线程亲和性）——即引擎循环线程在退出时调用，或 headless 跑完时调用。"""
+        if self._sct is not None:
             try:
                 self._sct.close()
             except Exception:
@@ -72,10 +78,11 @@ class ExecutionContext:
             self._sct = None
 
     def _capture_sct(self):
-        """本帧用的 mss 实例：在【当前线程】惰性创建，帧末 cleanup_tick 关闭。
-        不能跨线程复用——Windows 下 mss 的 GDI DC 有线程亲和性，跨线程 grab 会 BitBlt 失败；
-        也不能用 thread-local 缓存——pywebview 每次 js_api 调用都换线程，旧实例随死线程滞留、
-        每帧泄漏整屏位图。每帧“同线程创建+关闭”：既不跨线程、又当帧释放 GDI/内存，不泄漏。"""
+        """本上下文的 mss 实例：在【当前线程】惰性创建、跨帧复用，由 close_capture() 在该线程退出时关闭。
+        关键：mss 的 GDI DC 有线程亲和性——本上下文必须始终在【同一条线程】上跑帧
+        （编辑器=专属引擎线程；headless=主线程）。绝不能跨线程 grab（会 BitBlt 失败），
+        也不要用 thread-local 缓存（pywebview 每次 js_api 换线程会让旧实例随死线程泄漏整屏位图——
+        正因如此运行循环才改成常驻单线程：截图实例只建一次、反复复用，最省时、不泄漏）。"""
         if self._sct is None:
             import mss
             self._sct = mss.mss()
