@@ -9,6 +9,7 @@ const ED = (function () {
   let defByType = {};       // our type_id -> 定义（含 help/参数说明），用于选中节点时显示说明
   let helpEl = null;
   let selectedNode = null;   // 当前选中的节点（用于参数变动时刷新“已修改”列表）
+  let selectedGroupId = null;   // 当前选中的【组】id（组像节点一样可选中；右下角显示组的详情/暴露参数）。与 selectedNode 互斥。
   let seq = 1;
   let booted = false;
   // 当前流程的元信息：名称/说明/文件路径/是否内置只读（保存时内置会被改为另存）
@@ -1087,6 +1088,14 @@ const ED = (function () {
     ctx.stroke();
     ctx.restore();
   }
+  // 选中的组：描一圈青色虚线（区别于金色落点高亮），表示“此组已选中”（右下角显示其详情）。
+  function drawGroupSelHL(ctx, x, y, w, h) {
+    ctx.save();
+    roundRect(ctx, x - 2, y - 2, w + 4, h + 4, 11);
+    ctx.strokeStyle = "#8ad8ff"; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.restore();
+  }
   function drawGroups(ctx) {
     drawExtraExecLinks(ctx);     // 先补画 LiteGraph 漏掉的“汇入”执行连线（与分组无关，总要画）
     syncFoldWidgets();           // 折叠节点的可编辑参数 DOM 浮层：跟随平移/缩放，几何变则重建
@@ -1100,7 +1109,11 @@ const ED = (function () {
       if (g.collapsed) {         // 折叠态：画紧凑“子图节点”箱体（仅顶层折叠组；嵌套在折叠父组里的子组不单独画）
         if (isInsideCollapsed(g)) continue;
         const sbox = subgBox(g, ctx);
-        if (sbox) { drawSubgBox(ctx, g, i, sbox); if (_altDrag && _altDrag.targetGi === i) drawDropTargetHL(ctx, sbox.x, sbox.y, sbox.w, sbox.h); }
+        if (sbox) {
+          drawSubgBox(ctx, g, i, sbox);
+          if (selectedGroupId === g.id) drawGroupSelHL(ctx, sbox.x, sbox.y, sbox.w, sbox.h);
+          if (_altDrag && _altDrag.targetGi === i) drawDropTargetHL(ctx, sbox.x, sbox.y, sbox.w, sbox.h);
+        }
         continue;
       }
       // 展开态：成员若已全部被折叠父组隐藏，则不画其包裹框（否则框会落在父箱体之上）。空组(无成员)不算“全隐藏”，照画。
@@ -1112,6 +1125,7 @@ const ED = (function () {
       roundRect(ctx, x, y, w, h, 10);
       ctx.fillStyle = col + "22"; ctx.fill();          // 半透明填充
       ctx.strokeStyle = col + "cc"; ctx.lineWidth = 2; ctx.stroke();
+      if (selectedGroupId === g.id) drawGroupSelHL(ctx, x, y, w, h);   // 选中态高亮
       if (_altDrag && _altDrag.targetGi === i) drawDropTargetHL(ctx, x, y, w, h);   // Alt 拖拽落点提示
 
       // 组名做成“标签页”贴在框的左上沿之上——不会和框内第一个节点重叠
@@ -1776,6 +1790,7 @@ const ED = (function () {
     for (const p of panelPins) if (p[2]) pinLabels[p[0] + "|" + p[1]] = p[2];   // 把已保存的显示名种进记忆
     foldPins = Array.isArray(flow.foldparams) ? flow.foldparams.map((x) => x.slice(0, 2)) : [];   // “显示到折叠节点”的参数
     groupDefs = Array.isArray(flow.groups) ? normalizeGroups(flow.groups) : [];   // 补 id/parent，旧格式自动迁移成容器树
+    selectedGroupId = null;   // 新流程：清除组选中
     refreshFold();
     const added = buildGraph(flow);
     applyGroupColors();   // 按分组给节点标题栏染色
@@ -2780,8 +2795,8 @@ const ED = (function () {
       "overflow:auto;background:#23272fee;color:#cfd3da;border:1px solid #3a404a;border-radius:6px;" +
       "padding:8px 10px;font:12px/1.6 'Microsoft YaHei',sans-serif;display:none;z-index:50;";
     document.body.appendChild(helpEl);
-    canvas.onNodeSelected = (n) => { selectedNode = n; showNodeHelp(n); };
-    canvas.onNodeDeselected = () => { selectedNode = null; helpEl.style.display = "none"; };
+    canvas.onNodeSelected = (n) => { selectedNode = n; selectedGroupId = null; showNodeHelp(n); };   // 选节点即取消组选中
+    canvas.onNodeDeselected = () => { selectedNode = null; if (!selectedGroupId) helpEl.style.display = "none"; };
   }
 
   // 选中节点的说明面板：只放“该节点专属”的内容（用途 + 需要解释的端口/参数），
@@ -2793,7 +2808,7 @@ const ED = (function () {
   }
 
   // 右下角说明各区段的“展开/折叠”记忆（节点切换/重绘时保持用户的展开状态）。
-  let helpOpen = { params: true, ports: false, adv: false, pin: false };
+  let helpOpen = { params: true, ports: false, adv: false, pin: false, gexpose: true };
   // 折叠区段：<details> 原生折叠；data-sec 用于记忆展开状态。
   function section(key, title, body, count) {
     const head = count != null ? `${title}（${count}）` : title;
@@ -2902,6 +2917,99 @@ const ED = (function () {
       });
     }
     helpEl.style.display = "block";
+  }
+
+  // ====== 组的“选中”：组像节点一样可被选中（仅点标题处；折叠后整箱体即标题＝点哪都选）。======
+  // 选中后右下角显示组的详情面板（改名/折叠/颜色/暴露参数/删除）。与节点选中互斥。
+  function selectGroup(id) {
+    selectedGroupId = id || null;
+    if (selectedGroupId) {
+      selectedNode = null;
+      try { if (canvas && canvas.deselectAllNodes) canvas.deselectAllNodes(); } catch (e) {}   // 触发 onNodeDeselected→暂隐 help，下面再显示组面板
+      showGroupHelp(groupById(selectedGroupId));
+    } else if (helpEl) { helpEl.style.display = "none"; }
+    if (canvas) canvas.setDirty(true, true);
+  }
+  // 选中组的详情面板：改名 / 折叠·展开 / 颜色 / 勾选暴露到上层的参数（=折叠后显示，逐层向上冒泡）/ 解散·删除。
+  function showGroupHelp(g) {
+    if (!helpEl) return;
+    if (simpleMode || !g) { helpEl.style.display = "none"; return; }
+    const gi = groupDefs.indexOf(g); if (gi < 0) { helpEl.style.display = "none"; return; }
+    const col = groupColor(g, gi);
+    const direct = (g.members || []).map(nodeByOurId).filter(Boolean);
+    const childN = childGroupsOf(g).length;
+    const par = groupById(g.parent);
+    let html = `<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">` +
+      `<span style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
+      `<b style="color:#e6e9ee;flex:1">${esc(groupPathTitle(g))}</b>` +
+      `<a href="#" data-grename="1" style="color:#7fb0ee;text-decoration:none;white-space:nowrap">[改名]</a></div>`;
+    html += `<div style="color:#7f8895">直接成员 ${direct.length} 个` +
+      `${childN ? "，子组 " + childN + " 个" : ""}` +
+      `${par ? "，父组：" + esc(par.title || "分组") : "，顶层组"}</div>`;
+    html += `<div style="margin-top:6px;display:flex;align-items:center;gap:8px">` +
+      `<button data-gfold="1" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:2px 9px;cursor:pointer">${g.collapsed ? "展开" : "折叠为子图"}</button>` +
+      `<label style="color:#9aa3af;display:flex;align-items:center;gap:4px">颜色 <input type="color" data-gcolor="1" value="${col}" style="width:26px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer"></label>` +
+      `</div>`;
+    // 暴露到上层的参数：直接成员的参数勾选（=该参数“显示到折叠节点”，foldPins）。折叠本组或任一祖先组时该控件都会出现。
+    let pb = "";
+    for (const node of direct) {
+      const d = defByType[node._typeId]; const ps = (d && d.params) || [];
+      if (!ps.length) continue;
+      pb += `<div style="margin-top:5px;color:#bcd;font-weight:bold">${esc((d && d.title) || node.title || "节点")}</div>`;
+      for (const p of ps) {
+        const fp = isFoldPinned(node._id, p.key);
+        pb += `<label style="display:block;cursor:pointer;color:#aeb6c2;padding:1px 0">` +
+          `<input type="checkbox" data-gfpnid="${esc(node._id)}" data-gfpkey="${esc(p.key)}" ${fp ? "checked" : ""}> ${esc(p.label || p.key)}</label>`;
+      }
+    }
+    if (pb) html += section("gexpose", "暴露到上层的参数（折叠后在子图节点里可编辑）", pb, null);
+    else html += `<div style="margin-top:6px;color:#7f8895">该组暂无直接成员的可暴露参数——把节点拖进组即可在此勾选。</div>`;
+    html += `<div style="margin-top:8px;border-top:1px solid #3a404a;padding-top:6px">` +
+      `<a href="#" data-gdissolve="1" style="color:#7fb0ee;text-decoration:none">解散组（成员/子组上提到父层）</a><br>` +
+      `<a href="#" data-gdelall="1" style="color:#ff9b9b;text-decoration:none">删除组及全部内容（连同内部节点）</a></div>`;
+    helpEl.innerHTML = html;
+    helpEl.querySelectorAll("details[data-sec]").forEach((dt) =>
+      dt.addEventListener("toggle", () => { helpOpen[dt.getAttribute("data-sec")] = dt.open; }));
+    const ren = helpEl.querySelector("[data-grename]");
+    if (ren) ren.onclick = async (e) => { e.preventDefault(); const nm = await askText("分组改名", g.title || ""); if (nm != null) { g.title = nm.trim() || "分组"; refreshGroups(); showGroupHelp(g); } };
+    const fold = helpEl.querySelector("[data-gfold]");
+    if (fold) fold.onclick = () => { setGroupCollapsed(gi, !g.collapsed); showGroupHelp(g); };
+    const colInp = helpEl.querySelector("[data-gcolor]");
+    if (colInp) colInp.oninput = () => { g.color = colInp.value; refreshGroups(); };
+    helpEl.querySelectorAll("[data-gfpnid]").forEach((cb) =>
+      cb.onchange = () => { toggleFoldPin(cb.getAttribute("data-gfpnid"), cb.getAttribute("data-gfpkey")); });
+    const dis = helpEl.querySelector("[data-gdissolve]");
+    if (dis) dis.onclick = (e) => { e.preventDefault(); dissolveGroup(g); selectGroup(null); setStatus("已解散组"); };
+    const delAll = helpEl.querySelector("[data-gdelall]");
+    if (delAll) delAll.onclick = async (e) => {
+      e.preventDefault();
+      const cnt = groupAllMembers(g).length;
+      if (await confirmBox("删除组及全部内容", `将删除「${groupPathTitle(g)}」及其内部 ${cnt} 个节点` + (childGroupsOf(g).length ? "（含子组）" : "") + "，不可恢复。确定？", "删除")) {
+        deleteGroupAll(g); selectGroup(null); setStatus("已删除组及全部内容");
+      }
+    };
+    helpEl.style.display = "block";
+  }
+  // 删除组及其全部内容：删掉子树全体成员节点 + 该组与所有后代组本身。
+  function deleteGroupAll(g) {
+    if (!g) return;
+    const memberIds = groupAllMembers(g), subtree = groupSubtreeIds(g);
+    for (const id of memberIds) { const n = nodeByOurId(id); if (n) { try { graph.remove(n); } catch (e) {} } }   // onNodeRemoved 会清成员/折叠/面板项
+    groupDefs = groupDefs.filter((x) => !subtree.has(x.id));
+    refreshGroups();
+  }
+  // 组的右键菜单（在组标题/折叠箱体上右键弹出）：选中 / 折叠 / 改名 / 解散 / 删除组及全部内容。
+  function showGroupMenu(g, e) {
+    const gi = groupDefs.indexOf(g); if (gi < 0) return;
+    const items = [
+      { content: "选中组（详情·暴露参数）", callback: () => selectGroup(g.id) },
+      { content: g.collapsed ? "展开" : "折叠为子图", callback: () => setGroupCollapsed(gi, !g.collapsed) },
+      { content: "改名…", callback: async () => { const nm = await askText("分组改名", g.title || ""); if (nm != null) { g.title = nm.trim() || "分组"; refreshGroups(); if (selectedGroupId === g.id) showGroupHelp(g); } } },
+      null,
+      { content: "解散组（成员/子组上提到父层）", callback: () => { dissolveGroup(g); if (selectedGroupId === g.id) selectGroup(null); setStatus("已解散组"); } },
+      { content: "删除组及全部内容（连同内部节点）", callback: async () => { const cnt = groupAllMembers(g).length; if (await confirmBox("删除组及全部内容", `将删除「${groupPathTitle(g)}」及其内部 ${cnt} 个节点` + (childGroupsOf(g).length ? "（含子组）" : "") + "，不可恢复。确定？", "删除")) { deleteGroupAll(g); if (selectedGroupId === g.id) selectGroup(null); setStatus("已删除组及全部内容"); } } },
+    ];
+    new LiteGraph.ContextMenu(items, { event: e, title: "分组：" + (g.title || "分组") });
   }
 
   // 流程统计：节点数 / 执行·数据连线数 / 分组数 / 面板项数 / 各类节点数（按分类）。
@@ -3114,6 +3222,8 @@ const ED = (function () {
     groupDefs = Array.isArray(data.groups) ? normalizeGroups(data.groups) : [];   // 分组（含 id/parent/折叠态）随撤销/重做恢复
     refreshFold();
     applyGroupColors();
+    if (selectedGroupId && groupById(selectedGroupId)) showGroupHelp(groupById(selectedGroupId));   // 撤销/重做后组面板开着则刷新
+    else if (selectedGroupId) { selectedGroupId = null; if (helpEl) helpEl.style.display = "none"; }
     if (groupDlgRender && document.getElementById("grpdlg")) groupDlgRender();   // 分组弹窗开着则刷新
     attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
     canvas.ds.scale = cam[0]; canvas.ds.offset = [cam[1], cam[2]];
@@ -3176,6 +3286,17 @@ const ED = (function () {
     try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
     _lastMenuPos = [off[0], off[1]];   // 记下右键位置，供画布菜单“新建组”定位
     if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;  // 节点上交给 LiteGraph
+    // 命中组标题/折叠箱体 → 组专属右键菜单（最内层优先）
+    const gorder = groupDefs.map((g, i) => i).sort((a, b) => groupAllMembers(groupDefs[a]).length - groupAllMembers(groupDefs[b]).length);
+    for (const i of gorder) {
+      const r = groupTabRect(groupDefs[i]); if (!r) continue;
+      if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try { LiteGraph.closeAllContextMenus(window); } catch (err) {}
+        showGroupMenu(groupDefs[i], e);
+        return;
+      }
+    }
     const link = linkNear(off[0], off[1]);
     if (link) {
       e.preventDefault();
@@ -3261,7 +3382,7 @@ const ED = (function () {
   function onGroupDragDown(e) {
     if (e.button !== 0 || !graph || !canvas) return;
     let off; try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
-    if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;   // 在节点上交给 LiteGraph
+    if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) { if (selectedGroupId) selectGroup(null); return; }   // 点节点→取消组选中，交给 LiteGraph
     const ii = foldIconAt(off[0], off[1]);                                   // 先：单击右端 ⊟/⊞ 图标 → 折叠/展开（两种模式都可用）
     if (ii >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(ii, !groupDefs[ii].collapsed); return; }
     if (simpleMode) return;            // 使用模式（只读）：不允许拖动整组移动节点（位置属于“改图”）
@@ -3278,6 +3399,7 @@ const ED = (function () {
         return;
       }
     }
+    if (selectedGroupId) selectGroup(null);   // 点在空白处（非节点/非组手柄）：取消组选中
   }
   function onGroupDragMove(e) {
     if (!_groupDrag) return;
@@ -3285,6 +3407,9 @@ const ED = (function () {
     const dx = off[0] - _groupDrag.last[0], dy = off[1] - _groupDrag.last[1];
     if (dx || dy) {
       for (const n of _groupDrag.members) { n.pos[0] += dx; n.pos[1] += dy; }
+      // 空组（子树无任何节点）没有成员可移动——直接挪它的锚点框 pos，让空组能被拖动
+      const dg = groupDefs[_groupDrag.gi];
+      if (dg) { const sub = groupSubtreeIds(dg); for (const g2 of groupDefs) if (sub.has(g2.id) && g2.pos && !groupAllMembers(g2).length) { g2.pos = [g2.pos[0] + dx, g2.pos[1] + dy]; } }
       _groupDrag.last = off; _groupDrag.moved = true;
       if (canvas) canvas.setDirty(true, true);
     }
@@ -3304,7 +3429,8 @@ const ED = (function () {
     const gd = _groupDrag; _groupDrag = null;
     const ad = _altDrag; const wasAlt = !!_altDrag; _altDrag = null;   // 先捕获再清空 Alt 拖拽态（恢复源组框跟随）
     if (canvas) canvas.setDirty(true, true);
-    if (!gd || !gd.moved) return;
+    if (!gd) return;
+    if (!gd.moved) { const cg = groupDefs[gd.gi]; selectGroup(cg && cg.id); return; }   // 只点不拖（点标题/折叠箱体）＝选中该组
     const g = groupDefs[gd.gi];
     if (g && (altKeyDown || wasAlt)) {
       // 【按住 Alt】放下才改父组：落在某个组内 → 设为其子组（最内层那个）；落在空白 → 设为顶层。否则只是移动。
