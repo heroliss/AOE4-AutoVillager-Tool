@@ -3253,9 +3253,16 @@ const ED = (function () {
   }
   function duplicateSelection() {   // Ctrl+D：选中组→克隆组；选中节点→连内部线整体再制（保留分组归属）
     if (selectedGroupId) { const g = groupById(selectedGroupId); if (g) { const ng = cloneGroup(g); if (ng) selectGroup(ng.id); } return; }
-    const sel = selectedNodeList(); if (!sel.length) return;
+    const sel = selectedNodeList(); if (!sel.length) { setStatus("没有选中节点——先点选要再制的节点"); return; }
     selectNewNodes(materializeSpec(buildCopySpec(sel), 32, 32, true));
     setStatus(`已再制 ${sel.length} 个节点`);
+  }
+  function selectAllNodes() {   // Ctrl+A：全选所有节点（取代 LiteGraph 自带的无提示全选）
+    if (!graph || !canvas) return;
+    try { canvas.deselectAllNodes(); for (const n of (graph._nodes || [])) canvas.selectNode(n, true); } catch (e) {}
+    if (selectedGroupId) selectGroup(null);
+    canvas.setDirty(true, true);
+    setStatus(`已全选 ${(graph._nodes || []).length} 个节点`);
   }
   // 编辑组的描述（仅展示、不参与运行）。
   function editGroupNote(g) {
@@ -3278,6 +3285,17 @@ const ED = (function () {
     box.querySelector("#notecancel").onclick = () => box.remove();
   }
   // 组的右键菜单（在组标题/折叠箱体上右键弹出）：与节点行为对齐——折叠 / 改名 / 描述 / 克隆 / 再分组 / 分组管理 / 解散 / 删除。
+  // 给 LiteGraph 弹出菜单补「点菜单外任意处即关闭」：原生菜单只在点中项/点菜单背景时关，
+  // 从弹窗里弹出的菜单点别处不会消失（用户反馈：分组管理里「归入」菜单点别处不关）。
+  function closeMenuOnOutside(menu) {
+    if (!menu || !menu.root) return;
+    const onDown = (ev) => {
+      if (menu.root && menu.root.contains(ev.target)) return;   // 点在菜单内：交给菜单自身处理
+      try { menu.close(); } catch (e) {}
+      document.removeEventListener("pointerdown", onDown, true);
+    };
+    setTimeout(() => document.addEventListener("pointerdown", onDown, true), 0);   // 延后挂载，避免捕获到“打开它”的这一次点击
+  }
   function showGroupMenu(g, e) {
     const gi = groupDefs.indexOf(g); if (gi < 0) return;
     const items = [
@@ -3291,7 +3309,7 @@ const ED = (function () {
       { content: "解散组（成员/子组上提到父层）", callback: () => { dissolveGroup(g); if (selectedGroupId === g.id) selectGroup(null); setStatus("已解散组"); } },
       { content: "删除组及全部内容（连同内部节点）", callback: () => { const cnt = groupAllMembers(g).length; deleteGroupAll(g); if (selectedGroupId === g.id) selectGroup(null); setStatus(`已删除组及全部 ${cnt} 个节点——可 Ctrl+Z 撤销`); } },
     ];
-    new LiteGraph.ContextMenu(items, { event: e, title: "分组：" + (g.title || "分组") });
+    closeMenuOnOutside(new LiteGraph.ContextMenu(items, { event: e, title: "分组：" + (g.title || "分组") }));
   }
   // 「再分组」：把某组归入另一个组（=设父组），下拉选目标（含“顶层”），防环。
   function reparentGroupDialog(g, e) {
@@ -3301,7 +3319,7 @@ const ED = (function () {
       if (t === g || isDescendantGroup(t, g)) continue;   // 不能归入自己或自己的后代
       opts.push({ content: groupPathTitle(t), callback: () => { setGroupParent(g, t.id); setStatus(`已把「${g.title || "分组"}」归入「${t.title || "分组"}」`); } });
     }
-    new LiteGraph.ContextMenu(opts, { event: e, title: "归入组：" + (g.title || "分组") });
+    closeMenuOnOutside(new LiteGraph.ContextMenu(opts, { event: e, title: "归入组：" + (g.title || "分组") }));
   }
 
   // 流程统计：节点数 / 执行·数据连线数 / 分组数 / 面板项数 / 各类节点数（按分类）。
@@ -3692,6 +3710,7 @@ const ED = (function () {
       const r = groupTabRect(groupDefs[i]); if (!r) continue;
       if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
         e.preventDefault(); e.stopImmediatePropagation();
+        selectGroup(groupDefs[i].id);   // 一按下手柄就选中该组（与节点一致：拖动即选中，右下角随即出详情）
         const members = groupAllMembers(groupDefs[i]).map(nodeByOurId).filter(Boolean);   // 拖整组＝移动其【子树全体】节点
         _groupDrag = { gi: i, last: off, members, moved: false };
         window.addEventListener("pointermove", onGroupDragMove, true);
@@ -3813,43 +3832,42 @@ const ED = (function () {
       window.addEventListener("keyup", (e) => { if (e.key === "Alt") { altKeyDown = false; if (canvas) canvas.setDirty(true, true); } }, true);
       window.addEventListener("blur", () => { altKeyDown = false; });
       // 通用快捷键：Ctrl+Z 撤销 / Ctrl+Y·Ctrl+Shift+Z 重做 / Ctrl+C·V·D 复制·粘贴·再制 / Ctrl+A 全选节点。
+      // 必须用【捕获阶段】（文档级，早于 LiteGraph 画布的捕获监听）：否则 LiteGraph 的 processKey 在 Ctrl+C/Ctrl+A
+      // 上会 stopImmediatePropagation 抢走事件（用它自带剪贴板），导致我们的复制根本没执行、随后粘贴提示“剪贴板为空”。
       document.addEventListener("keydown", (e) => {
         if (!(e.ctrlKey || e.metaKey)) return;
         const t = e.target;
-        const inField = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);   // 文本框/下拉里：让系统的复制粘贴等照常
+        const inField = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);   // 文本框/下拉里：让系统/控件自己处理
+        if (inField) return;
         const k = e.key.toLowerCase();
-        if (k === "z" && !e.shiftKey) { if (inField) return; e.preventDefault(); undo(); return; }
-        if (k === "y" || (k === "z" && e.shiftKey)) { if (inField) return; e.preventDefault(); redo(); return; }
-        if (inField || simpleMode) return;   // 以下均为“改图”操作：只读（使用）模式 / 文本框内不接管
+        const take = () => { e.preventDefault(); e.stopImmediatePropagation(); };   // 接管本键，阻止 LiteGraph 自带处理重复触发
+        if (k === "z" && !e.shiftKey) { take(); undo(); return; }
+        if (k === "y" || (k === "z" && e.shiftKey)) { take(); redo(); return; }
+        if (simpleMode) return;   // 以下均为“改图”操作：只读（使用）模式不接管
         if (k === "c") {   // 选中了文字（如日志）→ 让系统复制文字；否则复制选中的节点
           const hasTextSel = !!(window.getSelection && String(window.getSelection() || ""));
-          if (!hasTextSel && copySelection()) e.preventDefault();
+          if (hasTextSel) return;
+          take();
+          if (!copySelection()) setStatus("没有选中节点——先点选要复制的节点再 Ctrl+C");
           return;
         }
-        if (k === "v") { e.preventDefault(); pasteClipboard(); return; }
-        if (k === "d") { e.preventDefault(); duplicateSelection(); return; }
-        if (k === "a") {   // 全选所有节点（交给本工具，避免浏览器“全选页面文字”）
-          e.preventDefault();
-          try { canvas.deselectAllNodes(); for (const n of (graph._nodes || [])) canvas.selectNode(n, true); } catch (err) {}
-          if (selectedGroupId) selectGroup(null);
-          canvas.setDirty(true, true);
-          setStatus(`已全选 ${(graph._nodes || []).length} 个节点`);
-          return;
-        }
-      });
-      // Delete/Backspace：删选中节点；若选中的是【组】则解散该组（节点 Delete=删节点，组=删容器壳=解散，与节点行为对齐）。
+        if (k === "v") { take(); pasteClipboard(); return; }
+        if (k === "d") { take(); duplicateSelection(); return; }
+        if (k === "a") { take(); selectAllNodes(); return; }
+      }, true);
+      // Delete/Backspace：删选中节点；选中的是【组】则【整组删除】（组当作一个节点看待；可 Ctrl+Z 恢复）。
       document.addEventListener("keydown", (e) => {
         if (e.key !== "Delete" && e.key !== "Backspace") return;
         if (simpleMode) return;
         const t = e.target;
         if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;   // 正在输入框里：不拦截
         if (selectedGroupId) {
-          const g = groupById(selectedGroupId); e.preventDefault();
-          if (g) { dissolveGroup(g); selectGroup(null); setStatus("已解散组（Delete）"); }
+          const g = groupById(selectedGroupId); e.preventDefault(); e.stopImmediatePropagation();   // 抢在 LiteGraph 删节点之前
+          if (g) { const cnt = groupAllMembers(g).length; deleteGroupAll(g); selectGroup(null); setStatus(`已删除组及全部 ${cnt} 个节点（Delete）——可 Ctrl+Z 撤销`); }
           return;
         }
         const sel = Object.values((canvas && canvas.selected_nodes) || {});
-        if (sel.length) { e.preventDefault(); for (const n of sel.slice()) { try { graph.remove(n); } catch (err) {} } setStatus(`已删除 ${sel.length} 个节点`); }
+        if (sel.length) { e.preventDefault(); e.stopImmediatePropagation(); for (const n of sel.slice()) { try { graph.remove(n); } catch (err) {} } setStatus(`已删除 ${sel.length} 个节点——可 Ctrl+Z 撤销`); }
       }, true);
       doResize();   // 首次同步定尺寸（之后的 resize 走 rAF 合并）
       window.addEventListener("resize", resize);
