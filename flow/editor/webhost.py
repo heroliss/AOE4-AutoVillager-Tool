@@ -802,9 +802,9 @@ class Api:
             except Exception:
                 pass
 
-    def pick_region(self):
+    def pick_region(self, initial=None):
         from . import capture
-        return self._capture(capture.pick_region)
+        return self._capture(lambda: capture.pick_region(initial))   # initial=[l,t,r,b] 当前框，预显示+可微调
 
     def pick_point(self):
         from . import capture

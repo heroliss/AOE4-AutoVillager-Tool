@@ -444,7 +444,7 @@ const ED = (function () {
       // 多图：打开"列表编辑器"，逐条增删/排序更方便
       if (multi) mkBtn("编辑列表…", () => editImageList(node, w, p));
     } else if (p.ptype === "region") {
-      mkBtn("框选区域…", () => defer("框选区域…（Enter 确认 / Esc 取消）", () => api().pick_region(), (box) => {
+      mkBtn("框选区域…", () => defer("框选区域…（拖动/移动/拖边角微调，Enter 确认 / Esc 取消）", () => api().pick_region(parseBox(w.value)), (box) => {
         if (!box) { setStatus("已取消框选"); return; }
         apply(csv(box), "已框选区域：" + csv(box));
       }));
@@ -2075,7 +2075,7 @@ const ED = (function () {
       mkb("捕获", () => { setStatus("请按下按键…（Esc 取消）"); Promise.resolve(api().pick_key()).then((k) => { if (k) apply(k); }).catch((e) => showError("捕获失败：" + e)); });
       mkb("特殊键", () => specialKeyMenu((name) => apply(name)));
     } else if (pt === "region") {
-      mkb("框选", () => { setStatus("框选区域…（Enter 确认 / Esc 取消）"); Promise.resolve(api().pick_region()).then((b) => { if (b) apply(b.join(",")); }).catch((e) => showError("采集失败：" + e)); });
+      mkb("框选", () => { setStatus("框选区域…（拖动/移动/拖边角微调，Enter 确认 / Esc 取消）"); Promise.resolve(api().pick_region(parseBox(node.properties && node.properties[key]))).then((b) => { if (b) apply(b.join(",")); }).catch((e) => showError("采集失败：" + e)); });
     } else if (pt === "point") {
       mkb("取点", () => { setStatus("点击取点…（Esc 取消）"); Promise.resolve(api().pick_point()).then((p) => { if (p) apply(p.join(",")); }).catch((e) => showError("采集失败：" + e)); });
     } else if (pt === "color") {
@@ -2924,6 +2924,11 @@ const ED = (function () {
     return String(s == null ? "" : s).replace(/[&<>]/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   }
+  // 把区域参数当前值 "l,t,r,b" 解析成 [l,t,r,b]（4 个有限数）；非法/空返回 null（框选时用于预显示当前框）。
+  function parseBox(v) {
+    const a = String(v == null ? "" : v).split(",").map((x) => parseInt(x, 10));
+    return (a.length === 4 && a.every((n) => Number.isFinite(n))) ? a : null;
+  }
 
   function setupHelpPanel() {
     helpEl = document.createElement("div");
@@ -3508,7 +3513,7 @@ const ED = (function () {
       "· 右上角<b>资源监控</b>小窗显示本工具 CPU/内存曲线，点开可看系统占用与调采样间隔/保留时长。</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>在游戏画面上直接采集</b>（节点里相应参数下方的按钮）<br>" +
-      "· <b>框选区域…</b>：按住左键拖出矩形，Enter 确认（区域参数）<br>" +
+      "· <b>框选区域…</b>：会<b>预显示该参数当前的框</b>，可<b>框内拖动=移动</b>、<b>拖边/角手柄=改大小</b>、空白拖动=重画，Enter 确认（区域参数）<br>" +
       "· <b>取点…/吸色…</b>：移动有放大镜，点一下取坐标/颜色（吸色会顺带回填配套坐标）<br>" +
       "· <b>截取模板…</b>：框选游戏画面裁出小图存为模板（图片参数）<br>" +
       "· <b>选择图片…</b>：从已有图片文件选模板　· <b>捕获按键…</b>：按一下记下按键<br>" +

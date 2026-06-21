@@ -158,45 +158,116 @@ def pick_color():
 
 
 # ==================== 框选区域 / 截模板 ====================
-def _drag_rect(on_confirm_label: str):
-    """拖拽框选一个矩形：拖动画框，松手定框，Enter 确认，重新拖动可重画，Esc 取消。
+def _drag_rect(on_confirm_label: str, initial=None):
+    """框选一个矩形，支持微调：空白拖动=重画；框内拖动=整体移动；拖 8 个边/角手柄=改大小。
+    传入 initial=[l,t,r,b] 则【预显示当前框】，可在它基础上微调。Enter 确认，Esc 取消。
 
     确认时返回 [left, top, right, bottom]（已规整为左上<右下），取消返回 None。
     """
     import tkinter as tk
     root, canvas, shot, sw, sh = _make_overlay(
-        f"按住左键拖动框选 | Enter {on_confirm_label} | 重新拖动可重画 | Esc 取消")
-    state = {"box": None, "start": None, "rid": None, "tid": None, "confirmed": False}
+        f"拖动框选 | 框内拖动=移动 | 拖边/角=改大小 | 空白拖动=重画 | Enter {on_confirm_label} | Esc 取消")
+
+    box0 = None   # 预显示的当前框（夹到屏幕内）
+    if initial and len(initial) == 4:
+        try:
+            vx1, vy1, vx2, vy2 = (int(round(float(v))) for v in initial)
+            x1, x2 = sorted((max(0, min(sw, vx1)), max(0, min(sw, vx2))))
+            y1, y2 = sorted((max(0, min(sh, vy1)), max(0, min(sh, vy2))))
+            if x2 > x1 and y2 > y1:
+                box0 = [x1, y1, x2, y2]
+        except Exception:
+            box0 = None
+
+    state = {"box": box0, "mode": None, "press": None, "orig": None,
+             "rid": None, "tid": None, "hids": [], "confirmed": False}
+    HND, TOL = 6, 10   # 手柄半边长 / 命中容差（像素）
+    _CURS = {"nw": "size_nw_se", "se": "size_nw_se", "ne": "size_ne_sw", "sw": "size_ne_sw",
+             "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
+             "e": "sb_h_double_arrow", "w": "sb_h_double_arrow", "move": "fleur"}
+
+    def handles(b):
+        x1, y1, x2, y2 = b
+        mx, my = (x1 + x2) // 2, (y1 + y2) // 2
+        return {"nw": (x1, y1), "n": (mx, y1), "ne": (x2, y1), "e": (x2, my),
+                "se": (x2, y2), "s": (mx, y2), "sw": (x1, y2), "w": (x1, my)}
+
+    def hit(b, x, y):
+        if not b:
+            return None
+        for name, (hx, hy) in handles(b).items():
+            if abs(x - hx) <= TOL and abs(y - hy) <= TOL:
+                return name
+        x1, y1, x2, y2 = b
+        return "move" if (x1 <= x <= x2 and y1 <= y <= y2) else None
+
+    def norm(b):
+        x1, y1, x2, y2 = b
+        x1, x2 = sorted((x1, x2))
+        y1, y2 = sorted((y1, y2))
+        return [max(0, x1), max(0, y1), min(sw, x2), min(sh, y2)]
 
     def redraw():
         for k in ("rid", "tid"):
             if state[k] is not None:
-                canvas.delete(state[k])
-                state[k] = None
+                canvas.delete(state[k]); state[k] = None
+        for hid in state["hids"]:
+            canvas.delete(hid)
+        state["hids"] = []
         b = state["box"]
         if not b:
             return
         x1, y1, x2, y2 = b
         state["rid"] = canvas.create_rectangle(x1, y1, x2, y2, outline="#00e0ff",
                                                 width=2, fill="#00e0ff", stipple="gray12")
-        state["tid"] = canvas.create_text(x1, y1 - 8, anchor="sw", fill="#00e0ff",
+        state["tid"] = canvas.create_text(x1, max(10, y1 - 8), anchor="sw", fill="#00e0ff",
                                           font=("Consolas", 11),
                                           text=f"({x1},{y1},{x2},{y2})  {x2-x1}x{y2-y1}")
+        for (hx, hy) in handles(b).values():    # 8 个可拖动手柄方块
+            state["hids"].append(canvas.create_rectangle(
+                hx - HND, hy - HND, hx + HND, hy + HND, outline="#00e0ff", fill="#0a2a33", width=1))
+
+    def on_motion(e):   # 悬停改光标，提示可移动/缩放
+        canvas.configure(cursor=_CURS.get(hit(state["box"], e.x, e.y), "crosshair"))
 
     def on_press(e):
-        state["start"] = (e.x, e.y)
-        state["box"] = [e.x, e.y, e.x, e.y]
+        z = hit(state["box"], e.x, e.y)
+        state["press"] = (e.x, e.y)
+        state["orig"] = list(state["box"]) if state["box"] else None
+        if z is None:                       # 空白处：开始重画一个新框
+            state["mode"] = "draw"
+            state["box"] = [e.x, e.y, e.x, e.y]
+        else:
+            state["mode"] = z               # "move" 或某个手柄名
         redraw()
 
     def on_drag(e):
-        if not state["start"]:
+        m = state["mode"]
+        if not m:
             return
-        x0, y0 = state["start"]
-        state["box"] = [min(x0, e.x), min(y0, e.y), max(x0, e.x), max(y0, e.y)]
+        px, py = state["press"]
+        if m == "draw":
+            state["box"] = [min(px, e.x), min(py, e.y), max(px, e.x), max(py, e.y)]
+        elif m == "move":
+            ox1, oy1, ox2, oy2 = state["orig"]
+            bw, bh = ox2 - ox1, oy2 - oy1
+            nx1 = max(0, min(sw - bw, ox1 + (e.x - px)))
+            ny1 = max(0, min(sh - bh, oy1 + (e.y - py)))
+            state["box"] = [nx1, ny1, nx1 + bw, ny1 + bh]
+        else:                               # 拖某个边/角手柄改大小（名字含 n/s/e/w）
+            x1, y1, x2, y2 = state["orig"]
+            if "w" in m: x1 = e.x
+            if "e" in m: x2 = e.x
+            if "n" in m: y1 = e.y
+            if "s" in m: y2 = e.y
+            state["box"] = norm([x1, y1, x2, y2])
         redraw()
 
     def on_release(_e):
-        state["start"] = None
+        state["mode"] = None
+        if state["box"]:
+            state["box"] = norm(state["box"])
+            redraw()
 
     def on_enter(_e):
         b = state["box"]
@@ -207,11 +278,13 @@ def _drag_rect(on_confirm_label: str):
     def on_esc(_e):
         root.quit()
 
+    canvas.bind("<Motion>", on_motion)
     canvas.bind("<ButtonPress-1>", on_press)
     canvas.bind("<B1-Motion>", on_drag)
     canvas.bind("<ButtonRelease-1>", on_release)
     root.bind("<Return>", on_enter)
     root.bind("<Escape>", on_esc)
+    redraw()   # 若有预显示框，立即画出来
     root.mainloop()
     box = list(state["box"]) if state["confirmed"] else None
     # 截模板需要原图，附在 root 上由调用方取用后再 destroy。
@@ -219,9 +292,9 @@ def _drag_rect(on_confirm_label: str):
     return root, box
 
 
-def pick_region():
-    """框选区域，返回 [left, top, right, bottom]（取消返回 None）。"""
-    root, box = _drag_rect("确认")
+def pick_region(initial=None):
+    """框选区域，返回 [left, top, right, bottom]（取消返回 None）。initial=当前框，会预显示并可微调。"""
+    root, box = _drag_rect("确认", initial)
     _safe_destroy(root)
     return box
 
