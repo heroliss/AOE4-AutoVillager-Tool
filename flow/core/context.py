@@ -46,6 +46,11 @@ class ExecutionContext:
         self._full_origin = (0, 0)
         self._sct = None                        # 本帧 mss 实例（当前线程自建、帧末关闭，见 _capture_sct）
 
+        # —— 性能监控（默认关）：开启后记录每个节点本帧的「自身耗时 / 帧内累计耗时」，供编辑器叠加显示 ——
+        self.profile_enabled = False
+        self._tick_t0 = 0.0                      # 本帧起点（perf_counter 秒）
+        self._node_times: dict[str, list] = {}   # node_id -> [self_ms, cum_ms]
+
         self._block_active = False              # 输入屏蔽是否生效中
         self._lock_held = False                 # 文件锁是否持有中
 
@@ -59,6 +64,9 @@ class ExecutionContext:
         self._memo.clear()
         self._region_cache.clear()
         self._full_frame = None
+        if self.profile_enabled:
+            self._node_times = {}
+            self._tick_t0 = time.perf_counter()
 
     def cleanup_tick(self) -> None:
         """一帧结束后的安全清理：确保输入屏蔽与文件锁不会跨帧泄漏。
@@ -103,6 +111,23 @@ class ExecutionContext:
     def memo_snapshot(self) -> dict:
         """本帧已解析的数据输出 (node_id, port) -> value 的拷贝（供编辑器“运行可视化”显示数据线上的值）。"""
         return dict(self._memo)
+
+    # ==================== 性能监控（执行器使用）====================
+    def profile_record(self, node_id: str, self_ms: float) -> None:
+        """记录某节点本帧的耗时。self_ms=该节点自身这一段的耗时；
+        cum_ms=从本帧开始到此刻（该节点刚跑完）的累计耗时——即“帧内直到该节点”的总耗时。
+        同一帧内若节点被多次执行（环/循环），自身耗时累加、累计取最后一次完成时刻。"""
+        cum = (time.perf_counter() - self._tick_t0) * 1000.0
+        rec = self._node_times.get(node_id)
+        if rec is None:
+            self._node_times[node_id] = [self_ms, cum]
+        else:
+            rec[0] += self_ms
+            rec[1] = cum
+
+    def profile_snapshot(self) -> dict:
+        """本帧各节点耗时 node_id -> [self_ms, cum_ms] 的拷贝（供编辑器叠加显示）。"""
+        return {k: list(v) for k, v in self._node_times.items()}
 
     # ==================== 日志 / 实时状态 ====================
     def log(self, level: str, message: str, node_id: Optional[str] = None) -> None:

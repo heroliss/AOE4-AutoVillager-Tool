@@ -26,6 +26,7 @@ const ED = (function () {
   let running = false, runSession = false, pollTimer = null, realRun = false, _lastTick = 0;   // realRun: true=真跑(真发输入)
   let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
+  let profileOn = false, runTimes = {};         // 性能监控：开关 + 本帧各节点 [自身ms, 累计ms]
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
   let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
   let simpleMode = false;                       // 使用模式：画布只读（仅控制面板+运行+日志），面向“只想用”的用户
@@ -1239,7 +1240,7 @@ const ED = (function () {
     if (runSession && !(opts && opts.keepHistory)) {
       running = false; stopPoll(); stopRunAnim();
       try { api().run_end(); } catch (e) {}
-      runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); setRunUI();
+      runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; setRunUI();
     }
     const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
     const keepHistory = !!(opts && opts.keepHistory);   // 自动排版：保留撤销历史（这样排版可被 Ctrl+Z 撤销）
@@ -1622,6 +1623,25 @@ const ED = (function () {
     ctx.fillText(text, x + 6, y + 0.5);
     ctx.restore();
   }
+  // 性能监控药丸：节点上方标「自身ms · Σ帧内累计ms」。rx=右边界（与节点右沿对齐），by=底边（节点顶部上方）。
+  // 自身耗时越大数字越偏红（>8ms≈一次截图量级），一眼看出本帧耗时大头落在哪个节点。
+  function drawTimePill(ctx, rx, by, selfMs, cumMs) {
+    const fmt = (v) => (v >= 100 ? Math.round(v) + "" : v.toFixed(1));
+    const t1 = fmt(selfMs), t2 = "Σ" + fmt(cumMs) + "ms";
+    ctx.save();
+    ctx.font = "bold 11px Consolas, monospace";
+    const w1 = ctx.measureText(t1).width, w2 = ctx.measureText(t2).width;
+    const pad = 6, gap = 8, w = pad + w1 + gap + w2 + pad, h = 16, x = rx - w, y = by - h;
+    roundRect(ctx, x, y, w, h, 5);
+    ctx.fillStyle = "rgba(20,26,36,0.92)"; ctx.shadowColor = "#000a"; ctx.shadowBlur = 5; ctx.fill();
+    ctx.shadowBlur = 0; ctx.strokeStyle = "#0008"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    const cy = y + h / 2 + 0.5, hot = Math.min(1, selfMs / 16);
+    ctx.fillStyle = `rgb(${160 + hot * 95 | 0},${200 - hot * 120 | 0},${255 - hot * 200 | 0})`;  // 蓝→红
+    ctx.fillText(t1, x + pad, cy);                                   // 自身耗时
+    ctx.fillStyle = "#ffd23f"; ctx.fillText(t2, x + pad + w1 + gap, cy);   // Σ 帧内累计
+    ctx.restore();
+  }
   // 与 LiteGraph SPLINE_LINK 完全一致的贝塞尔控制点：输出在右、输入在左，
   // 偏移量 = 两端点欧氏距离 × 0.25（LiteGraph: distance(a,b)*0.25）。这样高亮/流动曲线与底层连线严丝合缝。
   function linkCtrlPts(pa, pb) {
@@ -1803,6 +1823,15 @@ const ED = (function () {
         if (oi >= 0) drawEndCap(ctx, termNode.getConnectionPos(false, oi, _t0));
       }
     }
+    // ⑧ 性能监控（开关开启时）：每个本帧跑过的节点上方标「本节点ms · Σ帧内累计ms」。
+    //    自身耗时＝该节点自己这段（控制节点不含其数据输入的求值，截图/OCR 等大头各自单列）；
+    //    累计＝从本帧开始到该节点跑完的总耗时（沿执行链单调递增，终点≈整帧总耗时）。
+    if (profileOn) {
+      for (const n of nodes) {
+        const tm = runTimes[n._id]; if (!tm) continue;
+        drawTimePill(ctx, n.pos[0] + n.size[0], n.pos[1] - th - 3, tm[0], tm[1]);
+      }
+    }
   }
 
   // 试运行动画刷新上限：运行中 120fps、暂停 20fps（暂停画面基本静止，只留呼吸感）。
@@ -1918,6 +1947,7 @@ const ED = (function () {
       if (runSession) {
         startRunAnim();                                  // 启动脉冲/流动动画
         try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {}   // 把断点同步给引擎
+        try { api().run_set_profile(profileOn); } catch (e) {}   // 把「性能监控」开关同步给引擎
       }
       return runSession;
     } catch (e) { showError("启动运行失败：" + (e && (e.stack || e.message) || e)); return false; }
@@ -1961,6 +1991,7 @@ const ED = (function () {
       runPorts = t.ports || {};
       runData = t.data || runData;       // 无人观看时引擎可能略过 data；保留上次，避免标签闪烁
       runDataNodes = new Set(Object.keys(runData).map((k) => k.split(RUNSEP)[0]));
+      runTimes = t.times || (profileOn ? runTimes : {});   // 仅在“性能监控”开启时引擎才附带耗时
       _lastTick = t.tick;
     }
     const ts = nowHMS();
@@ -2027,10 +2058,20 @@ const ED = (function () {
   async function stopRun() {
     running = false; stopPoll(); stopRunAnim();
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
-    runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set();
+    runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {};
     setRunUI();
     if (canvas) canvas.setDirty(true, true);
     setStatus("已停止运行");
+  }
+  // 性能监控开关：开启后运行时在每个节点叠加「自身耗时 / 帧内累计耗时」。可在运行中随时切换。
+  function toggleProfile() {
+    profileOn = !profileOn;
+    const b = document.getElementById("profbtn");
+    if (b) b.classList.toggle("on", profileOn);
+    if (!profileOn) runTimes = {};
+    if (runSession) { try { api().run_set_profile(profileOn); } catch (e) {} }
+    if (canvas) canvas.setDirty(true, false);
+    setStatus(profileOn ? "已开启性能监控：运行时每个节点显示「本节点ms · Σ累计ms」" : "已关闭性能监控");
   }
 
   // ============ 资源监控小窗：右上角常驻迷你曲线 + 数字，点开看详情/改采样配置 ============
@@ -2115,7 +2156,7 @@ const ED = (function () {
   }
 
   const self = {
-    toggleRun, dryRun, stopRun, toggleSimple, toggleSysMon,
+    toggleRun, dryRun, stopRun, toggleProfile, toggleSimple, toggleSysMon,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {

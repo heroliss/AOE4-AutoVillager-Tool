@@ -38,7 +38,12 @@ class Executor:
             ctx.memo_set(key, None)
             return None
 
-        outputs = node.evaluate(ctx, inputs)
+        if ctx.profile_enabled:
+            t0 = time.perf_counter()
+            outputs = node.evaluate(ctx, inputs)
+            ctx.profile_record(node_id, (time.perf_counter() - t0) * 1000.0)
+        else:
+            outputs = node.evaluate(ctx, inputs)
         for out_name, val in outputs.items():
             ctx.memo_set((node_id, out_name), val)
         # 不再把 outputs 存进 node.live：该字段从不被读取，却会让每个数据节点常驻持有上一帧的
@@ -51,6 +56,16 @@ class Executor:
             src = self.graph.data_source(node_id, port.name)
             inputs[port.name] = self._resolve(ctx, src[0], src[1]) if src else None
         return inputs
+
+    def _execute_node(self, ctx: ExecutionContext, node_id: str, node: Node, inputs: dict):
+        """执行一个控制节点，必要时计时。自身耗时只含 execute()——数据输入的求值
+        （截图/OCR 等开销大头）已在 _resolve_inputs 里按各自的数据节点单独计时，不重复计。"""
+        if ctx.profile_enabled:
+            t0 = time.perf_counter()
+            result = node.execute(ctx, inputs)
+            ctx.profile_record(node_id, (time.perf_counter() - t0) * 1000.0)
+            return result
+        return node.execute(ctx, inputs)
 
     # ==================== 执行流：单帧 ====================
     def run_tick(self, ctx: ExecutionContext, dt: float = 0.0) -> None:
@@ -74,7 +89,7 @@ class Executor:
 
             node = self.graph.nodes[node_id]
             inputs = self._resolve_inputs(ctx, node_id, node)
-            outputs, next_port = node.execute(ctx, inputs)
+            outputs, next_port = self._execute_node(ctx, node_id, node, inputs)
 
             # 控制节点的数据输出也写入记忆缓存，供下游拉取
             for out_name, val in outputs.items():
@@ -129,7 +144,7 @@ class TraceExecutor(Executor):
 
             node = self.graph.nodes[node_id]
             inputs = self._resolve_inputs(ctx, node_id, node)
-            outputs, next_port = node.execute(ctx, inputs)
+            outputs, next_port = self._execute_node(ctx, node_id, node, inputs)
             self.trace_path.append(node_id)
             if next_port is not None:
                 self.trace_ports[node_id] = next_port

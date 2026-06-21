@@ -39,6 +39,9 @@
   /* 使用模式（只读）时按钮换成琥珀色，强化“当前只读、点一下进编辑”的状态感 */
   #modebtn.inuse { background: #5a4a2f; border-color: #8a6a3f; color: #ffe9c7; }
   #modebtn.inuse:hover { background: #6a572f; }
+  /* 性能监控开关：开启时蓝色高亮，运行时在每个节点叠加「自身/累计」耗时 */
+  #profbtn.on { background: #314a6b; border-color: #3f5f88; color: #cfe3ff; }
+  #profbtn.on:hover { background: #395681; }
   #toolbar button:focus-visible, #toolbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   #toolbar select { max-width: 220px; }
   #toolbar .sep { flex: none; width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
@@ -146,6 +149,7 @@
     <button id="runbtn" class="accent" onclick="ED.toggleRun()" title="运行：执行当前流程（向游戏发送按键/鼠标）">▶ 运行</button>
     <button id="stopbtn" onclick="ED.stopRun()" disabled>停止</button>
     <button id="dryrunbtn" class="edit-only" onclick="ED.dryRun()" title="试运行（干跑）：只识别、不发送任何输入，用于调试核对">试运行</button>
+    <button id="profbtn" onclick="ED.toggleProfile()" title="性能监控：运行时在每个节点叠加「本节点耗时 / 本帧累计耗时(ms)」，找出耗时大头">⏱ 耗时</button>
     <span class="sep edit-only"></span>
     <button class="edit-only" onclick="ED.autolayout()">自动排版</button>
     <button class="edit-only" onclick="ED.fit()">适应窗口</button>
