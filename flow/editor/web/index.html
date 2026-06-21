@@ -66,10 +66,11 @@
   #wrap { flex: 1 1 auto; position: relative; min-height: 0; }
   canvas { display: block; }
   /* 折叠节点的可编辑参数浮层：容器按图坐标摆放控件，整体 transform 跟随画布（见 applyFoldWidgetTransform） */
-  #foldwidgets { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden;
+  #foldwidgets { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: visible;
                  transform-origin: 0 0; pointer-events: none; z-index: 5; }
   #foldwidgets .fw-row { position: absolute; display: flex; align-items: center; gap: 6px;
                  height: 24px; pointer-events: auto; }
+  #foldwidgets .fw-dot { width: 6px; height: 6px; border-radius: 50%; background: #e6a23c; flex: none; display: none; }
   #foldwidgets .fw-label { color: #aeb6c2; font-size: 12px; white-space: nowrap;
                  overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; max-width: 48%; }
   #foldwidgets input, #foldwidgets select { background: #15171c; color: #cfd3da; border: 1px solid #444;

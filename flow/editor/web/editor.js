@@ -16,8 +16,12 @@ const ED = (function () {
   let flowMeta = { name: "", desc: "", path: null, readonly: false };
   // 控制面板置顶项：有序的 [nodeId, paramKey, 自定义显示名?]（随流程保存）。
   let panelPins = [];
-  // “显示到折叠节点”的参数：[nodeId, paramKey]（随流程保存）。折叠箱体里渲染成和节点一样的可编辑控件。
+  // 参数暴露（封装：组≈函数，逐级暴露、不冒泡）。两级：
+  //  · foldPins=[[nodeId,paramKey]]：节点把【自身】参数暴露给它【所在的直接组】（折叠该组后在箱体里可编辑）。
+  //  · groupExpose=[[groupId,nodeId,paramKey]]：某组把【已暴露进它接口】的某参数，再【向上一级】暴露给它的父组。
+  // 一个参数要出现在第 N 层组的折叠箱体里，必须从拥有它的节点起、沿途每一层组都勾选了向上暴露（见 interfaceParams）。
   let foldPins = [];
+  let groupExpose = [];
   // 记住每个参数填过的“面板显示名”（键= nodeId|key）：取消勾选不丢，重新勾选自动回填；清空文本即“手动删除”。
   let pinLabels = {};
   let _panelDrag = null;                        // 控制面板项拖动调序：正在拖的项 "nodeId|key"（仅编辑模式）
@@ -125,7 +129,7 @@ const ED = (function () {
         { content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd },
         null,
         { content: "新建组", callback: () => createGroupAt(_lastMenuPos) },   // 在右键处新建一个空组，拖节点进去即归入
-        { content: "编辑分组…", callback: () => assignGroupDialog(Object.values((canvas && canvas.selected_nodes) || {})) },   // 任意空白处都能管理分组（有选中节点则一并可指派）
+        { content: "分组管理…", callback: () => assignGroupDialog(Object.values((canvas && canvas.selected_nodes) || {})) },   // 任意空白处都能管理分组（有选中节点则一并可指派）
       ];
     };
     // 节点右键：精简到 克隆 / 删除 + 节点自定义项（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/
@@ -587,6 +591,13 @@ const ED = (function () {
   // 画“分组框”（在节点后面，随成员节点自动包裹）。onDrawBackground 在画布变换内调用，用图坐标。
   const GROUP_PAD = 16, GROUP_TOP = 14;   // 四周留白（顶部留少许，组名做成“标签页”放在框上沿之上，不挤占内部）
   const GROUP_EMPTY_W = 240, GROUP_EMPTY_H = 130;   // 空组（无成员）的默认框尺寸——保证仍可见、可拖动、可作为拖放落点
+  const GROUP_NEST_PAD = 12, GROUP_TAB_H = 20;      // 嵌套时父框比子组框再外扩一圈（含子组标题标签高度），使父框真正“包住”子组、层次可见
+  function unionRect(a, b) {                          // 两个 [x,y,w,h] 的并集
+    if (!a) return b; if (!b) return a;
+    const x0 = Math.min(a[0], b[0]), y0 = Math.min(a[1], b[1]);
+    const x1 = Math.max(a[0] + a[2], b[0] + b[2]), y1 = Math.max(a[1] + a[3], b[1] + b[3]);
+    return [x0, y0, x1 - x0, y1 - y0];
+  }
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
   // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。
   function groupTabText(g) { return "⠿ " + groupPathTitle(g) + "  ⊟"; }
@@ -681,6 +692,7 @@ const ED = (function () {
       collapsed: !!g.collapsed, parent: (g.parent !== undefined ? (g.parent || null) : undefined),
       members: (g.members || []).slice(),
       pos: Array.isArray(g.pos) ? g.pos.slice() : null, size: Array.isArray(g.size) ? g.size.slice() : null,   // 空组兜底定位（支持空组）
+      desc: g.desc || "",
     }));
     const used = new Set(gs.filter((g) => g.id).map((g) => g.id));
     let seq = 1;
@@ -750,17 +762,23 @@ const ED = (function () {
     setStatus("已新建空组「" + g.title + "」——拖节点进框即归入（按住 Alt 拖动可放进/移出其它组）");
     return g;
   }
-  // 展开态分组的可见包裹框：裹住【可见成员】并并入其【折叠子组】箱体（否则拖折叠子组时父框跟不上＝“浮出父组”）。
-  function expandedGroupBox(g, ctx) {
-    let bb = groupBox(g, ctx, true);
-    for (const { g: c } of topCollapsedGroups()) {
-      if (!isDescendantGroup(c, g)) continue;          // 只并入嵌在 g 内的折叠子组
-      const sb = subgBox(c, ctx); if (!sb) continue;
-      if (!bb) { bb = [sb.x, sb.y, sb.w, sb.h]; continue; }
-      const x0 = Math.min(bb[0], sb.x), y0 = Math.min(bb[1], sb.y);
-      const x1 = Math.max(bb[0] + bb[2], sb.x + sb.w), y1 = Math.max(bb[1] + bb[3], sb.y + sb.h);
-      bb = [x0, y0, x1 - x0, y1 - y0];
+  // 展开态分组的可见包裹框：裹住【可见成员】并【把每个直接子组的画框（含其标题标签）整体并进来】，
+  // 再向外扩一圈 GROUP_NEST_PAD——这样父框真正“包住”子组（子组≈一个节点），层次清晰；
+  // 也修复“父组只剩子组、没有直接成员时父框与子组框重合而看不见”的问题。递归处理多层嵌套。
+  function expandedGroupBox(g, ctx, _vg) {
+    const vg = _vg || new Set(); if (vg.has(g.id)) return groupBox(g, ctx, true); vg.add(g.id);
+    let bb = groupBox(g, ctx, true);   // 直接可见成员（已含成员留白）
+    let hasChild = false;
+    for (const c of childGroupsOf(g)) {
+      let cb = null;
+      if (c.collapsed) { const sb = subgBox(c, ctx); cb = sb && [sb.x, sb.y, sb.w, sb.h]; }
+      else cb = expandedGroupBox(c, ctx, vg);
+      if (!cb) continue;
+      hasChild = true;
+      bb = unionRect(bb, [cb[0], cb[1] - GROUP_TAB_H, cb[2], cb[3] + GROUP_TAB_H]);   // 含子组标题标签
     }
+    if (!bb) return null;
+    if (hasChild) bb = [bb[0] - GROUP_NEST_PAD, bb[1] - GROUP_NEST_PAD, bb[2] + 2 * GROUP_NEST_PAD, bb[3] + 2 * GROUP_NEST_PAD];
     return bb;
   }
   // 命中：包含坐标的【最内层】分组下标（拖组放进它用）；排除 exclude 组及其后代。无则 -1。
@@ -829,19 +847,34 @@ const ED = (function () {
     ins.sort((p, q) => p._y - q._y); outs.sort((p, q) => p._y - q._y);   // 端口按成员节点上下顺序排，贴合原布局
     return { ins, outs };
   }
-  // 该组里被勾选“显示到折叠节点”的参数：折叠箱体里用和节点上一样的可编辑控件呈现（DOM 浮层，见 rebuildFoldWidgets）。
-  function subgFoldParams(g) {
-    const members = new Set(groupAllMembers(g)), out = [];
-    for (const [nid, key] of foldPins) {
-      if (!members.has(nid)) continue;
+  // 组的【接口参数】＝出现在该组折叠箱体里的可编辑参数（逐级暴露、不冒泡）：
+  //  · 直接成员节点中，被该节点暴露给本组的参数（isFoldPinned）；
+  //  · 直接子组的接口参数中，被该子组【再向上暴露给本组】的（isGroupExposed(子组, nid, key)）。
+  // 即一个深层参数只有沿途每层组都勾了“向上暴露”才会浮现到上层——和函数封装一致。
+  function interfaceParams(g, _vg) {
+    const vg = _vg || new Set(); if (!g || vg.has(g.id)) return []; vg.add(g.id);
+    const out = [], seen = new Set();
+    for (const nid of (g.members || [])) {
       const node = nodeByOurId(nid); if (!node) continue;
-      const w = (node.widgets || []).find((x) => x._key === key); if (!w) continue;
-      const d = defByType[node._typeId];
-      const p = d && (d.params || []).find((q) => q.key === key);
-      out.push({ nid, key, node, label: (p && p.label) || key });
+      const d = defByType[node._typeId]; if (!d) continue;
+      for (const p of (d.params || [])) {
+        if (!isFoldPinned(nid, p.key)) continue;
+        const sk = nid + "|" + p.key; if (seen.has(sk)) continue; seen.add(sk);
+        const w = (node.widgets || []).find((x) => x._key === p.key); if (!w) continue;
+        out.push({ nid, key: p.key, node, label: p.label || p.key });
+      }
+    }
+    for (const c of childGroupsOf(g)) {
+      for (const it of interfaceParams(c, vg)) {
+        if (!isGroupExposed(c.id, it.nid, it.key)) continue;   // 仅子组选择向上暴露给本组的
+        const sk = it.nid + "|" + it.key; if (seen.has(sk)) continue; seen.add(sk);
+        out.push(it);
+      }
     }
     return out;
   }
+  // 折叠箱体里要显示的可编辑参数 = 该组的接口参数。
+  function subgFoldParams(g) { return interfaceParams(g); }
   // 折叠箱体几何：锚定在成员包围盒左上角（成员仍保留 pos），尺寸按端口数 / 标题 / 折叠参数行自适应。
   function subgBox(g, ctx) {
     const bb = groupBox(g, ctx); if (!bb) return null;
@@ -1010,9 +1043,13 @@ const ED = (function () {
       box.fparams.forEach((f, k) => {
         const row = document.createElement("div");
         row.className = "fw-row";
+        row.dataset.fwk = f.nid + "|" + f.key;   // 供 refreshFoldDots 找到对应 widget 判断“已修改”
         row.style.left = (box.x + SUBG.PAD) + "px";
         row.style.top = (y0 + k * SUBG.PARAM_ROW_H) + "px";
         row.style.width = (box.w - 2 * SUBG.PAD) + "px";
+        const dot = document.createElement("span");   // 已修改（未保存）橙点——与节点上的标记对齐
+        dot.className = "fw-dot";
+        row.appendChild(dot);
         const lab = document.createElement("span");
         lab.className = "fw-label"; lab.textContent = f.label; lab.title = f.label;
         row.appendChild(lab);
@@ -1028,6 +1065,17 @@ const ED = (function () {
     const host = document.getElementById("foldwidgets"); if (!host) return;
     if (foldWidgetSig() !== _foldWidgetSig) rebuildFoldWidgets();
     applyFoldWidgetTransform();
+    refreshFoldDots();              // 折叠箱体里参数的“已修改”橙点（与节点上的橙点对齐）
+  }
+  function refreshFoldDots() {
+    const host = document.getElementById("foldwidgets"); if (!host) return;
+    host.querySelectorAll(".fw-row").forEach((row) => {
+      const dot = row.querySelector(".fw-dot"); if (!dot) return;
+      const s = row.dataset.fwk || "", ix = s.indexOf("|");
+      const node = ix > 0 ? nodeByOurId(s.slice(0, ix)) : null;
+      const w = node && (node.widgets || []).find((x) => x._key === s.slice(ix + 1));
+      dot.style.display = (w && paramChanged(w)) ? "block" : "none";
+    });
   }
   function syncFoldWidgetValues() {   // 值在别处被改（撤销/控制面板/采集）时，刷新折叠控件显示值
     const host = document.getElementById("foldwidgets"); if (!host) return;
@@ -1180,9 +1228,11 @@ const ED = (function () {
     for (const g of groupDefs) if (g.collapsed) for (const m of groupAllMembers(g)) foldHidden.add(m);
   }
   function refreshGroups() {
+    if (groupExpose.length) groupExpose = groupExpose.filter((e) => groupDefs.some((g) => g.id === e[0]));   // 组被解散/删除后清掉它的“向上暴露”项
     refreshFold();
     applyGroupColors();
     if (canvas) canvas.setDirty(true, true);
+    if (groupDlgRender && document.getElementById("grpdlg")) groupDlgRender();   // 分组管理窗口开着则同步刷新
     scheduleSnap(); refreshDirty();
   }
   function applyGroupColors() {
@@ -1208,26 +1258,32 @@ const ED = (function () {
       const curIdx = ids.map(nodeGroupIndex);
       const same = curIdx.every((x) => x === curIdx[0]) ? curIdx[0] : -2;   // 多选不一致 → 不预选
       const hasSel = ids.length > 0;
-      let h = `<b style='color:#e6c07b'>分组</b>` + (hasSel ? `（已选 ${ids.length} 个节点）` : "（管理）") +
+      let h = `<b style='color:#e6c07b'>分组管理</b>` + (hasSel ? `（已选 ${ids.length} 个节点）` : "") +
               "<div style='color:#7f8895;margin:2px 0 8px'>" +
-              (hasSel ? "选一个组＝把选中节点放进去（一个节点只属于一个组）；" : "右键节点可把它指派到组；") +
-              "嵌套请把一个组拖进另一个组。</div>";
+              (hasSel ? "选一个组＝把选中节点放进去（一个节点只属于一个组）；" : "缩进表示嵌套层级；") +
+              "嵌套可把一个组拖进另一个组，或用每行「归入」。</div>";
       if (hasSel) h += `<label style="display:block;cursor:pointer;padding:4px 0"><input type="radio" name="grp" value="-1" ${same === -1 ? "checked" : ""}> 不分组</label>`;
-      groupDefs.forEach((g, i) => {
+      // 按容器树 DFS 排序、按层级缩进，直观显示嵌套关系
+      const ordered = [];
+      const visit = (pid, depth) => { groupDefs.forEach((g, i) => { if ((g.parent || null) !== (pid || null)) return; ordered.push({ g, i, depth }); visit(g.id, depth + 1); }); };
+      visit(null, 0);
+      if (!ordered.length) h += "<div style='color:#6b727d;padding:4px 0'>（还没有分组——下面「新建空组」或选中节点后新建）</div>";
+      ordered.forEach(({ g, i, depth }) => {
         const col = groupColor(g, i), nc = childGroupsOf(g).length;
-        h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0">` +
+        h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0;margin-left:${depth * 16}px">` +
+             (depth ? `<span style="color:#5b626d;flex:none">└</span>` : "") +
              (hasSel ? `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` : "") +
              `<span data-swatch="${i}" style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
-             `<span style="flex:1">${esc(groupPathTitle(g))}</span>` +
+             `<span style="flex:1">${esc(g.title || "分组")}${g.desc ? " <span style='color:#6b727d' title='" + esc(g.desc) + "'>📝</span>" : ""}</span>` +
              `<span style="color:#7f8895">${(g.members || []).length}个${nc ? "+" + nc + "组" : ""}</span>` +
              `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
-             `<button data-fold="${i}" title="折叠成一个紧凑子图节点 / 展开还原" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
+             `<button data-fold="${i}" title="折叠成一个紧凑节点 / 展开还原" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
+             `<button data-reparent="${i}" title="归入另一个组 / 移到顶层" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">归入</button>` +
              `<button data-ren="${i}" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">改名</button>` +
              `<button data-del="${i}" title="解散此组（子组与成员上提到父组）" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:1px 7px;cursor:pointer">解散</button></label>`;
       });
-      // 新建分组只在“有选中节点”时提供——空组没有包裹框、也无法作为拖放落点，无实际意义。
       h += "<div style='margin-top:10px'>" +
-        (hasSel ? "<button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ 新建分组（含选中节点）</button>" : "") +
+        `<button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ ${hasSel ? "新建分组（含选中节点）" : "新建空组"}</button>` +
         "<span style='float:right;color:#6b727d;font-size:12px;padding-top:5px'>点窗口外关闭</span></div>";
       box.innerHTML = h;
       if (hasSel) box.querySelectorAll("input[name='grp']").forEach((r) =>
@@ -1252,11 +1308,15 @@ const ED = (function () {
       box.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
         dissolveGroup(groupDefs[+b.getAttribute("data-del")]); render();
       });
+      box.querySelectorAll("[data-reparent]").forEach((b) => b.onclick = (ev) => {
+        reparentGroupDialog(groupDefs[+b.getAttribute("data-reparent")], ev);   // 归入另一个组/顶层（菜单选）
+      });
       const newBtn = box.querySelector("#grp_new");
       if (newBtn) newBtn.onclick = async () => {
+        if (!hasSel) { createGroupAt(null); render(); return; }   // 无选中：新建一个空组（视口中心）
         const name = await askText("新建分组", "分组" + (groupDefs.length + 1));
         if (name == null) return;
-        groupDefs.push({ id: newGroupId(), title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], parent: null, members: [] });
+        groupDefs.push({ id: newGroupId(), title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], parent: null, members: [], pos: null, size: null, desc: "" });
         setNodesDirectGroup(ids, groupDefs.length - 1); render();   // 新组直接含选中节点；嵌套靠拖组
       };
     };
@@ -1353,13 +1413,10 @@ const ED = (function () {
       content: gi >= 0 ? `分组：${groupDefs[gi].title}…` : "分组…",
       callback: () => assignGroupDialog(targets),
     });
-    // —— 试运行调试：断点 / 运行到此节点 ——
+    // —— 试运行调试：断点（“运行到此节点”与断点重复，已去掉）——
     options.push(null, {
       content: breakpoints.has(node._id) ? "取消断点 ⭕" : "设为断点 🔴",
       callback: () => toggleBreakpoint(node._id),
-    }, {
-      content: "运行到此节点 ⏭",
-      callback: () => runToNode(node._id),
     });
   }
   function editNote(node) {
@@ -1474,12 +1531,13 @@ const ED = (function () {
         return ka < kb ? -1 : ka > kb ? 1 : 0;
       });
       const groups = (c.groups || []).map((g) => {
-        const o = { id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: g.members.slice().sort() };
+        const o = { id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: g.members.slice().sort(), desc: g.desc || "" };
         if (!g.members.length && g.pos) o.pos = [Math.round(g.pos[0]), Math.round(g.pos[1])];   // 空组才把位置纳入签名（有成员时位置由成员推导，避免误判“未保存”）
         return o;
       }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const foldparams = (c.foldparams || []).slice().sort((a, b) => ((a + "") < (b + "") ? -1 : 1));
-      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, foldparams, nodes, edges });
+      const groupexpose = (c.groupexpose || []).map((e) => e.join("|")).sort();
+      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, foldparams, groupexpose, nodes, edges });
     } catch (e) { return null; }
   }
   function markSaved() {         // 保存/载入后：把“当前”设为基线，清除所有标记
@@ -1549,8 +1607,9 @@ const ED = (function () {
     if (ea) out.push(`＋ 新增连线 ${ea} 条`);
     if (er) out.push(`－ 删除连线 ${er} 条`);
     if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
-    if (JSON.stringify(cur.foldparams || []) !== JSON.stringify(savedBaseline.foldparams || [])) out.push("◇ 折叠节点参数已修改");
-    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, p: g.parent || null, m: (g.members || []).slice().sort(),
+    const exsig = (a) => JSON.stringify([...(a || [])].map((x) => (Array.isArray(x) ? x.join("|") : x)).sort());
+    if (exsig(cur.foldparams) !== exsig(savedBaseline.foldparams) || exsig(cur.groupexpose) !== exsig(savedBaseline.groupexpose)) out.push("◇ 暴露参数已修改");
+    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, p: g.parent || null, d: g.desc || "", m: (g.members || []).slice().sort(),
         x: (!(g.members || []).length && g.pos) ? [Math.round(g.pos[0]), Math.round(g.pos[1])] : null }))   // 空组位置变化也算“分组已修改”
       .sort((a, b) => (a.t < b.t ? -1 : 1)));
     if (gsig(cur.groups) !== gsig(savedBaseline.groups)) out.push("◇ 分组已修改");
@@ -1728,10 +1787,12 @@ const ED = (function () {
     const panel = panelPins.filter(([nid]) => graph._nodes.some((n) => n._id === nid));
     const ids = new Set(graph._nodes.map((n) => n._id));
     const foldparams = foldPins.filter(([nid]) => ids.has(nid)).map((p) => p.slice(0, 2));
+    const gset = new Set(groupDefs.map((g) => g.id));
+    const groupexpose = groupExpose.filter(([gid, nid]) => ids.has(nid) && gset.has(gid)).map((e) => e.slice(0, 3));
     // 支持空组：保留所有组（含空组），随流程存盘；pos/size 用于空组兜底定位（有成员时由包围盒每帧刷新）。
     const groups = groupDefs
-      .map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: (g.members || []).filter((m) => ids.has(m)), pos: g.pos || null, size: g.size || null }));
-    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, nodes, edges };
+      .map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: (g.members || []).filter((m) => ids.has(m)), pos: g.pos || null, size: g.size || null, desc: g.desc || "" }));
+    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, groupexpose, nodes, edges };
   }
 
   // 操作提示走底部居中的临时浮层（toast），与工具栏的“文件信息”分开、互不覆盖；几秒后淡出。
@@ -1788,7 +1849,8 @@ const ED = (function () {
     if (!keepHistory) { undoStack = []; redoStack = []; breakpoints = new Set(); runUntil = null; }   // 新流程：清空撤销历史与断点（排版除外）
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
     for (const p of panelPins) if (p[2]) pinLabels[p[0] + "|" + p[1]] = p[2];   // 把已保存的显示名种进记忆
-    foldPins = Array.isArray(flow.foldparams) ? flow.foldparams.map((x) => x.slice(0, 2)) : [];   // “显示到折叠节点”的参数
+    foldPins = Array.isArray(flow.foldparams) ? flow.foldparams.map((x) => x.slice(0, 2)) : [];   // 节点暴露给所在组的参数
+    groupExpose = Array.isArray(flow.groupexpose) ? flow.groupexpose.map((x) => x.slice(0, 3)) : [];   // 组再向上一级暴露的参数
     groupDefs = Array.isArray(flow.groups) ? normalizeGroups(flow.groups) : [];   // 补 id/parent，旧格式自动迁移成容器树
     selectedGroupId = null;   // 新流程：清除组选中
     refreshFold();
@@ -1869,10 +1931,22 @@ const ED = (function () {
   function toggleFoldPin(nid, key) {
     const i = foldPins.findIndex((p) => p[0] === nid && p[1] === key);
     if (i >= 0) foldPins.splice(i, 1); else foldPins.push([nid, key]);
+    if (i >= 0) groupExpose = groupExpose.filter((e) => !(e[1] === nid && e[2] === key));   // 取消节点暴露 → 连带清掉各组对它的“向上暴露”
     rebuildFoldWidgets();                       // 箱体行数/控件随之变
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
     if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
+    if (selectedGroupId) showGroupHelp(groupById(selectedGroupId));
+  }
+  // 组把“已暴露进它接口”的某参数再向上暴露给父组（逐级封装）。
+  function isGroupExposed(gid, nid, key) { return groupExpose.some((e) => e[0] === gid && e[1] === nid && e[2] === key); }
+  function toggleGroupExpose(gid, nid, key) {
+    const i = groupExpose.findIndex((e) => e[0] === gid && e[1] === nid && e[2] === key);
+    if (i >= 0) groupExpose.splice(i, 1); else groupExpose.push([gid, nid, key]);
+    rebuildFoldWidgets();
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty();
+    if (selectedGroupId) showGroupHelp(groupById(selectedGroupId));
   }
   // 设置某置顶项“在面板上显示的名称”（空＝用默认名）。同步记进 pinLabels，取消勾选后仍保留。
   function setPinLabel(nid, key, name) {
@@ -2861,14 +2935,14 @@ const ED = (function () {
     // 显示到 控制面板 / 折叠节点：两列勾选——左=置顶到顶部面板；右=折叠该参数所属分组后在折叠箱体里显示可编辑控件。
     const pinnable = (d.params || []);
     if (pinnable.length) {
-      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>左：置顶到顶部控制面板 ｜ 右：折叠分组后显示在折叠节点里（可直接编辑）</div>";
+      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>左：置顶到顶部控制面板 ｜ 右：把该参数暴露给所在组（折叠该组后在组里可直接编辑；要再往上层显示需在组里继续勾选）</div>";
       for (const p of pinnable) {
         const pinned = isPinned(node._id, p.key), fpinned = isFoldPinned(node._id, p.key);
         b += `<div style="margin-top:3px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">` +
              `<label style="cursor:pointer;color:#aeb6c2;flex:1 1 120px;min-width:120px">` +
              `<input type="checkbox" data-pin="${esc(p.key)}" ${pinned ? "checked" : ""}> ${esc(p.label)}</label>` +
-             `<label style="cursor:pointer;color:#8fb6e0;white-space:nowrap" title="折叠该参数所属分组后，在折叠节点里显示这个可编辑控件（需先把节点加入分组）">` +
-             `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 折叠节点</label>`;
+             `<label style="cursor:pointer;color:#8fb6e0;white-space:nowrap" title="把该参数暴露给它所在的分组：折叠该组后在组里显示这个可编辑控件（需先把节点加入分组）。逐级封装：要再往上一层显示，在那个组的详情里继续勾选。">` +
+             `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 暴露给所在组</label>`;
         if (pinned) {
           const cur = (pinEntry(node._id, p.key) || [])[2] || "";
           b += `<input type="text" data-pinlabel="${esc(p.key)}" value="${esc(cur)}" ` +
@@ -2877,7 +2951,7 @@ const ED = (function () {
         }
         b += `</div>`;
       }
-      html += section("pin", "显示到 控制面板 / 折叠节点", b, null);
+      html += section("pin", "显示到 控制面板 / 暴露给所在组", b, null);
     }
     helpEl.innerHTML = html;
     helpEl.querySelectorAll("details[data-sec]").forEach((dt) => {
@@ -2930,7 +3004,8 @@ const ED = (function () {
     } else if (helpEl) { helpEl.style.display = "none"; }
     if (canvas) canvas.setDirty(true, true);
   }
-  // 选中组的详情面板：改名 / 折叠·展开 / 颜色 / 勾选暴露到上层的参数（=折叠后显示，逐层向上冒泡）/ 解散·删除。
+  // 选中组的详情面板（组≈节点/函数）：改名 / 折叠·展开 / 颜色 / 描述 / 克隆 /
+  //   勾选“暴露给父组的参数”（只列【已暴露进本组接口】的参数，逐级向上、不冒泡）/ 解散·删除。
   function showGroupHelp(g) {
     if (!helpEl) return;
     if (simpleMode || !g) { helpEl.style.display = "none"; return; }
@@ -2946,24 +3021,24 @@ const ED = (function () {
     html += `<div style="color:#7f8895">直接成员 ${direct.length} 个` +
       `${childN ? "，子组 " + childN + " 个" : ""}` +
       `${par ? "，父组：" + esc(par.title || "分组") : "，顶层组"}</div>`;
-    html += `<div style="margin-top:6px;display:flex;align-items:center;gap:8px">` +
-      `<button data-gfold="1" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:2px 9px;cursor:pointer">${g.collapsed ? "展开" : "折叠为子图"}</button>` +
+    if (g.desc) html += `<div style="margin-top:3px;color:#9aa3af;white-space:pre-line">${esc(g.desc)}</div>`;
+    html += `<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">` +
+      `<button data-gfold="1" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:2px 9px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
+      `<button data-gclone="1" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:2px 9px;cursor:pointer">克隆</button>` +
+      `<button data-gdesc="1" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:2px 9px;cursor:pointer">${g.desc ? "编辑描述" : "添加描述"}</button>` +
       `<label style="color:#9aa3af;display:flex;align-items:center;gap:4px">颜色 <input type="color" data-gcolor="1" value="${col}" style="width:26px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer"></label>` +
       `</div>`;
-    // 暴露到上层的参数：直接成员的参数勾选（=该参数“显示到折叠节点”，foldPins）。折叠本组或任一祖先组时该控件都会出现。
+    // 暴露给父组的参数：只列【已暴露进本组接口】的参数（interfaceParams），勾选=再向上暴露一级（groupExpose）。
+    const iface = interfaceParams(g);
     let pb = "";
-    for (const node of direct) {
-      const d = defByType[node._typeId]; const ps = (d && d.params) || [];
-      if (!ps.length) continue;
-      pb += `<div style="margin-top:5px;color:#bcd;font-weight:bold">${esc((d && d.title) || node.title || "节点")}</div>`;
-      for (const p of ps) {
-        const fp = isFoldPinned(node._id, p.key);
-        pb += `<label style="display:block;cursor:pointer;color:#aeb6c2;padding:1px 0">` +
-          `<input type="checkbox" data-gfpnid="${esc(node._id)}" data-gfpkey="${esc(p.key)}" ${fp ? "checked" : ""}> ${esc(p.label || p.key)}</label>`;
-      }
+    for (const it of iface) {
+      const ex = isGroupExposed(g.id, it.nid, it.key);
+      pb += `<label style="display:block;cursor:pointer;color:#aeb6c2;padding:1px 0">` +
+        `<input type="checkbox" data-gexnid="${esc(it.nid)}" data-gexkey="${esc(it.key)}" ${ex ? "checked" : ""}> ` +
+        `${esc((it.node.title || "节点") + "·" + it.label)}</label>`;
     }
-    if (pb) html += section("gexpose", "暴露到上层的参数（折叠后在子图节点里可编辑）", pb, null);
-    else html += `<div style="margin-top:6px;color:#7f8895">该组暂无直接成员的可暴露参数——把节点拖进组即可在此勾选。</div>`;
+    if (iface.length) html += section("gexpose", "暴露给父组的参数（再往上一级显示）", pb, iface.length);
+    else html += `<div style="margin-top:6px;color:#7f8895">还没有参数暴露进本组——在子节点说明里勾「暴露给所在组」，或在子组里勾「暴露给父组」。</div>`;
     html += `<div style="margin-top:8px;border-top:1px solid #3a404a;padding-top:6px">` +
       `<a href="#" data-gdissolve="1" style="color:#7fb0ee;text-decoration:none">解散组（成员/子组上提到父层）</a><br>` +
       `<a href="#" data-gdelall="1" style="color:#ff9b9b;text-decoration:none">删除组及全部内容（连同内部节点）</a></div>`;
@@ -2974,10 +3049,14 @@ const ED = (function () {
     if (ren) ren.onclick = async (e) => { e.preventDefault(); const nm = await askText("分组改名", g.title || ""); if (nm != null) { g.title = nm.trim() || "分组"; refreshGroups(); showGroupHelp(g); } };
     const fold = helpEl.querySelector("[data-gfold]");
     if (fold) fold.onclick = () => { setGroupCollapsed(gi, !g.collapsed); showGroupHelp(g); };
+    const clone = helpEl.querySelector("[data-gclone]");
+    if (clone) clone.onclick = () => { const ng = cloneGroup(g); if (ng) selectGroup(ng.id); };
+    const desc = helpEl.querySelector("[data-gdesc]");
+    if (desc) desc.onclick = () => editGroupNote(g);
     const colInp = helpEl.querySelector("[data-gcolor]");
     if (colInp) colInp.oninput = () => { g.color = colInp.value; refreshGroups(); };
-    helpEl.querySelectorAll("[data-gfpnid]").forEach((cb) =>
-      cb.onchange = () => { toggleFoldPin(cb.getAttribute("data-gfpnid"), cb.getAttribute("data-gfpkey")); });
+    helpEl.querySelectorAll("[data-gexnid]").forEach((cb) =>
+      cb.onchange = () => { toggleGroupExpose(g.id, cb.getAttribute("data-gexnid"), cb.getAttribute("data-gexkey")); });
     const dis = helpEl.querySelector("[data-gdissolve]");
     if (dis) dis.onclick = (e) => { e.preventDefault(); dissolveGroup(g); selectGroup(null); setStatus("已解散组"); };
     const delAll = helpEl.querySelector("[data-gdelall]");
@@ -2998,18 +3077,103 @@ const ED = (function () {
     groupDefs = groupDefs.filter((x) => !subtree.has(x.id));
     refreshGroups();
   }
-  // 组的右键菜单（在组标题/折叠箱体上右键弹出）：选中 / 折叠 / 改名 / 解散 / 删除组及全部内容。
+  // 克隆一个组（组≈节点：可整体复制成“蓝图”）：深拷贝子树全体节点 + 内部连线 + 子组结构 +
+  // 暴露设置（foldPins/groupExpose）+ 描述，全部换新 id、整体偏移，挂到与原组同一父层。返回新组。
+  function cloneGroup(g) {
+    if (!g || !graph || simpleMode) return null;
+    const OFF = 40;
+    const subtreeIds = [...groupSubtreeIds(g)], memberIds = groupAllMembers(g);
+    const memberSet = new Set(memberIds);
+    // 新 id 映射（节点/组都换新，避免与现有冲突）
+    const nodeIdMap = {}, nexist = new Set((graph._nodes || []).map((n) => n._id));
+    for (const oid of memberIds) { let id, k = 0; do { id = oid + "_c" + (++k); } while (nexist.has(id)); nexist.add(id); nodeIdMap[oid] = id; }
+    const grpIdMap = {}, gexist = new Set(groupDefs.map((x) => x.id));
+    let gseq = 1;
+    for (const gid of subtreeIds) { let id; do { id = "g" + (gseq++); } while (gexist.has(id)); gexist.add(id); grpIdMap[gid] = id; }
+    // 1) 克隆节点
+    const created = {};
+    for (const oid of memberIds) {
+      const src = nodeByOurId(oid); if (!src) continue;
+      const key = typeKeyByType[src._typeId]; if (!key) continue;
+      const n = LiteGraph.createNode(key); if (!n) continue;
+      n._id = nodeIdMap[oid]; n._typeId = src._typeId; n._note = src._note || "";
+      n.pos = [src.pos[0] + OFF, src.pos[1] + OFF];
+      for (const w of (n.widgets || [])) {
+        const sw = (src.widgets || []).find((x) => x._key === w._key);
+        if (sw) { w.value = sw.value; n.properties[w._key] = sw.value; }
+      }
+      graph.add(n); created[n._id] = n;
+    }
+    // 2) 克隆【内部】连线（两端都在子树内；克隆与原节点同类型 → 槽位下标一致，可直接连）
+    for (const l of Object.values(graph.links || {})) {
+      if (!l) continue;
+      const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
+      if (!a || !b || !memberSet.has(a._id) || !memberSet.has(b._id)) continue;
+      const na = created[nodeIdMap[a._id]], nb = created[nodeIdMap[b._id]];
+      if (na && nb) { try { na.connect(l.origin_slot, nb, l.target_slot); } catch (e) {} }
+    }
+    // 3) 克隆组（子树）：根克隆挂到原组同父层，其余按映射重挂
+    for (const gid of subtreeIds) {
+      const src = groupById(gid);
+      groupDefs.push({
+        id: grpIdMap[gid], title: src.title, color: src.color, collapsed: !!src.collapsed,
+        parent: (src === g) ? (g.parent || null) : (grpIdMap[src.parent] || null),
+        members: (src.members || []).map((m) => nodeIdMap[m]).filter(Boolean),
+        desc: src.desc || "", pos: src.pos ? [src.pos[0] + OFF, src.pos[1] + OFF] : null, size: src.size ? src.size.slice() : null,
+      });
+    }
+    // 4) 克隆暴露设置
+    for (const [nid, key] of foldPins.slice()) if (nodeIdMap[nid]) foldPins.push([nodeIdMap[nid], key]);
+    for (const [gid, nid, key] of groupExpose.slice()) if (grpIdMap[gid] && nodeIdMap[nid]) groupExpose.push([grpIdMap[gid], nodeIdMap[nid], key]);
+    refreshGroups(); scheduleSnap();
+    setStatus("已克隆组「" + (g.title || "分组") + "」");
+    return groupById(grpIdMap[g.id]);
+  }
+  // 编辑组的描述（仅展示、不参与运行）。
+  function editGroupNote(g) {
+    if (!g) return;
+    document.getElementById("notedlg")?.remove();
+    const box = document.createElement("div");
+    box.id = "notedlg"; box.className = "popdlg";
+    box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(420px,90vw);" +
+      "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:130;" +
+      "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+    box.innerHTML = "<b style='color:#e6c07b'>分组描述</b>（说明这个分组/封装块的作用，仅展示）<br>" +
+      "<textarea id='notetext' style='width:100%;height:84px;margin-top:8px;background:#15171c;color:#cfd3da;" +
+      "border:1px solid #444;border-radius:4px;padding:6px;font:13px/1.5 \"Microsoft YaHei\",sans-serif;box-sizing:border-box'></textarea>" +
+      "<div style='margin-top:8px;text-align:right'>" +
+      "<button id='noteok' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>确定</button> " +
+      "<button id='notecancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 12px;cursor:pointer'>取消</button></div>";
+    document.body.appendChild(box);
+    const ta = box.querySelector("#notetext"); ta.value = g.desc || ""; ta.focus();
+    box.querySelector("#noteok").onclick = () => { g.desc = ta.value.trim(); box.remove(); scheduleSnap(); refreshDirty(); if (selectedGroupId === g.id) showGroupHelp(g); };
+    box.querySelector("#notecancel").onclick = () => box.remove();
+  }
+  // 组的右键菜单（在组标题/折叠箱体上右键弹出）：与节点行为对齐——折叠 / 改名 / 描述 / 克隆 / 再分组 / 分组管理 / 解散 / 删除。
   function showGroupMenu(g, e) {
     const gi = groupDefs.indexOf(g); if (gi < 0) return;
     const items = [
-      { content: "选中组（详情·暴露参数）", callback: () => selectGroup(g.id) },
-      { content: g.collapsed ? "展开" : "折叠为子图", callback: () => setGroupCollapsed(gi, !g.collapsed) },
+      { content: g.collapsed ? "展开" : "折叠", callback: () => setGroupCollapsed(gi, !g.collapsed) },
       { content: "改名…", callback: async () => { const nm = await askText("分组改名", g.title || ""); if (nm != null) { g.title = nm.trim() || "分组"; refreshGroups(); if (selectedGroupId === g.id) showGroupHelp(g); } } },
+      { content: g.desc ? "编辑描述…" : "添加描述…", callback: () => editGroupNote(g) },
+      { content: "克隆组", callback: () => { const ng = cloneGroup(g); if (ng) selectGroup(ng.id); } },
+      { content: "再分组（归入组…）", callback: () => reparentGroupDialog(g, e) },
       null,
+      { content: "分组管理…", callback: () => assignGroupDialog([]) },
       { content: "解散组（成员/子组上提到父层）", callback: () => { dissolveGroup(g); if (selectedGroupId === g.id) selectGroup(null); setStatus("已解散组"); } },
       { content: "删除组及全部内容（连同内部节点）", callback: async () => { const cnt = groupAllMembers(g).length; if (await confirmBox("删除组及全部内容", `将删除「${groupPathTitle(g)}」及其内部 ${cnt} 个节点` + (childGroupsOf(g).length ? "（含子组）" : "") + "，不可恢复。确定？", "删除")) { deleteGroupAll(g); if (selectedGroupId === g.id) selectGroup(null); setStatus("已删除组及全部内容"); } } },
     ];
     new LiteGraph.ContextMenu(items, { event: e, title: "分组：" + (g.title || "分组") });
+  }
+  // 「再分组」：把某组归入另一个组（=设父组），下拉选目标（含“顶层”），防环。
+  function reparentGroupDialog(g, e) {
+    if (!g) return;
+    const opts = [{ content: "▲ 顶层（不归任何组）", callback: () => { setGroupParent(g, null); setStatus("已移到顶层"); } }];
+    for (const t of groupDefs) {
+      if (t === g || isDescendantGroup(t, g)) continue;   // 不能归入自己或自己的后代
+      opts.push({ content: groupPathTitle(t), callback: () => { setGroupParent(g, t.id); setStatus(`已把「${g.title || "分组"}」归入「${t.title || "分组"}」`); } });
+    }
+    new LiteGraph.ContextMenu(opts, { event: e, title: "归入组：" + (g.title || "分组") });
   }
 
   // 流程统计：节点数 / 执行·数据连线数 / 分组数 / 面板项数 / 各类节点数（按分类）。
@@ -3218,7 +3382,8 @@ const ED = (function () {
     buildGraph(data);
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
     panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 3)) : [];   // 置顶项(含自定义名)随撤销/重做恢复
-    foldPins = Array.isArray(data.foldparams) ? data.foldparams.map((x) => x.slice(0, 2)) : [];   // 折叠节点参数随撤销/重做恢复
+    foldPins = Array.isArray(data.foldparams) ? data.foldparams.map((x) => x.slice(0, 2)) : [];   // 暴露给所在组的参数随撤销/重做恢复
+    groupExpose = Array.isArray(data.groupexpose) ? data.groupexpose.map((x) => x.slice(0, 3)) : [];   // 组向上暴露随撤销/重做恢复
     groupDefs = Array.isArray(data.groups) ? normalizeGroups(data.groups) : [];   // 分组（含 id/parent/折叠态）随撤销/重做恢复
     refreshFold();
     applyGroupColors();
@@ -3363,7 +3528,7 @@ const ED = (function () {
     refreshFold();
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
-    setStatus(g.collapsed ? `已折叠「${g.title || "分组"}」为子图（单击 ⊞ 或双击展开）` : `已展开「${g.title || "分组"}」`);
+    setStatus(g.collapsed ? `已折叠「${g.title || "分组"}」（单击 ⊞ 或双击展开）` : `已展开「${g.title || "分组"}」`);
   }
   function onCanvasDblClick(e) {
     if (!graph || !canvas) return;     // 折叠/展开是纯视图操作，使用模式（只读）下也允许
@@ -3469,7 +3634,8 @@ const ED = (function () {
       // 删除节点：除快照外，隐藏右下角说明面板（否则被删节点的说明会残留）
       graph.onNodeRemoved = () => {
         panelPins = panelPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));   // 删节点连带移除其面板项
-        foldPins = foldPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));     // 删节点连带移除其折叠参数
+        foldPins = foldPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));     // 删节点连带移除其“暴露给所在组”
+        groupExpose = groupExpose.filter((e) => graph._nodes.some((n) => n._id === e[1]));   // 删节点连带移除组对它的“向上暴露”
         const ids = new Set(graph._nodes.map((n) => n._id));
         breakpoints = new Set([...breakpoints].filter((id) => ids.has(id)));   // 删节点连带移除其断点
         if (runUntil && !ids.has(runUntil)) runUntil = null;
@@ -3518,6 +3684,20 @@ const ED = (function () {
         if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
         else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
       });
+      // Delete/Backspace：删选中节点；若选中的是【组】则解散该组（节点 Delete=删节点，组=删容器壳=解散，与节点行为对齐）。
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Delete" && e.key !== "Backspace") return;
+        if (simpleMode) return;
+        const t = e.target;
+        if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;   // 正在输入框里：不拦截
+        if (selectedGroupId) {
+          const g = groupById(selectedGroupId); e.preventDefault();
+          if (g) { dissolveGroup(g); selectGroup(null); setStatus("已解散组（Delete）"); }
+          return;
+        }
+        const sel = Object.values((canvas && canvas.selected_nodes) || {});
+        if (sel.length) { e.preventDefault(); for (const n of sel.slice()) { try { graph.remove(n); } catch (err) {} } setStatus(`已删除 ${sel.length} 个节点`); }
+      }, true);
       doResize();   // 首次同步定尺寸（之后的 resize 走 rAF 合并）
       window.addEventListener("resize", resize);
       // 用 ResizeObserver 让窗口拖拽改变大小时内容实时刷新（window resize 在部分情况下不够即时）

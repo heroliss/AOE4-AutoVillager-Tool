@@ -54,9 +54,11 @@ class Graph:
         # 可视化“分组/子图框”：按成员节点划分（仅编辑器展示，框随成员自动包裹）。不参与执行。
         # 每项 {"title": str, "color": str, "collapsed": bool, "members": [node_id, ...]}。
         self.groups: list = []
-        # “显示到折叠节点”的参数：[ [node_id, param_key], ... ]。仅编辑器展示——折叠箱体里把这些参数
+        # “暴露给所在组”的参数：[ [node_id, param_key], ... ]。仅编辑器展示——折叠箱体里把这些参数
         # 渲染成和节点上一样的可编辑控件。不参与执行。
         self.foldparams: list = []
+        # 组“再向上一级暴露”的参数：[ [group_id, node_id, param_key], ... ]。逐级封装、不冒泡。仅编辑器展示。
+        self.groupexpose: list = []
 
     # ==================== 构建 ====================
     def add(self, node_id: str, node: Node, pos: tuple[float, float] = (0.0, 0.0)) -> Node:
@@ -107,6 +109,7 @@ class Graph:
             **({"panel": [list(x) for x in self.panel]} if self.panel else {}),
             **({"groups": [dict(x) for x in self.groups]} if self.groups else {}),
             **({"foldparams": [list(x) for x in self.foldparams]} if self.foldparams else {}),
+            **({"groupexpose": [list(x) for x in self.groupexpose]} if self.groupexpose else {}),
             "nodes": [
                 {
                     "id": node_id,
@@ -128,6 +131,7 @@ class Graph:
         g.panel = [list(x) for x in data.get("panel", [])]
         g.groups = [dict(x) for x in data.get("groups", [])]
         g.foldparams = [list(x) for x in data.get("foldparams", [])]
+        g.groupexpose = [list(x) for x in data.get("groupexpose", [])]
         for nd in data.get("nodes", []):
             node = create_node(nd["type"])
             # 仅写入已声明的参数，忽略多余键，缺失键保留默认

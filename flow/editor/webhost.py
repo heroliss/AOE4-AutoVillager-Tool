@@ -215,6 +215,7 @@ def graph_to_payload(graph: Graph) -> dict:
             "panel": [list(x) for x in graph.panel],
             "groups": [dict(x) for x in graph.groups],
             "foldparams": [list(x) for x in getattr(graph, "foldparams", [])],
+            "groupexpose": [list(x) for x in getattr(graph, "groupexpose", [])],
             "nodes": nodes, "edges": edges}
 
 
@@ -238,6 +239,8 @@ def payload_to_graph(payload: dict) -> Graph:
     g.panel = [list(p) for p in payload.get("panel", []) if len(p) >= 2 and p[0] in g.nodes]
     # “显示到折叠节点”的参数：仅保留指向现存节点的 [node_id, key]
     g.foldparams = [list(p)[:2] for p in payload.get("foldparams", []) if len(p) >= 2 and p[0] in g.nodes]
+    # 组“再向上一级暴露”的参数 [group_id, node_id, key]：仅保留指向现存节点的
+    g.groupexpose = [list(p)[:3] for p in payload.get("groupexpose", []) if len(p) >= 3 and p[1] in g.nodes]
     # 分组（容器树）：直接成员只保留现存节点。支持空组——保留所有组（含无成员的空组），存盘/重开后仍在。
     _grp_raw = payload.get("groups", [])
     for gr in _grp_raw:
@@ -248,6 +251,7 @@ def payload_to_graph(payload: dict) -> Graph:
                          "collapsed": bool(gr.get("collapsed", False)),   # 可折叠子图：保留折叠态，存盘/重开后仍折叠
                          "parent": gr.get("parent"),
                          "members": members,
+                         "desc": gr.get("desc", ""),   # 分组描述（仅展示）
                          "pos": gr.get("pos"),     # 空组兜底定位（有成员时由前端按包围盒每帧刷新）
                          "size": gr.get("size")})
     kinds = _port_kind_map()
