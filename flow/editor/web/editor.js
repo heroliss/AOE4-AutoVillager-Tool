@@ -574,10 +574,11 @@ const ED = (function () {
     const n = parseInt(m[1], 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
     return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#15181d" : "#ffffff";
   }
+  // 分组包裹框：裹住该组【子树全体成员】（直接成员 + 所有后代组成员）。visibleOnly 时跳过被折叠隐藏的成员。
   function groupBox(g, ctx, visibleOnly) {
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
-    for (const mid of (g.members || [])) {
-      if (visibleOnly && foldHidden.has(mid)) continue;   // 展开态包裹框：只裹【可见】成员（部分被折叠父组吞掉时只裹剩余部分）
+    for (const mid of groupAllMembers(g)) {
+      if (visibleOnly && foldHidden.has(mid)) continue;
       const n = nodeByOurId(mid);
       if (!n) continue;
       any = true;
@@ -595,65 +596,114 @@ const ED = (function () {
   // 折叠后，把“跨越分组边界”的连线汇成箱体左/右侧的输入/输出端口，并列出该组被钉选的参数，
   // 看起来像一个独立节点；双击箱体即展开。组内连线在折叠态隐藏。
   const SUBG = { TITLE_H: 28, PORT_GAP: 22, PORT_R: 4.5, PAD: 12, MINW: 200, PARAM_ROW_H: 30, PARAM_MINW: 268, EXEC: "#e6a23c", DATA: "#59b6c7" };
-  function collapsedGroupList() {           // [{g, i}]：collapsed 且仍有成员的组
-    const out = [];
-    groupDefs.forEach((g, i) => { if (g.collapsed && (g.members || []).length) out.push({ g, i }); });
+
+  // ===== 容器树模型：组≈特殊节点。每个组有稳定 id + 单一 parent；members 仅记【直接子节点】。 =====
+  // 节点只属于一个组（某组的直接成员），组只有一个父组。子树全体成员 = 直接成员 ∪ 各子组子树成员（递归）。
+  let _gidSeq = 1;
+  function newGroupId() { let id; do { id = "g" + (_gidSeq++); } while (groupDefs.some((g) => g.id === id)); return id; }
+  function groupById(id) { return id ? groupDefs.find((g) => g.id === id) : null; }
+  function childGroupsOf(g) { return groupDefs.filter((x) => x.parent === g.id); }
+  function groupAncestors(g) {            // 自下而上祖先组
+    const out = []; let p = groupById(g.parent);
+    while (p && !out.includes(p)) { out.push(p); p = groupById(p.parent); }
     return out;
   }
-  // ===== 嵌套（重叠成员模型）：B 的成员是 A 成员的【真子集】⇒ B 嵌套在 A 内。一个节点可同属多个组。=====
-  function groupContains(outer, inner) {   // outer 成员严格多于 inner 且为其超集
-    const om = outer.members || [], im = inner.members || [];
-    if (om.length <= im.length) return false;
-    const s = new Set(om);
-    return im.every((m) => s.has(m));
+  function isDescendantGroup(a, b) { return groupAncestors(a).includes(b); }   // a 在 b 的子树内
+  function groupDepth(g) { return groupAncestors(g).length; }                  // 嵌套深度（顶层=0）
+  function groupAllMembers(g, _seen, _vg) {   // 子树全体节点 ourId（去重）
+    const set = _seen || new Set(), vg = _vg || new Set();
+    if (vg.has(g.id)) return _seen ? set : [...set];   // 防环（万一文件被手改出父子环）
+    vg.add(g.id);
+    for (const m of (g.members || [])) set.add(m);
+    for (const c of childGroupsOf(g)) groupAllMembers(c, set, vg);
+    return _seen ? set : [...set];
   }
-  // 顶层折叠组：collapsed 且【不】嵌套在另一个 collapsed 组里——只有它们画成可见箱体；
-  // 嵌套在折叠父组里的子组其成员已被父组隐藏，不单独画箱体（父箱体已覆盖之）。
-  function topCollapsedGroups() {
-    const all = collapsedGroupList();
-    return all.filter(({ g }) => !all.some(({ g: h }) => h !== g && groupContains(h, g)));
+  function collapsedGroupList() {         // [{g, i}]：collapsed 且子树有成员的组
+    const out = [];
+    groupDefs.forEach((g, i) => { if (g.collapsed && groupAllMembers(g).length) out.push({ g, i }); });
+    return out;
   }
-  // 某组是否被另一个【折叠】组包含（用于：展开态子组若整体落在折叠父组内，则不画其包裹框）。
-  function isInsideCollapsed(g) {
-    return collapsedGroupList().some(({ g: h }) => h !== g && groupContains(h, g));
+  function topCollapsedGroups() {         // collapsed 且无 collapsed 祖先 → 画成可见箱体
+    return collapsedGroupList().filter(({ g }) => !groupAncestors(g).some((a) => a.collapsed));
   }
-  function groupSupersets(g) { return groupDefs.filter((s) => s !== g && groupContains(s, g)); }   // 严格包含 g 的组（g 的祖先链）
-  function groupSubsets(g) { return groupDefs.filter((s) => s !== g && groupContains(g, s)); }     // 被 g 严格包含的组（g 的后代）
-  // 把若干节点【加入】某分组（连同其所有祖先组，维持 child⊆parent 不变式）。
-  function addNodesToGroup(ourIds, gi) {
-    const g = groupDefs[gi]; if (!g) return;
-    for (const s of [g, ...groupSupersets(g)]) {
-      s.members = s.members || [];
-      for (const id of ourIds) if (!s.members.includes(id)) s.members.push(id);
+  function isInsideCollapsed(g) { return groupAncestors(g).some((a) => a.collapsed); }   // 有 collapsed 祖先
+  // 读入分组数组并规范成容器树：补 id；旧格式（members=全量、靠子集嵌套、无 parent）→ 推断 parent 并把 members 收为直接成员。
+  function normalizeGroups(raw) {
+    const gs = (raw || []).map((g) => ({
+      id: g.id || null, title: g.title || "分组", color: g.color || "",
+      collapsed: !!g.collapsed, parent: (g.parent !== undefined ? (g.parent || null) : undefined),
+      members: (g.members || []).slice(),
+    }));
+    const used = new Set(gs.filter((g) => g.id).map((g) => g.id));
+    let seq = 1;
+    for (const g of gs) if (!g.id) { let id; do { id = "g" + (seq++); } while (used.has(id)); g.id = id; used.add(id); }
+    if (gs.some((g) => g.parent !== undefined)) {          // 新格式：信任 parent
+      for (const g of gs) if (g.parent === undefined) g.parent = null;
+      return gs;
     }
-    refreshGroups();
+    // 旧格式：members 为子树全量、靠子集嵌套 → 推断 parent + 收为直接成员
+    const orig = new Map(gs.map((g) => [g.id, g.members.slice()]));
+    for (const g of gs) {                                  // parent = 严格包含自己的【最小】组
+      let best = null, bestN = Infinity;
+      for (const s of gs) {
+        if (s === g) continue;
+        const sm = orig.get(s.id), gm = orig.get(g.id);
+        if (sm.length > gm.length && gm.every((m) => sm.includes(m)) && sm.length < bestN) { best = s; bestN = sm.length; }
+      }
+      g.parent = best ? best.id : null;
+    }
+    for (const g of gs) {                                  // members → 直接成员（减去各直接子组的子树成员）
+      const childMembers = new Set();
+      for (const c of gs) if (c.parent === g.id) for (const m of orig.get(c.id)) childMembers.add(m);
+      g.members = orig.get(g.id).filter((m) => !childMembers.has(m));
+    }
+    return gs;
   }
-  // 把若干节点从某分组【移除】（连同其所有后代子组，否则后代仍含该节点就不再是 g 的子集）；空组自动消失。
-  function removeNodesFromGroup(ourIds, gi) {
-    const g = groupDefs[gi]; if (!g) return;
+
+  // 删空组：无直接成员【且】无子组的组才删（保留“纯容器”父组）；级联直到稳定。
+  function pruneEmptyGroups() {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = groupDefs.length - 1; i >= 0; i--) {
+        const g = groupDefs[i];
+        if (!(g.members || []).length && !childGroupsOf(g).length) { groupDefs.splice(i, 1); changed = true; }
+      }
+    }
+  }
+  // 把若干节点设为某组的【直接成员】（单一归属：先从所有组移除，再加入目标；gi=null→移出所有组）。
+  function setNodesDirectGroup(ourIds, gi) {
     const rm = new Set(ourIds);
-    for (const s of [g, ...groupSubsets(g)]) s.members = (s.members || []).filter((m) => !rm.has(m));
-    groupDefs = groupDefs.filter((x) => (x.members || []).length);
+    for (const g of groupDefs) g.members = (g.members || []).filter((m) => !rm.has(m));
+    if (gi != null && groupDefs[gi]) {
+      const g = groupDefs[gi]; g.members = g.members || [];
+      for (const id of ourIds) if (!g.members.includes(id)) g.members.push(id);
+    }
+    pruneEmptyGroups();
     refreshGroups();
   }
-  // —— 把「组」当容器拖放实现嵌套（仍是重叠成员模型，但维持 child⊆parent 不变式）——
-  function unnestGroup(g) {       // 从所有严格超集里摘出 g → g 变顶层
-    const rm = new Set(g.members || []);
-    for (const s of groupSupersets(g)) s.members = (s.members || []).filter((m) => !rm.has(m));
+  // 设某组的父组（parentId=null→顶层）。防环：目标不能是自己或自己的后代。
+  function setGroupParent(g, parentId) {
+    if (!g) return;
+    if (parentId) { const p = groupById(parentId); if (!p || p === g || isDescendantGroup(p, g)) return; }
+    g.parent = parentId || null;
+    pruneEmptyGroups();   // 旧父组若因此变成空容器（无直接成员且无子组）则清掉
+    refreshGroups();
   }
-  function nestGroupInto(g, t) {  // 把 g 嵌入 t：先摘出，再并入 t 及 t 的所有祖先
-    if (g === t || groupContains(g, t)) return;   // 不能嵌入自己或自己的后代（防环）
-    unnestGroup(g);
-    for (const s of [t, ...groupSupersets(t)]) {
-      s.members = s.members || [];
-      for (const m of (g.members || [])) if (!s.members.includes(m)) s.members.push(m);
-    }
+  // 解散某组：子组与直接成员上提到它的父组（无父则变顶层/无组），再删除它本身。
+  function dissolveGroup(g) {
+    if (!g) return;
+    const pid = g.parent || null, p = groupById(pid);
+    for (const c of childGroupsOf(g)) c.parent = pid;          // 子组改挂到祖父
+    if (p) { p.members = p.members || []; for (const m of (g.members || [])) if (!p.members.includes(m)) p.members.push(m); }
+    const k = groupDefs.indexOf(g); if (k >= 0) groupDefs.splice(k, 1);
+    refreshGroups();
   }
   // 展开态分组的可见包裹框：裹住【可见成员】并并入其【折叠子组】箱体（否则拖折叠子组时父框跟不上＝“浮出父组”）。
   function expandedGroupBox(g, ctx) {
     let bb = groupBox(g, ctx, true);
     for (const { g: c } of topCollapsedGroups()) {
-      if (!groupContains(g, c)) continue;            // 只并入嵌在 g 内的折叠子组
+      if (!isDescendantGroup(c, g)) continue;          // 只并入嵌在 g 内的折叠子组
       const sb = subgBox(c, ctx); if (!sb) continue;
       if (!bb) { bb = [sb.x, sb.y, sb.w, sb.h]; continue; }
       const x0 = Math.min(bb[0], sb.x), y0 = Math.min(bb[1], sb.y);
@@ -667,14 +717,26 @@ const ED = (function () {
     const ctx = _measCtx(); if (!ctx) return -1;
     let best = -1, bestN = Infinity;
     groupDefs.forEach((g, i) => {
-      if (g === exclude || (exclude && groupContains(exclude, g))) return;
+      if (g === exclude || (exclude && isDescendantGroup(g, exclude))) return;
       let box;
       if (g.collapsed) { const b = subgBox(g, ctx); box = b && [b.x, b.y, b.w, b.h]; }
       else box = expandedGroupBox(g, ctx);
       if (!box) return;
-      if (gx >= box[0] && gx <= box[0] + box[2] && gy >= box[1] && gy <= box[1] + box[3] && (g.members || []).length < bestN) {
-        best = i; bestN = (g.members || []).length;
-      }
+      const n = groupAllMembers(g).length;
+      if (gx >= box[0] && gx <= box[0] + box[2] && gy >= box[1] && gy <= box[1] + box[3] && n < bestN) { best = i; bestN = n; }
+    });
+    return best;
+  }
+  // 节点拖放的落点组：包含节点中心的【最内层、且展开可见】分组（折叠/被折叠隐藏的组不作落点）。
+  function nodeDropGroupIndex(node) {
+    const ctx = _measCtx(); if (!ctx || !node) return -1;
+    const cx = node.pos[0] + node.size[0] / 2, cy = node.pos[1] + (node.size[1] || 0) / 2;
+    let best = -1, bestN = Infinity;
+    groupDefs.forEach((g, i) => {
+      if (g.collapsed || isInsideCollapsed(g)) return;
+      const box = expandedGroupBox(g, ctx); if (!box) return;
+      const n = groupAllMembers(g).length;
+      if (cx >= box[0] && cx <= box[0] + box[2] && cy >= box[1] && cy <= box[1] + box[3] && n < bestN) { best = i; bestN = n; }
     });
     return best;
   }
@@ -693,7 +755,7 @@ const ED = (function () {
   // 某折叠组的边界端口：外部→组内=输入端口；组内→外部=输出端口。按 (成员,槽位) 去重，每个唯一槽位一个端口。
   // 注意：link.origin_id/target_id 是 LiteGraph 的【数字 id】，分组成员存的是【ourId(_id)】，必须经 getNodeById 转换后再比对/拼 key。
   function subgPorts(g) {
-    const members = new Set(g.members || []);
+    const members = new Set(groupAllMembers(g));
     const ins = [], outs = [], seenI = new Set(), seenO = new Set();
     for (const k in (graph.links || {})) {
       const l = graph.links[k]; if (!l) continue;
@@ -718,7 +780,7 @@ const ED = (function () {
   }
   // 该组里被勾选“显示到折叠节点”的参数：折叠箱体里用和节点上一样的可编辑控件呈现（DOM 浮层，见 rebuildFoldWidgets）。
   function subgFoldParams(g) {
-    const members = new Set(g.members || []), out = [];
+    const members = new Set(groupAllMembers(g)), out = [];
     for (const [nid, key] of foldPins) {
       if (!members.has(nid)) continue;
       const node = nodeByOurId(nid); if (!node) continue;
@@ -759,7 +821,7 @@ const ED = (function () {
       const box = subgBox(g, ctx); if (!box) continue;
       box.ports.ins.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "in", idx)));
       box.ports.outs.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "out", idx)));
-      for (const m of (g.members || [])) if (!memberGroup.has(m)) memberGroup.set(m, i);   // ourId → 所属【顶层】折叠箱体下标（嵌套时取最外层）
+      for (const m of groupAllMembers(g)) if (!memberGroup.has(m)) memberGroup.set(m, i);   // ourId → 所属【顶层】折叠箱体下标（嵌套时取最外层）
       boxes.push({ g, i, box });
     }
     return { boxes, portPos, memberGroup };
@@ -841,7 +903,7 @@ const ED = (function () {
     // 运行时若组内有节点正在本帧路径上，箱体描金光提示“此处有活动”
     if (runSession) {
       let active = false;
-      for (const m of (g.members || [])) { if (runPath.has(m) || runDataNodes.has(m)) { active = true; break; } }
+      for (const m of groupAllMembers(g)) { if (runPath.has(m) || runDataNodes.has(m)) { active = true; break; } }
       if (active) {
         const pulse = 0.5 + 0.5 * Math.sin(runPhase * 3.0);
         ctx.save(); ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 2 + 2 * pulse;
@@ -857,7 +919,7 @@ const ED = (function () {
     const mctx = _measCtx(); if (!mctx) return;
     for (const { g } of topCollapsedGroups()) {
       let sumSelf = 0, maxCum = 0, any = false;
-      for (const m of (g.members || [])) {
+      for (const m of groupAllMembers(g)) {
         const tm = runTimes[m]; if (!tm) continue;
         any = true; sumSelf += tm[0]; if (tm[1] > maxCum) maxCum = tm[1];
       }
@@ -971,8 +1033,8 @@ const ED = (function () {
     syncFoldWidgets();           // 折叠节点的可编辑参数 DOM 浮层：跟随平移/缩放，几何变则重建
     if (!groupDefs.length) return;
     ctx.save();
-    // 嵌套渲染顺序：成员多的（外层）先画、成员少的（内层）后画压在上面，保证嵌套子组/子箱体可见。
-    const order = groupDefs.map((g, i) => i).sort((a, b) => (groupDefs[b].members || []).length - (groupDefs[a].members || []).length);
+    // 嵌套渲染顺序：按层级——外层（depth 小）先画、内层后画压在上面，保证嵌套子组/子箱体可见。
+    const order = groupDefs.map((g, i) => i).sort((a, b) => groupDepth(groupDefs[a]) - groupDepth(groupDefs[b]));
     for (const i of order) {
       const g = groupDefs[i];
       if (g.collapsed) {         // 折叠态：画紧凑“子图节点”箱体（仅顶层折叠组；嵌套在折叠父组里的子组不单独画）
@@ -982,7 +1044,7 @@ const ED = (function () {
         continue;
       }
       // 展开态：成员若已全部被折叠父组隐藏，则不画其包裹框（否则框会落在父箱体之上）。
-      if ((g.members || []).every((m) => foldHidden.has(m))) continue;
+      if (groupAllMembers(g).every((m) => foldHidden.has(m))) continue;
       const box = expandedGroupBox(g, ctx);  // 裹住可见成员 + 折叠子组箱体（拖折叠子组时父框跟随，不再浮出）
       if (!box) continue;
       const [x, y, w, h] = box, col = groupColor(g, i), name = groupTabText(g);
@@ -1027,24 +1089,18 @@ const ED = (function () {
     });
   }
 
-  // 一个节点可属于多个分组（嵌套）。返回【最内层】分组下标（成员最少的那个包含它的组），无则 -1。
-  // 用途：节点标题染色 / “所属分组”标签——取最贴近节点的内层组最达意。
+  // 节点只属于一个组（某组的【直接成员】）。返回其直接所属分组下标（即最内层），无则 -1。
   function nodeGroupIndex(ourId) {
-    let best = -1, bestN = Infinity;
-    groupDefs.forEach((g, i) => {
-      const m = g.members || [];
-      if (m.includes(ourId) && m.length < bestN) { best = i; bestN = m.length; }
-    });
-    return best;
+    return groupDefs.findIndex((g) => (g.members || []).includes(ourId));
   }
   function groupColorOf(ourId) {
     const i = nodeGroupIndex(ourId);
     return i >= 0 ? groupColor(groupDefs[i], i) : null;
   }
   // 分组变化后：把每个节点的标题栏染成所属分组色 + 重绘 + 计脏。
-  function refreshFold() {   // 重算“被折叠隐藏的成员”集合；任何改动分组的地方都应调用
+  function refreshFold() {   // 重算“被折叠隐藏的成员”集合（折叠组的子树全体）；任何改动分组的地方都应调用
     foldHidden = new Set();
-    for (const g of groupDefs) if (g.collapsed) for (const m of (g.members || [])) foldHidden.add(m);
+    for (const g of groupDefs) if (g.collapsed) for (const m of groupAllMembers(g)) foldHidden.add(m);
   }
   function refreshGroups() {
     refreshFold();
@@ -1071,37 +1127,29 @@ const ED = (function () {
       "padding:14px 16px;z-index:150;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
     document.body.appendChild(box);
     const render = () => {
-      // 嵌套（重叠成员）模型：一个节点可属于多个分组；勾选=把选中节点【加入】该组（不动其它组），
-      // 取消勾选=移出。成员是另一组子集的分组会自动嵌套显示。
-      const inCount = (i) => ids.filter((id) => (groupDefs[i].members || []).includes(id)).length;
+      // 容器树模型：一个节点只属于一个分组（直接成员）。这里用单选指定节点归属；嵌套请把一个组拖进另一个组。
+      const curIdx = ids.map(nodeGroupIndex);
+      const same = curIdx.every((x) => x === curIdx[0]) ? curIdx[0] : -2;   // 多选不一致 → 不预选
       let h = `<b style='color:#e6c07b'>分组</b>（已选 ${ids.length} 个节点）` +
-              "<div style='color:#7f8895;margin:2px 0 8px'>一个节点可属于多个分组；勾选=加入、取消=移出。成员是另一组子集时自动嵌套。</div>";
+              "<div style='color:#7f8895;margin:2px 0 8px'>一个节点只属于一个分组；嵌套请把一个组拖进另一个组。</div>";
+      h += `<label style="display:block;cursor:pointer;padding:4px 0"><input type="radio" name="grp" value="-1" ${same === -1 ? "checked" : ""}> 不分组</label>`;
       groupDefs.forEach((g, i) => {
-        const col = groupColor(g, i);
-        const cnt = inCount(i), full = cnt === ids.length, part = cnt > 0 && !full;
+        const col = groupColor(g, i), nc = childGroupsOf(g).length;
         h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0">` +
-             `<input type="checkbox" data-grp="${i}" ${full ? "checked" : ""}>` +
+             `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` +
              `<span data-swatch="${i}" style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
-             `<span style="flex:1">${esc(g.title || "分组")}${part ? " <span style='color:#7f8895'>(部分)</span>" : ""}</span>` +
-             `<span style="color:#7f8895">${(g.members || []).length}个</span>` +
+             `<span style="flex:1">${esc(g.title || "分组")}${groupDepth(g) ? " <span style='color:#7f8895'>(子组)</span>" : ""}</span>` +
+             `<span style="color:#7f8895">${(g.members || []).length}个${nc ? "+" + nc + "组" : ""}</span>` +
              `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
              `<button data-fold="${i}" title="折叠成一个紧凑子图节点 / 展开还原" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
              `<button data-ren="${i}" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">改名</button>` +
-             `<button data-del="${i}" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:1px 7px;cursor:pointer">解散</button></label>`;
+             `<button data-del="${i}" title="解散此组（子组与成员上提到父组）" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:1px 7px;cursor:pointer">解散</button></label>`;
       });
       h += "<div style='margin-top:10px'><button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ 新建分组（含选中节点）</button>" +
         "<span style='float:right;color:#6b727d;font-size:12px;padding-top:5px'>点窗口外关闭</span></div>";
       box.innerHTML = h;
-      // 勾选框：全部已在该组→取消勾选=移出；否则勾选=把选中节点加入该组（保留其它组归属，实现嵌套/重叠）
-      box.querySelectorAll("[data-grp]").forEach((c) => {
-        const i = +c.getAttribute("data-grp");
-        const cnt = inCount(i);
-        if (cnt > 0 && cnt < ids.length) c.indeterminate = true;   // 部分选中→半勾态
-        c.onchange = () => {
-          if (inCount(i) === ids.length) removeNodesFromGroup(ids, i); else addNodesToGroup(ids, i);
-          render();
-        };
-      });
+      box.querySelectorAll("input[name='grp']").forEach((r) =>
+        r.onchange = () => { const v = +r.value; setNodesDirectGroup(ids, v < 0 ? null : v); render(); });
       box.querySelectorAll("[data-color]").forEach((c) =>
         c.oninput = () => {
           const i = +c.getAttribute("data-color");
@@ -1120,13 +1168,13 @@ const ED = (function () {
         if (name != null) { groupDefs[i].title = name.trim() || "分组"; refreshGroups(); render(); }
       });
       box.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
-        groupDefs.splice(+b.getAttribute("data-del"), 1); refreshGroups(); render();
+        dissolveGroup(groupDefs[+b.getAttribute("data-del")]); render();
       });
       box.querySelector("#grp_new").onclick = async () => {
         const name = await askText("新建分组", "分组" + (groupDefs.length + 1));
         if (name == null) return;
-        groupDefs.push({ title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], members: [] });
-        addNodesToGroup(ids, groupDefs.length - 1); render();   // 加入而不移出其它组：选中若为某组子集则自动成为其嵌套子组
+        groupDefs.push({ id: newGroupId(), title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], parent: null, members: [] });
+        setNodesDirectGroup(ids, groupDefs.length - 1); render();   // 新组直接含选中节点；嵌套靠拖组
       };
     };
     groupDlgRender = render;   // 撤销/重做后若弹窗仍开着，据此刷新
@@ -1342,8 +1390,8 @@ const ED = (function () {
         const kb = b.src + "|" + b.src_port + "|" + b.dst + "|" + b.dst_port;
         return ka < kb ? -1 : ka > kb ? 1 : 0;
       });
-      const groups = (c.groups || []).map((g) => ({ title: g.title, color: g.color, collapsed: !!g.collapsed, members: g.members.slice().sort() }))
-        .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
+      const groups = (c.groups || []).map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: g.members.slice().sort() }))
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const foldparams = (c.foldparams || []).slice().sort((a, b) => ((a + "") < (b + "") ? -1 : 1));
       return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, foldparams, nodes, edges });
     } catch (e) { return null; }
@@ -1416,7 +1464,7 @@ const ED = (function () {
     if (er) out.push(`－ 删除连线 ${er} 条`);
     if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
     if (JSON.stringify(cur.foldparams || []) !== JSON.stringify(savedBaseline.foldparams || [])) out.push("◇ 折叠节点参数已修改");
-    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, m: (g.members || []).slice().sort() }))
+    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, p: g.parent || null, m: (g.members || []).slice().sort() }))
       .sort((a, b) => (a.t < b.t ? -1 : 1)));
     if (gsig(cur.groups) !== gsig(savedBaseline.groups)) out.push("◇ 分组已修改");
     return out;
@@ -1594,8 +1642,8 @@ const ED = (function () {
     const ids = new Set(graph._nodes.map((n) => n._id));
     const foldparams = foldPins.filter(([nid]) => ids.has(nid)).map((p) => p.slice(0, 2));
     const groups = groupDefs
-      .map((g) => ({ title: g.title, color: g.color, collapsed: !!g.collapsed, members: (g.members || []).filter((m) => ids.has(m)) }))
-      .filter((g) => g.members.length);
+      .map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: (g.members || []).filter((m) => ids.has(m)) }))
+      .filter((g) => g.members.length || groupDefs.some((x) => x.parent === g.id));   // 保留有成员的，或作为别人父组的纯容器组
     return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, nodes, edges };
   }
 
@@ -1654,9 +1702,7 @@ const ED = (function () {
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
     for (const p of panelPins) if (p[2]) pinLabels[p[0] + "|" + p[1]] = p[2];   // 把已保存的显示名种进记忆
     foldPins = Array.isArray(flow.foldparams) ? flow.foldparams.map((x) => x.slice(0, 2)) : [];   // “显示到折叠节点”的参数
-    groupDefs = Array.isArray(flow.groups)
-      ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", collapsed: !!g.collapsed, members: (g.members || []).slice() }))
-      : [];
+    groupDefs = Array.isArray(flow.groups) ? normalizeGroups(flow.groups) : [];   // 补 id/parent，旧格式自动迁移成容器树
     refreshFold();
     const added = buildGraph(flow);
     applyGroupColors();   // 按分组给节点标题栏染色
@@ -2992,9 +3038,7 @@ const ED = (function () {
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
     panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 3)) : [];   // 置顶项(含自定义名)随撤销/重做恢复
     foldPins = Array.isArray(data.foldparams) ? data.foldparams.map((x) => x.slice(0, 2)) : [];   // 折叠节点参数随撤销/重做恢复
-    groupDefs = Array.isArray(data.groups)
-      ? data.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", collapsed: !!g.collapsed, members: (g.members || []).slice() }))
-      : [];   // 分组（含折叠态）随撤销/重做恢复
+    groupDefs = Array.isArray(data.groups) ? normalizeGroups(data.groups) : [];   // 分组（含 id/parent/折叠态）随撤销/重做恢复
     refreshFold();
     applyGroupColors();
     if (groupDlgRender && document.getElementById("grpdlg")) groupDlgRender();   // 分组弹窗开着则刷新
@@ -3145,13 +3189,13 @@ const ED = (function () {
     const ii = foldIconAt(off[0], off[1]);                                   // 先：单击右端 ⊟/⊞ 图标 → 折叠/展开（两种模式都可用）
     if (ii >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(ii, !groupDefs[ii].collapsed); return; }
     if (simpleMode) return;            // 使用模式（只读）：不允许拖动整组移动节点（位置属于“改图”）
-    // 命中手柄时按【最内层】优先（成员少的先判定），这样嵌套时能抓到里层子组而不是外层父组。
-    const order = groupDefs.map((g, i) => i).sort((a, b) => (groupDefs[a].members || []).length - (groupDefs[b].members || []).length);
+    // 命中手柄时按【最内层】优先（子树成员少的先判定），这样嵌套时能抓到里层子组而不是外层父组。
+    const order = groupDefs.map((g, i) => i).sort((a, b) => groupAllMembers(groupDefs[a]).length - groupAllMembers(groupDefs[b]).length);
     for (const i of order) {
       const r = groupTabRect(groupDefs[i]); if (!r) continue;
       if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
         e.preventDefault(); e.stopImmediatePropagation();
-        const members = (groupDefs[i].members || []).map(nodeByOurId).filter(Boolean);
+        const members = groupAllMembers(groupDefs[i]).map(nodeByOurId).filter(Boolean);   // 拖整组＝移动其【子树全体】节点
         _groupDrag = { gi: i, last: off, members, moved: false };
         window.addEventListener("pointermove", onGroupDragMove, true);
         window.addEventListener("pointerup", onGroupDragUp, true);
@@ -3176,12 +3220,10 @@ const ED = (function () {
     if (!gd || !gd.moved) return;
     const g = groupDefs[gd.gi];
     if (g) {
-      // 放下时按落点决定嵌套：落在某个组内 → 嵌入【最内层】那个；落在空白 → 摘出为顶层。
+      // 放下时按落点决定父组：落在某个组内 → 设为其子组（最内层那个）；落在空白 → 设为顶层。
       const ti = innermostGroupAt(gd.last[0], gd.last[1], g);
       const tTitle = ti >= 0 ? (groupDefs[ti].title || "分组") : null;
-      if (ti >= 0) nestGroupInto(g, groupDefs[ti]); else unnestGroup(g);
-      groupDefs = groupDefs.filter((x) => (x.members || []).length);
-      refreshGroups();
+      setGroupParent(g, ti >= 0 ? groupDefs[ti].id : null);
       setStatus(tTitle ? `已把「${g.title || "分组"}」嵌入「${tTitle}」` : `「${g.title || "分组"}」移到顶层`);
     } else { scheduleSnap(); }
   }
@@ -3223,12 +3265,25 @@ const ED = (function () {
           if (l && (!graph.getNodeById(l.origin_id) || !graph.getNodeById(l.target_id))) delete graph.links[k];
         }
         for (const g of groupDefs) g.members = (g.members || []).filter((m) => ids.has(m));
-        groupDefs = groupDefs.filter((g) => g.members.length);   // 空组自动消失
+        pruneEmptyGroups();   // 清掉空组（保留仍有子组的纯容器父组）
         refreshFold();
         renderPanel();
         scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none";
       };
-      canvas.onNodeMoved = scheduleSnap;
+      canvas.onNodeMoved = (node) => {
+        // 拖动节点到某【展开】组框内 → 该节点（及一起拖动的选中节点）成为那个组的直接成员；拖到空白→移出。
+        // 与“拖组进组”一致：落点决定归属。仅在归属确实变化时改，避免组内微调误触发。
+        if (node && !simpleMode) {
+          const sel = Object.values((canvas && canvas.selected_nodes) || {});
+          const moved = (sel.length > 1 && sel.includes(node)) ? sel : [node];
+          const ti = nodeDropGroupIndex(node);   // 以主拖动节点落点为准
+          if (!moved.every((nd) => nodeGroupIndex(nd._id) === ti)) {
+            setNodesDirectGroup(moved.map((n) => n._id), ti >= 0 ? ti : null);   // 内含 refreshGroups（已计快照）
+            return;
+          }
+        }
+        scheduleSnap();
+      };
       // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
       canvas.canvas.addEventListener("pointerdown", onRightDown, true);
       canvas.canvas.addEventListener("pointerdown", onGroupDragDown, true);   // 左键拖“分组标签页”整体移动该组
