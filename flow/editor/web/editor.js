@@ -594,7 +594,7 @@ const ED = (function () {
   // 纯编辑器视图层：折叠只隐藏成员节点的“显示与命中”，collect() 输出的底层扁平图不变（引擎照常跑）。
   // 折叠后，把“跨越分组边界”的连线汇成箱体左/右侧的输入/输出端口，并列出该组被钉选的参数，
   // 看起来像一个独立节点；双击箱体即展开。组内连线在折叠态隐藏。
-  const SUBG = { TITLE_H: 28, PORT_GAP: 22, PORT_R: 4.5, PAD: 10, MINW: 156, PARAM_ROW_H: 30, PARAM_MINW: 210, EXEC: "#e6a23c", DATA: "#59b6c7" };
+  const SUBG = { TITLE_H: 28, PORT_GAP: 22, PORT_R: 4.5, PAD: 12, MINW: 200, PARAM_ROW_H: 30, PARAM_MINW: 268, EXEC: "#e6a23c", DATA: "#59b6c7" };
   function collapsedGroupList() {           // [{g, i}]：collapsed 且仍有成员的组
     const out = [];
     groupDefs.forEach((g, i) => { if (g.collapsed && (g.members || []).length) out.push({ g, i }); });
@@ -3027,10 +3027,10 @@ const ED = (function () {
   function _measCtx() { return (canvas && canvas.canvas) ? canvas.canvas.getContext("2d") : null; }
   function groupTabRect(g) {
     const ctx = _measCtx(); if (!ctx) return null;
-    if (g.collapsed) {                            // 折叠态：箱体标题栏即拖动手柄（拖它移动整组）
+    if (g.collapsed) {                            // 折叠态：整个箱体都是拖动手柄（像普通节点，空白处即可拖动整组）
       if (isInsideCollapsed(g)) return null;      // 嵌套在折叠父组里：不画箱体也就没有手柄
       const sb = subgBox(g, ctx); if (!sb) return null;
-      return [sb.x, sb.y, sb.w, SUBG.TITLE_H];
+      return [sb.x, sb.y, sb.w, sb.h];            // 折叠参数的 DOM 控件在更高层(pointer-events:auto)，点控件不会触发拖动
     }
     if ((g.members || []).every((m) => foldHidden.has(m))) return null;   // 整体被折叠父组隐藏：无可见框
     const box = groupBox(g, ctx, true); if (!box) return null;
