@@ -240,7 +240,9 @@ def payload_to_graph(payload: dict) -> Graph:
         members = [m for m in (gr.get("members") or []) if m in g.nodes]
         if members:
             g.groups.append({"title": gr.get("title", "分组"),
-                             "color": gr.get("color", ""), "members": members})
+                             "color": gr.get("color", ""),
+                             "collapsed": bool(gr.get("collapsed", False)),   # 可折叠子图：保留折叠态，存盘/重开后仍折叠
+                             "members": members})
     kinds = _port_kind_map()
     for e in payload.get("edges", []):
         src_type = next((n["type"] for n in payload["nodes"] if n["id"] == e["src"]), None)

@@ -18,8 +18,10 @@ const ED = (function () {
   // 记住每个参数填过的“面板显示名”（键= nodeId|key）：取消勾选不丢，重新勾选自动回填；清空文本即“手动删除”。
   let pinLabels = {};
   let _panelDrag = null;                        // 控制面板项拖动调序：正在拖的项 "nodeId|key"（仅编辑模式）
-  // 可视化分组：[{title, color, members:[ourNodeId...]}]，框随成员节点自动包裹（仅展示，随流程保存）。
+  // 可视化分组：[{title, color, collapsed?, members:[ourNodeId...]}]，框随成员节点自动包裹（仅展示，随流程保存）。
+  // collapsed=true 时该组折叠成一个紧凑“子图节点”：隐藏成员、把跨边界连线汇成箱体输入/输出端口（见“可折叠子图”一节）。
   let groupDefs = [];
+  let foldHidden = new Set();   // 当前被折叠组隐藏的成员 ourId（仅影响显示/命中；collect 仍输出完整扁平图供引擎用）
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // —— 试运行（干跑）可视化状态 ——
@@ -172,6 +174,20 @@ const ED = (function () {
         return ret;
       };
       LGraphCanvas.prototype.__cursorHooked = true;
+    }
+    // 可折叠子图：从“可见节点”里剔除被折叠组隐藏的成员——一处即同时管住【渲染】与【鼠标命中】
+    // （visible_nodes 同时用于绘制与 getNodeOnPos）。节点仍留在 graph._nodes 里，collect() 照常输出。
+    if (!LGraphCanvas.prototype.__foldHooked) {
+      const _origCVN = LGraphCanvas.prototype.computeVisibleNodes;
+      LGraphCanvas.prototype.computeVisibleNodes = function (nodes, out) {
+        const vis = _origCVN.call(this, nodes, out);
+        if (!foldHidden.size) return vis;
+        let w = 0;
+        for (let i = 0; i < vis.length; i++) if (!foldHidden.has(vis[i]._id)) vis[w++] = vis[i];
+        vis.length = w;
+        return vis;
+      };
+      LGraphCanvas.prototype.__foldHooked = true;
     }
     // 值编辑浮框：去掉 OK 按钮，输入即"实时生效"；回车/失焦/点外部即关闭。
     LGraphCanvas.prototype.prompt = function (title, value, callback, event, multiline) {
@@ -564,6 +580,179 @@ const ED = (function () {
     if (!any) return null;
     return [x0 - GROUP_PAD, y0 - GROUP_TOP, (x1 - x0) + 2 * GROUP_PAD, (y1 - y0) + GROUP_TOP + GROUP_PAD];
   }
+
+  // ============ 可折叠子图（把一个分组折叠成一个紧凑“子图节点”）============
+  // 纯编辑器视图层：折叠只隐藏成员节点的“显示与命中”，collect() 输出的底层扁平图不变（引擎照常跑）。
+  // 折叠后，把“跨越分组边界”的连线汇成箱体左/右侧的输入/输出端口，并列出该组被钉选的参数，
+  // 看起来像一个独立节点；双击箱体即展开。组内连线在折叠态隐藏。
+  const SUBG = { TITLE_H: 28, PORT_GAP: 22, PORT_R: 4.5, PAD: 10, MINW: 156, EXEC: "#e6a23c", DATA: "#59b6c7" };
+  function collapsedGroupList() {           // [{g, i}]：collapsed 且仍有成员的组
+    const out = [];
+    groupDefs.forEach((g, i) => { if (g.collapsed && (g.members || []).length) out.push({ g, i }); });
+    return out;
+  }
+  function subgPortLabel(node, slot, isInput) {
+    if (slot.type === "exec") return node.title || (isInput ? "入口" : "出口");   // exec 端口用成员节点名更达意
+    return slot.label || slot.name || (isInput ? "入" : "出");                    // 数据端口用槽位名（如“食物”）
+  }
+  // 某折叠组的边界端口：外部→组内=输入端口；组内→外部=输出端口。按 (成员,槽位) 去重，每个唯一槽位一个端口。
+  function subgPorts(g) {
+    const members = new Set(g.members || []);
+    const ins = [], outs = [], seenI = new Set(), seenO = new Set();
+    for (const k in (graph.links || {})) {
+      const l = graph.links[k]; if (!l) continue;
+      const oIn = members.has(l.origin_id), tIn = members.has(l.target_id);
+      if (oIn === tIn) continue;   // 都在组内（内部线）或都在组外（无关）→ 非边界
+      if (tIn) {
+        const n = graph.getNodeById(l.target_id); if (!n || !n.inputs || !n.inputs[l.target_slot]) continue;
+        const key = l.target_id + "#i#" + l.target_slot; if (seenI.has(key)) continue; seenI.add(key);
+        const slot = n.inputs[l.target_slot];
+        ins.push({ key, label: subgPortLabel(n, slot, true), type: slot.type });
+      } else {
+        const n = graph.getNodeById(l.origin_id); if (!n || !n.outputs || !n.outputs[l.origin_slot]) continue;
+        const key = l.origin_id + "#o#" + l.origin_slot; if (seenO.has(key)) continue; seenO.add(key);
+        const slot = n.outputs[l.origin_slot];
+        outs.push({ key, label: subgPortLabel(n, slot, false), type: slot.type });
+      }
+    }
+    return { ins, outs };
+  }
+  // 该组被钉选（出现在控制面板）的参数：折叠箱体上列出 [{label, val}]，即“挑选出的一部分有用参数”。
+  function subgPinnedParams(g) {
+    const members = new Set(g.members || []), out = [];
+    for (const [nid, key, custom] of panelPins) {
+      if (!members.has(nid)) continue;
+      const n = nodeByOurId(nid); if (!n) continue;
+      const w = (n.widgets || []).find((x) => x._key === key);
+      const label = custom || (w && w.name) || key;
+      let val = w ? w.value : (n.properties ? n.properties[key] : undefined);
+      if (val === true) val = "是"; else if (val === false) val = "否";
+      out.push({ label, val: (val == null ? "" : String(val)) });
+    }
+    return out;
+  }
+  // 折叠箱体几何：锚定在成员包围盒左上角（成员仍保留 pos），尺寸按端口数 / 标题 / 参数自适应。
+  function subgBox(g, ctx) {
+    const bb = groupBox(g, ctx); if (!bb) return null;
+    const ports = subgPorts(g), pins = subgPinnedParams(g);
+    const rows = Math.max(ports.ins.length, ports.outs.length, 1);
+    ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
+    const titleW = ctx.measureText("◳ " + (g.title || "子图") + "  ▸").width;
+    ctx.font = "12px 'Microsoft YaHei',sans-serif";
+    let li = 0, lo = 0, lp = 0;
+    for (const p of ports.ins) li = Math.max(li, ctx.measureText(p.label).width);
+    for (const p of ports.outs) lo = Math.max(lo, ctx.measureText(p.label).width);
+    for (const p of pins) lp = Math.max(lp, ctx.measureText(p.label + "：" + p.val).width);
+    const w = Math.max(SUBG.MINW, titleW + 24, li + lo + 34, lp + 22);
+    const h = SUBG.TITLE_H + rows * SUBG.PORT_GAP + (pins.length ? pins.length * 17 + 8 : SUBG.PAD);
+    return { x: bb[0], y: bb[1], w, h, ports, pins };
+  }
+  function subgPortPos(box, side, idx) {
+    const y = box.y + SUBG.TITLE_H + SUBG.PORT_GAP * (idx + 0.5);
+    return side === "in" ? [box.x, y] : [box.x + box.w, y];
+  }
+  // 一次性算出本帧折叠所需：每个组的箱体 + 边界端口 key→屏幕坐标（供连线改接）。图很小，按需重算即可。
+  function foldInfo() {
+    const ctx = _measCtx(), boxes = [], portPos = new Map();
+    if (!ctx) return { boxes, portPos };
+    for (const { g, i } of collapsedGroupList()) {
+      const box = subgBox(g, ctx); if (!box) continue;
+      box.ports.ins.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "in", idx)));
+      box.ports.outs.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "out", idx)));
+      boxes.push({ g, i, box });
+    }
+    return { boxes, portPos };
+  }
+  // 折叠态的连线绘制：跳过“内部线”，把跨边界线的隐藏端改接到箱体端口（其余正常）。复用 LiteGraph 的 renderLink。
+  function drawFoldedConnections(ctx) {
+    const fi = foldInfo();
+    ctx.lineWidth = this.connections_width; ctx.globalAlpha = this.editor_alpha;
+    for (const node of this.graph._nodes) {
+      if (!node.inputs) continue;
+      for (let i = 0; i < node.inputs.length; i++) {
+        const input = node.inputs[i]; if (!input || input.link == null) continue;
+        const link = this.graph.links[input.link]; if (!link) continue;
+        const start = this.graph.getNodeById(link.origin_id); if (!start) continue;
+        const oH = foldHidden.has(link.origin_id), tH = foldHidden.has(node._id);
+        if (oH && tH) continue;   // 内部线：折叠态不画
+        let a = oH ? fi.portPos.get(link.origin_id + "#o#" + link.origin_slot)
+                   : start.getConnectionPos(false, link.origin_slot, [0, 0]);
+        let b = tH ? fi.portPos.get(node._id + "#i#" + i)
+                   : node.getConnectionPos(true, i, [0, 0]);
+        if (!a || !b) continue;
+        const ss = start.outputs[link.origin_slot];
+        const sdir = (ss && ss.dir) || LiteGraph.RIGHT, edir = (input && input.dir) || LiteGraph.LEFT;
+        this.renderLink(ctx, [a[0], a[1]], [b[0], b[1]], link, false, 0, null, sdir, edir);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  // 画一个折叠子图箱体（标题栏=拖动手柄/双击展开；左输入、右输出端口；下方列出钉选参数）。
+  function drawSubgBox(ctx, g, i, box) {
+    const col = groupColor(g, i), tcol = contrastText(col);
+    roundRect(ctx, box.x, box.y, box.w, box.h, 9);
+    ctx.fillStyle = "#20242c"; ctx.globalAlpha = 0.98; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = col + "26"; ctx.fill();                          // 组色淡填充
+    ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke();
+    roundRect(ctx, box.x, box.y, box.w, SUBG.TITLE_H, 9);            // 标题栏（实色）
+    ctx.fillStyle = col; ctx.fill();
+    ctx.fillStyle = tcol; ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.fillText("◳ " + (g.title || "子图"), box.x + 10, box.y + SUBG.TITLE_H / 2);
+    ctx.textAlign = "right"; ctx.fillText("▸", box.x + box.w - 9, box.y + SUBG.TITLE_H / 2);  // ▸=可双击展开
+    // 端口：exec=三角、data=圆点；标签在内侧
+    const drawPort = (p, pos, side) => {
+      const c = p.type === "exec" ? SUBG.EXEC : SUBG.DATA;
+      ctx.fillStyle = c; ctx.strokeStyle = "#11141a"; ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (p.type === "exec") {
+        const d = SUBG.PORT_R + 1, sx = side === "in" ? 1 : -1;
+        ctx.moveTo(pos[0] - sx * d, pos[1] - d); ctx.lineTo(pos[0] + sx * d, pos[1]); ctx.lineTo(pos[0] - sx * d, pos[1] + d); ctx.closePath();
+      } else { ctx.arc(pos[0], pos[1], SUBG.PORT_R, 0, Math.PI * 2); }
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#c7ccd6"; ctx.font = "12px 'Microsoft YaHei',sans-serif"; ctx.textBaseline = "middle";
+      if (side === "in") { ctx.textAlign = "left"; ctx.fillText(p.label, pos[0] + 9, pos[1]); }
+      else { ctx.textAlign = "right"; ctx.fillText(p.label, pos[0] - 9, pos[1]); }
+    };
+    box.ports.ins.forEach((p, idx) => drawPort(p, subgPortPos(box, "in", idx), "in"));
+    box.ports.outs.forEach((p, idx) => drawPort(p, subgPortPos(box, "out", idx), "out"));
+    // 钉选参数（“挑选出的一部分有用参数”）：标签:值，逐行列在端口下方
+    let py = box.y + SUBG.TITLE_H + Math.max(box.ports.ins.length, box.ports.outs.length, 1) * SUBG.PORT_GAP + 4;
+    ctx.font = "12px 'Microsoft YaHei',sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    for (const pp of box.pins) {
+      ctx.fillStyle = "#8b929e"; ctx.fillText(pp.label + "：", box.x + 10, py + 8);
+      const lw = ctx.measureText(pp.label + "：").width;
+      ctx.fillStyle = "#dfe4ec"; ctx.fillText(pp.val, box.x + 10 + lw, py + 8);
+      py += 17;
+    }
+    // 运行时若组内有节点正在本帧路径上，箱体描金光提示“此处有活动”
+    if (runSession) {
+      let active = false;
+      for (const m of (g.members || [])) { if (runPath.has(m) || runDataNodes.has(m)) { active = true; break; } }
+      if (active) {
+        const pulse = 0.5 + 0.5 * Math.sin(runPhase * 3.0);
+        ctx.save(); ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 2 + 2 * pulse;
+        ctx.shadowColor = "#ffb300"; ctx.shadowBlur = 10 + 14 * pulse;
+        roundRect(ctx, box.x - 1, box.y - 1, box.w + 2, box.h + 2, 9); ctx.stroke(); ctx.restore();
+      }
+    }
+  }
+  // 性能监控 × 折叠：在子图箱体上汇总「组内成员自身耗时之和 · 组内最后完成时刻的累计」，
+  // 这样把一段折叠起来后，仍能一眼看出这一整段本帧花了多少（便于定位耗时大头的“段”）。
+  function drawFoldedTimePills(ctx) {
+    if (!runSession) return;
+    const mctx = _measCtx(); if (!mctx) return;
+    for (const { g } of collapsedGroupList()) {
+      let sumSelf = 0, maxCum = 0, any = false;
+      for (const m of (g.members || [])) {
+        const tm = runTimes[m]; if (!tm) continue;
+        any = true; sumSelf += tm[0]; if (tm[1] > maxCum) maxCum = tm[1];
+      }
+      if (!any) continue;
+      const box = subgBox(g, mctx); if (!box) continue;
+      drawTimePill(ctx, box.x + box.w, box.y - 3, sumSelf, maxCum);
+    }
+  }
   // 补画 LiteGraph 漏掉的“汇入同一入口”的执行连线：它的 drawConnections 每个输入口只画 input.link 那一条，
   // 而我们允许 exec 输入多条汇入(见 vendor 改动)，这里把其余 exec 连线按相同样条补上，保证都可见。
   const EXEC_FANIN_PAL = ["#e6a23c", "#9b8cff", "#5ad1a0", "#e36a9e", "#5ab0e6"];  // 汇入线配色，便于分清
@@ -581,14 +770,20 @@ const ED = (function () {
       const key = l.target_id + "" + l.target_slot;
       (byTarget[key] = byTarget[key] || []).push(l);
     }
+    const fi = foldHidden.size ? foldInfo() : null;   // 折叠态：补画的汇入线同样要跳过内部线 / 改接箱体端口
     ctx.save();
     for (const key in byTarget) {
       byTarget[key].forEach((l, j) => {
         const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
         if (!a || !b || !a.outputs || !a.outputs[l.origin_slot]) return;
+        const oH = foldHidden.has(l.origin_id), tH = foldHidden.has(l.target_id);
+        if (oH && tH) return;     // 内部汇入线：折叠态不画
         let pa, pb;
-        try { pa = a.getConnectionPos(false, l.origin_slot, [0, 0]); pb = b.getConnectionPos(true, l.target_slot, [0, 0]); }
-        catch (e) { return; }
+        try {
+          pa = oH ? fi.portPos.get(l.origin_id + "#o#" + l.origin_slot) : a.getConnectionPos(false, l.origin_slot, [0, 0]);
+          pb = tH ? fi.portPos.get(l.target_id + "#i#" + l.target_slot) : b.getConnectionPos(true, l.target_slot, [0, 0]);
+        } catch (e) { return; }
+        if (!pa || !pb) return;
         const cc = linkCtrlPts([pa[0], pa[1]], [pb[0], pb[1]]);
         const bow = ((j % 2 === 0) ? 1 : -1) * (Math.floor(j / 2) + 1) * 24;   // 交错上下弯，错开各条线
         ctx.strokeStyle = EXEC_FANIN_PAL[j % EXEC_FANIN_PAL.length]; ctx.lineWidth = 2.5;
@@ -603,6 +798,11 @@ const ED = (function () {
     if (!groupDefs.length) return;
     ctx.save();
     groupDefs.forEach((g, i) => {
+      if (g.collapsed) {         // 折叠态：画紧凑“子图节点”箱体（替代成员包裹框）
+        const sbox = subgBox(g, ctx);
+        if (sbox) drawSubgBox(ctx, g, i, sbox);
+        return;
+      }
       const box = groupBox(g, ctx);
       if (!box) return;
       const [x, y, w, h] = box, col = groupColor(g, i), name = groupTabText(g);
@@ -664,7 +864,12 @@ const ED = (function () {
     refreshGroups();
   }
   // 分组变化后：把每个节点的标题栏染成所属分组色 + 重绘 + 计脏。
+  function refreshFold() {   // 重算“被折叠隐藏的成员”集合；任何改动分组的地方都应调用
+    foldHidden = new Set();
+    for (const g of groupDefs) if (g.collapsed) for (const m of (g.members || [])) foldHidden.add(m);
+  }
   function refreshGroups() {
+    refreshFold();
     applyGroupColors();
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
@@ -702,6 +907,7 @@ const ED = (function () {
              `<span style="flex:1">${esc(g.title || "分组")}</span>` +
              `<span style="color:#7f8895">${(g.members || []).length}个</span>` +
              `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
+             `<button data-fold="${i}" title="折叠成一个紧凑子图节点 / 展开还原" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
              `<button data-ren="${i}" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">改名</button>` +
              `<button data-del="${i}" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:1px 7px;cursor:pointer">解散</button></label>`;
       });
@@ -718,6 +924,10 @@ const ED = (function () {
           if (sw) sw.style.background = c.value;     // 弹窗里的色块也实时跟随
           refreshGroups();                            // 画布上的节点标题色/分组框实时跟随
         });
+      box.querySelectorAll("[data-fold]").forEach((b) => b.onclick = () => {
+        const i = +b.getAttribute("data-fold");
+        setGroupCollapsed(i, !groupDefs[i].collapsed); render();
+      });
       box.querySelectorAll("[data-ren]").forEach((b) => b.onclick = async () => {
         const i = +b.getAttribute("data-ren");
         const name = await askText("分组改名", groupDefs[i].title || "");
@@ -946,7 +1156,7 @@ const ED = (function () {
         const kb = b.src + "|" + b.src_port + "|" + b.dst + "|" + b.dst_port;
         return ka < kb ? -1 : ka > kb ? 1 : 0;
       });
-      const groups = (c.groups || []).map((g) => ({ title: g.title, color: g.color, members: g.members.slice().sort() }))
+      const groups = (c.groups || []).map((g) => ({ title: g.title, color: g.color, collapsed: !!g.collapsed, members: g.members.slice().sort() }))
         .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
       return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, nodes, edges });
     } catch (e) { return null; }
@@ -1018,7 +1228,7 @@ const ED = (function () {
     if (ea) out.push(`＋ 新增连线 ${ea} 条`);
     if (er) out.push(`－ 删除连线 ${er} 条`);
     if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
-    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, m: (g.members || []).slice().sort() }))
+    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, m: (g.members || []).slice().sort() }))
       .sort((a, b) => (a.t < b.t ? -1 : 1)));
     if (gsig(cur.groups) !== gsig(savedBaseline.groups)) out.push("◇ 分组已修改");
     return out;
@@ -1195,7 +1405,7 @@ const ED = (function () {
     const panel = panelPins.filter(([nid]) => graph._nodes.some((n) => n._id === nid));
     const ids = new Set(graph._nodes.map((n) => n._id));
     const groups = groupDefs
-      .map((g) => ({ title: g.title, color: g.color, members: (g.members || []).filter((m) => ids.has(m)) }))
+      .map((g) => ({ title: g.title, color: g.color, collapsed: !!g.collapsed, members: (g.members || []).filter((m) => ids.has(m)) }))
       .filter((g) => g.members.length);
     return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, nodes, edges };
   }
@@ -1255,8 +1465,9 @@ const ED = (function () {
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
     for (const p of panelPins) if (p[2]) pinLabels[p[0] + "|" + p[1]] = p[2];   // 把已保存的显示名种进记忆
     groupDefs = Array.isArray(flow.groups)
-      ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
+      ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", collapsed: !!g.collapsed, members: (g.members || []).slice() }))
       : [];
+    refreshFold();
     const added = buildGraph(flow);
     applyGroupColors();   // 按分组给节点标题栏染色
     const total = (flow.nodes || []).length;
@@ -1739,7 +1950,7 @@ const ED = (function () {
     ctx.save();
     ctx.fillStyle = "rgba(11,13,18,0.62)";
     for (const n of nodes) {
-      if (active(n._id)) continue;
+      if (active(n._id) || foldHidden.has(n._id)) continue;   // 折叠隐藏的成员不参与压暗（其区域由子图箱体占据）
       const r = nodeFullRect(n, ctx);
       roundRect(ctx, r[0] - 3, r[1] - 3, r[2] + 6, r[3] + 6, 9); ctx.fill();
     }
@@ -1748,6 +1959,7 @@ const ED = (function () {
     for (let i = 0; i < runPathArr.length - 1; i++) {
       const A = byId.get(runPathArr[i]), B = byId.get(runPathArr[i + 1]);
       if (!A || !B) continue;
+      if (foldHidden.has(A._id) || foldHidden.has(B._id)) continue;   // 折叠态：跨/入隐藏成员的流动线不画
       const oi = outSlotIndex(A, runPorts[A._id]); if (oi < 0) continue;
       const p0 = A.getConnectionPos(false, oi, _t0), p1 = B.getConnectionPos(true, execInSlotIndex(B), _t1);
       drawFlowWire(ctx, [p0[0], p0[1]], [p1[0], p1[1]]);
@@ -1755,7 +1967,7 @@ const ED = (function () {
     // ③ 执行节点：脉冲发光边框（醒目的琥珀色，和分组色区分开 + 会呼吸）
     const pulse = 0.5 + 0.5 * Math.sin(runPhase * 3.0);
     for (const n of nodes) {
-      if (!runPath.has(n._id)) continue;
+      if (!runPath.has(n._id) || foldHidden.has(n._id)) continue;   // 折叠隐藏成员：高亮交给子图箱体描边
       ctx.save();
       ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 2.5 + 2.5 * pulse;
       ctx.shadowColor = "#ffb300"; ctx.shadowBlur = 12 + 18 * pulse;
@@ -1768,6 +1980,7 @@ const ED = (function () {
       const l = graph.links[k]; if (!l) continue;
       const A = graph.getNodeById(l.origin_id), B = graph.getNodeById(l.target_id);
       if (!A || !B) continue;
+      if (foldHidden.has(A._id) || foldHidden.has(B._id)) continue;   // 折叠态：触及隐藏成员的端口高亮交给箱体
       const oslot = A.outputs && A.outputs[l.origin_slot]; if (!oslot) continue;
       const isExec = oslot.type === "exec";
       const on = isExec ? (runPath.has(A._id) && runPorts[A._id] === oslot.name)
@@ -1790,6 +2003,7 @@ const ED = (function () {
     }
     // ⑤ 数据输出值（彩色标签）
     for (const n of nodes) {
+      if (foldHidden.has(n._id)) continue;   // 折叠隐藏成员：数据值标签不画
       const def = defByType[n._typeId]; if (!def) continue;
       (def.outputs || []).forEach((p, i) => {
         if (p.kind === "exec") return;
@@ -1805,7 +2019,7 @@ const ED = (function () {
     const termId = runPathArr.length ? runPathArr[runPathArr.length - 1] : null;
     for (const id of runPathArr) {
       if (id === termId) continue;                       // 终点节点交给 ⑦ 的“结束”端帽
-      const n = byId.get(id); if (!n) continue;
+      const n = byId.get(id); if (!n || foldHidden.has(id)) continue;
       const execOuts = (n.outputs || []).filter((o) => o.type === "exec");
       if (execOuts.length < 2) continue;                 // 只标“有分叉”的节点（如「分支」/获取锁/定时门）
       const pname = runPorts[id]; if (!pname) continue;
@@ -1815,7 +2029,7 @@ const ED = (function () {
     }
     // ⑦ 本帧执行“走到头”的节点：在它选中的那个出口上标“结束”，让终点一目了然
     //    （选了某个分支但没接下游 → 流程在此中断；这条最容易被忽略，用红色端帽点明）。
-    if (termId) {
+    if (termId && !foldHidden.has(termId)) {
       const termNode = byId.get(termId);
       if (termNode) {
         let oi = outSlotIndex(termNode, runPorts[termNode._id]);   // 优先：本帧实际选中的出口
@@ -1828,9 +2042,11 @@ const ED = (function () {
     //    累计＝从本帧开始到该节点跑完的总耗时（沿执行链单调递增，终点≈整帧总耗时）。
     if (profileOn) {
       for (const n of nodes) {
+        if (foldHidden.has(n._id)) continue;   // 折叠隐藏成员：耗时不在此画（汇总见下）
         const tm = runTimes[n._id]; if (!tm) continue;
         drawTimePill(ctx, n.pos[0] + n.size[0], n.pos[1] - th - 3, tm[0], tm[1]);
       }
+      drawFoldedTimePills(ctx);   // 折叠组：在子图箱体上汇总「组内自身耗时 · 组终累计」
     }
   }
 
@@ -2637,10 +2853,39 @@ const ED = (function () {
   function _measCtx() { return (canvas && canvas.canvas) ? canvas.canvas.getContext("2d") : null; }
   function groupTabRect(g) {
     const ctx = _measCtx(); if (!ctx) return null;
+    if (g.collapsed) {                            // 折叠态：箱体标题栏即拖动手柄（拖它移动整组）
+      const sb = subgBox(g, ctx); if (!sb) return null;
+      return [sb.x, sb.y, sb.w, SUBG.TITLE_H];
+    }
     const box = groupBox(g, ctx); if (!box) return null;
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     const tw = ctx.measureText(groupTabText(g)).width;
     return [box[0], box[1] - 18, tw + 18, 20];   // 与 drawGroups 标签页几何一致
+  }
+  // 命中测试：返回坐标落在哪个【折叠箱体】内的组下标（用于双击展开）；无则 -1。
+  function foldedBoxAt(gx, gy) {
+    const ctx = _measCtx(); if (!ctx) return -1;
+    for (const { g, i } of collapsedGroupList()) {
+      const b = subgBox(g, ctx); if (!b) continue;
+      if (gx >= b.x && gx <= b.x + b.w && gy >= b.y && gy <= b.y + b.h) return i;
+    }
+    return -1;
+  }
+  // 折叠 / 展开某个分组（i=组下标）。折叠＝把该组收成一个紧凑子图节点；展开＝还原成员节点视图。
+  function setGroupCollapsed(i, collapsed) {
+    const g = groupDefs[i]; if (!g) return;
+    g.collapsed = !!collapsed;
+    refreshFold();
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty();
+    setStatus(g.collapsed ? `已折叠「${g.title || "分组"}」为子图（双击展开）` : `已展开「${g.title || "分组"}」`);
+  }
+  function onCanvasDblClick(e) {
+    if (!graph || !canvas || simpleMode) return;
+    let off; try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
+    if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;   // 节点上交给 LiteGraph
+    const gi = foldedBoxAt(off[0], off[1]);
+    if (gi >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(gi, false); }
   }
   function onGroupDragDown(e) {
     if (e.button !== 0 || !graph || !canvas) return;
@@ -2686,8 +2931,14 @@ const ED = (function () {
       canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
-      canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）
+      canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）/ 折叠态画“子图箱体”
       canvas.onDrawForeground = drawRunOverlay;   // 在所有节点之上画“试运行”高亮/数据/连线流动
+      // 折叠子图：用自定义连线绘制——跳过组内连线、把跨边界连线改接到箱体端口；无折叠时走原版。
+      const _origDrawConn = canvas.drawConnections;
+      canvas.drawConnections = function (ctx) {
+        if (!foldHidden.size) return _origDrawConn.call(this, ctx);
+        drawFoldedConnections.call(this, ctx);
+      };
       setupHelpPanel();
       setupLogResize();
       // 撤销触发点：连线变化 / 增删节点 / 移动节点（参数改动在 addParamWidget 的回调里）
@@ -2706,6 +2957,7 @@ const ED = (function () {
         }
         for (const g of groupDefs) g.members = (g.members || []).filter((m) => ids.has(m));
         groupDefs = groupDefs.filter((g) => g.members.length);   // 空组自动消失
+        refreshFold();
         renderPanel();
         scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none";
       };
@@ -2713,6 +2965,7 @@ const ED = (function () {
       // 右键任意位置点中连线 -> 删除连线菜单（捕获阶段，先于 LiteGraph 的右键菜单）
       canvas.canvas.addEventListener("pointerdown", onRightDown, true);
       canvas.canvas.addEventListener("pointerdown", onGroupDragDown, true);   // 左键拖“分组标签页”整体移动该组
+      canvas.canvas.addEventListener("dblclick", onCanvasDblClick, true);     // 双击折叠箱体 = 展开该子图
       // 兜底：任何鼠标交互结束后尝试快照（snapshotNow 用 JSON 比对去重，无变化不入栈）
       canvas.canvas.addEventListener("pointerup", scheduleSnap);
       // Ctrl+Z 撤销 / Ctrl+Y 或 Ctrl+Shift+Z 重做（编辑输入框内已 stopPropagation，不会误触）
