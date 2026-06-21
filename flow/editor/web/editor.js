@@ -617,20 +617,66 @@ const ED = (function () {
   function isInsideCollapsed(g) {
     return collapsedGroupList().some(({ g: h }) => h !== g && groupContains(h, g));
   }
-  // 把若干节点【加入】某分组（不从其它分组移除——这正是嵌套/重叠的关键）。
+  function groupSupersets(g) { return groupDefs.filter((s) => s !== g && groupContains(s, g)); }   // 严格包含 g 的组（g 的祖先链）
+  function groupSubsets(g) { return groupDefs.filter((s) => s !== g && groupContains(g, s)); }     // 被 g 严格包含的组（g 的后代）
+  // 把若干节点【加入】某分组（连同其所有祖先组，维持 child⊆parent 不变式）。
   function addNodesToGroup(ourIds, gi) {
     const g = groupDefs[gi]; if (!g) return;
-    g.members = g.members || [];
-    for (const id of ourIds) if (!g.members.includes(id)) g.members.push(id);
+    for (const s of [g, ...groupSupersets(g)]) {
+      s.members = s.members || [];
+      for (const id of ourIds) if (!s.members.includes(id)) s.members.push(id);
+    }
     refreshGroups();
   }
-  // 把若干节点从某分组【移除】；空组自动消失。
+  // 把若干节点从某分组【移除】（连同其所有后代子组，否则后代仍含该节点就不再是 g 的子集）；空组自动消失。
   function removeNodesFromGroup(ourIds, gi) {
     const g = groupDefs[gi]; if (!g) return;
     const rm = new Set(ourIds);
-    g.members = (g.members || []).filter((m) => !rm.has(m));
+    for (const s of [g, ...groupSubsets(g)]) s.members = (s.members || []).filter((m) => !rm.has(m));
     groupDefs = groupDefs.filter((x) => (x.members || []).length);
     refreshGroups();
+  }
+  // —— 把「组」当容器拖放实现嵌套（仍是重叠成员模型，但维持 child⊆parent 不变式）——
+  function unnestGroup(g) {       // 从所有严格超集里摘出 g → g 变顶层
+    const rm = new Set(g.members || []);
+    for (const s of groupSupersets(g)) s.members = (s.members || []).filter((m) => !rm.has(m));
+  }
+  function nestGroupInto(g, t) {  // 把 g 嵌入 t：先摘出，再并入 t 及 t 的所有祖先
+    if (g === t || groupContains(g, t)) return;   // 不能嵌入自己或自己的后代（防环）
+    unnestGroup(g);
+    for (const s of [t, ...groupSupersets(t)]) {
+      s.members = s.members || [];
+      for (const m of (g.members || [])) if (!s.members.includes(m)) s.members.push(m);
+    }
+  }
+  // 展开态分组的可见包裹框：裹住【可见成员】并并入其【折叠子组】箱体（否则拖折叠子组时父框跟不上＝“浮出父组”）。
+  function expandedGroupBox(g, ctx) {
+    let bb = groupBox(g, ctx, true);
+    for (const { g: c } of topCollapsedGroups()) {
+      if (!groupContains(g, c)) continue;            // 只并入嵌在 g 内的折叠子组
+      const sb = subgBox(c, ctx); if (!sb) continue;
+      if (!bb) { bb = [sb.x, sb.y, sb.w, sb.h]; continue; }
+      const x0 = Math.min(bb[0], sb.x), y0 = Math.min(bb[1], sb.y);
+      const x1 = Math.max(bb[0] + bb[2], sb.x + sb.w), y1 = Math.max(bb[1] + bb[3], sb.y + sb.h);
+      bb = [x0, y0, x1 - x0, y1 - y0];
+    }
+    return bb;
+  }
+  // 命中：包含坐标的【最内层】分组下标（拖组放进它用）；排除 exclude 组及其后代。无则 -1。
+  function innermostGroupAt(gx, gy, exclude) {
+    const ctx = _measCtx(); if (!ctx) return -1;
+    let best = -1, bestN = Infinity;
+    groupDefs.forEach((g, i) => {
+      if (g === exclude || (exclude && groupContains(exclude, g))) return;
+      let box;
+      if (g.collapsed) { const b = subgBox(g, ctx); box = b && [b.x, b.y, b.w, b.h]; }
+      else box = expandedGroupBox(g, ctx);
+      if (!box) return;
+      if (gx >= box[0] && gx <= box[0] + box[2] && gy >= box[1] && gy <= box[1] + box[3] && (g.members || []).length < bestN) {
+        best = i; bestN = (g.members || []).length;
+      }
+    });
+    return best;
   }
   function subgPortLabel(node, slot, isInput) {
     const title = (node.title || "").trim();
@@ -937,7 +983,7 @@ const ED = (function () {
       }
       // 展开态：成员若已全部被折叠父组隐藏，则不画其包裹框（否则框会落在父箱体之上）。
       if ((g.members || []).every((m) => foldHidden.has(m))) continue;
-      const box = groupBox(g, ctx, true);    // 仅按【可见】成员包裹
+      const box = expandedGroupBox(g, ctx);  // 裹住可见成员 + 折叠子组箱体（拖折叠子组时父框跟随，不再浮出）
       if (!box) continue;
       const [x, y, w, h] = box, col = groupColor(g, i), name = groupTabText(g);
       roundRect(ctx, x, y, w, h, 10);
@@ -3033,7 +3079,7 @@ const ED = (function () {
       return [sb.x, sb.y, sb.w, sb.h];            // 折叠参数的 DOM 控件在更高层(pointer-events:auto)，点控件不会触发拖动
     }
     if ((g.members || []).every((m) => foldHidden.has(m))) return null;   // 整体被折叠父组隐藏：无可见框
-    const box = groupBox(g, ctx, true); if (!box) return null;
+    const box = expandedGroupBox(g, ctx); if (!box) return null;
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     const tw = ctx.measureText(groupTabText(g)).width;
     return [box[0], box[1] - 18, tw + 18, 20];   // 与 drawGroups 标签页几何一致
@@ -3099,12 +3145,14 @@ const ED = (function () {
     const ii = foldIconAt(off[0], off[1]);                                   // 先：单击右端 ⊟/⊞ 图标 → 折叠/展开（两种模式都可用）
     if (ii >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(ii, !groupDefs[ii].collapsed); return; }
     if (simpleMode) return;            // 使用模式（只读）：不允许拖动整组移动节点（位置属于“改图”）
-    for (let i = 0; i < groupDefs.length; i++) {
+    // 命中手柄时按【最内层】优先（成员少的先判定），这样嵌套时能抓到里层子组而不是外层父组。
+    const order = groupDefs.map((g, i) => i).sort((a, b) => (groupDefs[a].members || []).length - (groupDefs[b].members || []).length);
+    for (const i of order) {
       const r = groupTabRect(groupDefs[i]); if (!r) continue;
       if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
         e.preventDefault(); e.stopImmediatePropagation();
         const members = (groupDefs[i].members || []).map(nodeByOurId).filter(Boolean);
-        _groupDrag = { last: off, members, moved: false };
+        _groupDrag = { gi: i, last: off, members, moved: false };
         window.addEventListener("pointermove", onGroupDragMove, true);
         window.addEventListener("pointerup", onGroupDragUp, true);
         return;
@@ -3124,8 +3172,18 @@ const ED = (function () {
   function onGroupDragUp() {
     window.removeEventListener("pointermove", onGroupDragMove, true);
     window.removeEventListener("pointerup", onGroupDragUp, true);
-    if (_groupDrag && _groupDrag.moved) scheduleSnap();
-    _groupDrag = null;
+    const gd = _groupDrag; _groupDrag = null;
+    if (!gd || !gd.moved) return;
+    const g = groupDefs[gd.gi];
+    if (g) {
+      // 放下时按落点决定嵌套：落在某个组内 → 嵌入【最内层】那个；落在空白 → 摘出为顶层。
+      const ti = innermostGroupAt(gd.last[0], gd.last[1], g);
+      const tTitle = ti >= 0 ? (groupDefs[ti].title || "分组") : null;
+      if (ti >= 0) nestGroupInto(g, groupDefs[ti]); else unnestGroup(g);
+      groupDefs = groupDefs.filter((x) => (x.members || []).length);
+      refreshGroups();
+      setStatus(tTitle ? `已把「${g.title || "分组"}」嵌入「${tTitle}」` : `「${g.title || "分组"}」移到顶层`);
+    } else { scheduleSnap(); }
   }
 
   function start() {
