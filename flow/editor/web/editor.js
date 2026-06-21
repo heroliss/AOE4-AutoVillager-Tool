@@ -41,6 +41,7 @@ const ED = (function () {
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let profileOn = false, runTimes = {};         // 性能监控：开关 + 本帧各节点 [自身ms, 累计ms]
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
+  let bpHitId = null;                           // 当前“因命中断点而暂停”停在的节点 ourId（用于醒目高亮+居中；继续/停止后清空）
   let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
   let simpleMode = false;                       // 使用模式：画布只读（仅控制面板+运行+日志），面向“只想用”的用户
   let simpleEntrySig = null;                    // 进入使用模式时的图快照：退出时据此还原（使用模式里的拖动/调参不落盘）
@@ -599,8 +600,19 @@ const ED = (function () {
     return [x0, y0, x1 - x0, y1 - y0];
   }
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
-  // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。
-  function groupTabText(g) { return "⠿ " + groupPathTitle(g) + "  ⊟"; }
+  // 组描述的单行短版（在名称旁直接显示，超长截断；换行/多空白压成单空格）。
+  function groupDescShort(g, max) {
+    const d = String(g && g.desc || "").trim().replace(/\s+/g, " ");
+    const m = max || 22;
+    return d.length > m ? d.slice(0, m) + "…" : d;
+  }
+  // 标签页左侧文字：⠿ 拖动手柄 + 路径名 +（有描述则）📝 描述短版。
+  function groupTabLeft(g) {
+    const d = groupDescShort(g);
+    return "⠿ " + groupPathTitle(g) + (d ? "  📝 " + d : "");
+  }
+  // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。⊟ 占位保证标签留出按钮宽度。
+  function groupTabText(g) { return groupTabLeft(g) + "  ⊟"; }
   const GROUP_ICON_W = 24;   // 标签/标题栏最右侧用于“折叠/展开”单击的小图标命中宽度（图坐标）
   // 依据背景色亮度选黑/白文字，保证标题在分组色上清晰可读。
   function contrastText(hex) {
@@ -629,12 +641,13 @@ const ED = (function () {
     }
     return [x0 - GROUP_PAD, y0 - GROUP_TOP, (x1 - x0) + 2 * GROUP_PAD, (y1 - y0) + GROUP_TOP + GROUP_PAD];
   }
-  // 维护每个【有直接成员】组的锚点框(pos/size)＝其当前包围盒；成员被拖空/删空后据此把空组留在原地（仍可见、可拖回）。
+  // 维护每个【子树有节点】组的锚点框(pos/size)＝其当前包围盒（含后代组成员，故纯容器组也记锚点）。
+  // 成员/子组被拖空/删空后据此把空组留在原地（仍可见、可拖回/可删）；groupBox 在子树非空时按成员算，不读 pos/size，无自反馈。
   // 每帧（drawGroups）调一次；Alt 拖拽中框会临时收缩，跳过以免把收缩尺寸写进锚点。
   function syncGroupAnchors(ctx) {
     if (_altDrag) return;
     for (const g of groupDefs) {
-      if (!(g.members || []).length) continue;   // 空组 / 纯容器组：锚点保持不动（空组用既有锚点，纯容器靠子组的框）
+      if (!groupAllMembers(g).length) continue;   // 真·空组（整棵子树无节点）：锚点保持不动（留作空组兜底框）
       const bb = groupBox(g, ctx, true);
       if (bb) { g.pos = [bb[0], bb[1]]; g.size = [bb[2], bb[3]]; }
     }
@@ -770,6 +783,9 @@ const ED = (function () {
     let bb = groupBox(g, ctx, true);   // 直接可见成员（已含成员留白）
     let hasChild = false;
     for (const c of childGroupsOf(g)) {
+      // Alt 拖子组：被拖出的子组（在 keepIds 里、随组移动）不并入【非该子树】的父框——这样父框不跟随被拖走的子组，
+      // 子组才拖得出去（与节点 Alt 拖出一致：groupBox 已对被拖成员做同样排除）。子树内部计算照常并入（整组一起动）。
+      if (_altDrag && _altDrag.keepIds && _altDrag.keepIds.has(c.id) && !_altDrag.keepIds.has(g.id)) continue;
       let cb = null;
       if (c.collapsed) { const sb = subgBox(c, ctx); cb = sb && [sb.x, sb.y, sb.w, sb.h]; }
       else cb = expandedGroupBox(c, ctx, vg);
@@ -876,12 +892,17 @@ const ED = (function () {
   // 折叠箱体里要显示的可编辑参数 = 该组的接口参数。
   function subgFoldParams(g) { return interfaceParams(g); }
   // 折叠箱体几何：锚定在成员包围盒左上角（成员仍保留 pos），尺寸按端口数 / 标题 / 折叠参数行自适应。
+  // 折叠箱体标题文字：◳ 路径名 +（有描述则）📝 描述短版（与展开态标签的显示一致）。
+  function subgTitleText(g) {
+    const d = groupDescShort(g);
+    return "◳ " + groupPathTitle(g) + (d ? "  📝 " + d : "");
+  }
   function subgBox(g, ctx) {
     const bb = groupBox(g, ctx); if (!bb) return null;
     const ports = subgPorts(g), fparams = subgFoldParams(g);
     const rows = Math.max(ports.ins.length, ports.outs.length, 1);
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
-    const titleW = ctx.measureText("◳ " + groupPathTitle(g)).width + GROUP_ICON_W + 14;   // 路径名 + 右端展开按钮留位
+    const titleW = ctx.measureText(subgTitleText(g)).width + GROUP_ICON_W + 14;   // 路径名(+描述) + 右端展开按钮留位
     ctx.font = "12px 'Microsoft YaHei',sans-serif";
     let li = 0, lo = 0;
     for (const p of ports.ins) li = Math.max(li, ctx.measureText(p.label).width);
@@ -960,7 +981,7 @@ const ED = (function () {
     ctx.fillStyle = col; ctx.fill();
     ctx.fillStyle = tcol; ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    ctx.fillText("◳ " + groupPathTitle(g), box.x + 10, box.y + SUBG.TITLE_H / 2);
+    ctx.fillText(subgTitleText(g), box.x + 10, box.y + SUBG.TITLE_H / 2);
     drawFoldChip(ctx, [box.x + box.w - GROUP_ICON_W, box.y, GROUP_ICON_W, SUBG.TITLE_H], "⊞");  // 右端：单击展开按钮
     // 端口：exec=三角、data=圆点；标签在内侧
     const drawPort = (p, pos, side) => {
@@ -1183,7 +1204,7 @@ const ED = (function () {
       roundRect(ctx, x, y - 18, tw + 18, 20, 5);
       ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = contrastText(col); ctx.textAlign = "left";   // 显式置左：折叠箱体端口标签会把 textAlign 设成 right 且不复位，否则本组名被右对齐而整体左移错位
-      ctx.fillText("⠿ " + groupPathTitle(g), x + 9, y - 4);   // 路径名（A/B）显示嵌套；文字不含 ⊟（⊟ 改用右端明显按钮）
+      ctx.fillText(groupTabLeft(g), x + 9, y - 4);   // 路径名（A/B）显示嵌套 + 📝 描述短版；文字不含 ⊟（⊟ 改用右端明显按钮）
       const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
     }
     ctx.restore();
@@ -1274,7 +1295,7 @@ const ED = (function () {
              (depth ? `<span style="color:#5b626d;flex:none">└</span>` : "") +
              (hasSel ? `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` : "") +
              `<span data-swatch="${i}" style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
-             `<span style="flex:1">${esc(g.title || "分组")}${g.desc ? " <span style='color:#6b727d' title='" + esc(g.desc) + "'>📝</span>" : ""}</span>` +
+             `<span style="flex:1">${esc(g.title || "分组")}${g.desc ? " <span style='color:#7f8895' title='" + esc(g.desc) + "'>📝 " + esc(groupDescShort(g, 16)) + "</span>" : ""}</span>` +
              `<span style="color:#7f8895">${(g.members || []).length}个${nc ? "+" + nc + "组" : ""}</span>` +
              `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
              `<button data-fold="${i}" title="折叠成一个紧凑节点 / 展开还原" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
@@ -2359,6 +2380,37 @@ const ED = (function () {
       ctx.restore();
     }
   }
+  // 命中断点暂停时：在停下的节点（或其所属折叠箱体）上画醒目的红色脉冲环 + “⏸ 已暂停”标牌，
+  // 让“停在哪一步”一眼可见——之前暂停后画面几乎无变化，用户找不到停在哪。
+  function drawBpHitMarker(ctx) {
+    if (!bpHitId || !graph) return;
+    let rect = null;                       // [x, y, w, h]（图坐标）
+    const n = nodeByOurId(bpHitId);
+    if (n && !foldHidden.has(bpHitId)) {
+      rect = nodeFullRect(n, ctx);
+    } else {                               // 命中的是被折叠隐藏的成员：高亮它所属的【顶层折叠箱体】
+      for (const { g } of topCollapsedGroups()) {
+        if (!groupAllMembers(g).includes(bpHitId)) continue;
+        const b = subgBox(g, ctx); if (b) rect = [b.x, b.y, b.w, b.h];
+        break;
+      }
+    }
+    if (!rect) return;
+    const [x, y, w, h] = rect;
+    const pulse = 0.5 + 0.5 * Math.sin(runPhase * 2.2);   // runPhase 在暂停时仍以 20fps 推进 → 环会呼吸
+    ctx.save();
+    ctx.strokeStyle = "#ff5b5b"; ctx.lineWidth = 3 + 2 * pulse;
+    ctx.shadowColor = "#ff2d2d"; ctx.shadowBlur = 14 + 16 * pulse;
+    roundRect(ctx, x - 3, y - 3, w + 6, h + 6, 10); ctx.stroke();
+    ctx.restore();
+    const label = "⏸ 已暂停（命中断点）";    // 右上角外侧的醒目标牌
+    ctx.save();
+    ctx.font = "bold 12px 'Microsoft YaHei',sans-serif"; ctx.textBaseline = "middle";
+    const tw = ctx.measureText(label).width, px = x + w - tw - 14, py = y - 25;
+    roundRect(ctx, px, py, tw + 14, 20, 6); ctx.fillStyle = "#ff5b5b"; ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.fillText(label, px + 7, py + 11);
+    ctx.restore();
+  }
   function drawRunOverlay(ctx) {
     drawBreakpoints(ctx);                 // 断点红点：与是否试运行无关，始终显示
     if (!runSession || !graph) return;
@@ -2468,6 +2520,7 @@ const ED = (function () {
       }
       drawFoldedTimePills(ctx);   // 折叠组：在子图箱体上汇总「组内自身耗时 · 组终累计」
     }
+    drawBpHitMarker(ctx);          // ⑨ 命中断点暂停：醒目红环 + “已暂停”标牌（画在最上层）
   }
 
   // 试运行动画刷新上限：运行中 120fps、暂停 20fps（暂停画面基本静止，只留呼吸感）。
@@ -2640,7 +2693,9 @@ const ED = (function () {
     if (r.bp_hit && running) {           // 引擎已自停在断点；前端同步暂停 UI
       running = false; stopPoll(); setRunUI();
       const n = nodeByOurId(r.bp_hit);
-      setStatus("⏸ 命中断点：" + (n ? n.title : r.bp_hit) + " · 第 " + _lastTick + " 帧");
+      bpHitId = r.bp_hit;                 // 记下“停在哪”：drawRunOverlay 据此画醒目暂停高亮
+      if (n && canvas) { try { canvas.centerOnNode(n); } catch (e) {} if (canvas) canvas.setDirty(true, true); }   // 居中到命中节点 + 整屏重绘（平移后背景/分组框也要刷新）
+      setStatus("⏸ 命中断点：" + (n ? n.title : r.bp_hit) + " · 第 " + _lastTick + " 帧 ·（▶继续 / 取消该断点）");
     } else if (t) {
       setStatus(`运行中 · 第 ${_lastTick} 帧 · 经过 ${runPathArr.length} 个节点`);
     }
@@ -2663,6 +2718,7 @@ const ED = (function () {
   function stopPoll() { if (pollTimer) cancelAnimationFrame(pollTimer); pollTimer = null; }
   async function startRun() {
     if (running) return;
+    bpHitId = null;                                  // 继续/开始跑：清掉“停在断点”的高亮
     if (!(await ensureRunSession())) return;
     try { await api().run_resume(); } catch (e) {}   // 让后台引擎线程开始/继续跑
     running = true; setRunUI();
@@ -2671,6 +2727,7 @@ const ED = (function () {
   function pauseRun() { running = false; stopPoll(); try { api().run_pause(); } catch (e) {} setRunUI(); }
   function toggleBreakpoint(id) {
     if (breakpoints.has(id)) breakpoints.delete(id); else breakpoints.add(id);
+    if (bpHitId === id && !breakpoints.has(id)) bpHitId = null;   // 取消了正停在的那个断点：撤掉暂停高亮
     if (canvas) canvas.setDirty(true, true);
     if (runSession) { try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {} }
     setStatus(breakpoints.has(id) ? "已设断点 🔴（运行命中即暂停）" : "已取消断点");
@@ -2686,7 +2743,7 @@ const ED = (function () {
     startRun();
   }
   async function stopRun() {
-    running = false; stopPoll(); stopRunAnim();
+    running = false; stopPoll(); stopRunAnim(); bpHitId = null;
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
     runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {};
     setRunUI();
@@ -3054,12 +3111,11 @@ const ED = (function () {
     const dis = helpEl.querySelector("[data-gdissolve]");
     if (dis) dis.onclick = (e) => { e.preventDefault(); dissolveGroup(g); selectGroup(null); setStatus("已解散组"); };
     const delAll = helpEl.querySelector("[data-gdelall]");
-    if (delAll) delAll.onclick = async (e) => {
+    if (delAll) delAll.onclick = (e) => {
       e.preventDefault();
-      const cnt = groupAllMembers(g).length;
-      if (await confirmBox("删除组及全部内容", `将删除「${groupPathTitle(g)}」及其内部 ${cnt} 个节点` + (childGroupsOf(g).length ? "（含子组）" : "") + "，不可恢复。确定？", "删除")) {
-        deleteGroupAll(g); selectGroup(null); setStatus("已删除组及全部内容");
-      }
+      const cnt = groupAllMembers(g).length;   // 不弹确认：删除可 Ctrl+Z 整体恢复（节点+组都进撤销快照）
+      deleteGroupAll(g); selectGroup(null);
+      setStatus(`已删除组及全部 ${cnt} 个节点——可 Ctrl+Z 撤销`);
     };
     helpEl.style.display = "block";
   }
@@ -3123,6 +3179,84 @@ const ED = (function () {
     setStatus("已克隆组「" + (g.title || "分组") + "」");
     return groupById(grpIdMap[g.id]);
   }
+
+  // ===== 复制 / 粘贴 / 再制（Ctrl+C / Ctrl+V / Ctrl+D）=====
+  let _clip = null, _clipPastes = 0;   // 会话级剪贴板（脱离实时引用的复制规格）+ 连续粘贴次数（每次再加偏移免叠在一起）
+  // 把一批节点抽成“复制规格”（脱离实时引用：记类型/参数/位置/说明/直接所属组 + 内部连线 + 暴露参数）。
+  function buildCopySpec(srcNodes) {
+    const idSet = new Set(srcNodes.map((n) => n._id));
+    const nodes = srcNodes.map((n) => ({
+      oid: n._id, typeId: n._typeId, pos: [n.pos[0], n.pos[1]], note: n._note || "",
+      params: Object.fromEntries((n.widgets || []).filter((w) => w._key).map((w) => [w._key, w.value])),
+      gid: (groupDefs[nodeGroupIndex(n._id)] || {}).id || null,
+    }));
+    const edges = [];
+    for (const l of Object.values(graph.links || {})) {
+      if (!l) continue;
+      const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
+      if (!a || !b || !idSet.has(a._id) || !idSet.has(b._id)) continue;   // 仅复制【选区内部】连线
+      edges.push([a._id, l.origin_slot, b._id, l.target_slot]);
+    }
+    const foldpins = foldPins.filter(([nid]) => idSet.has(nid)).map((p) => p.slice());
+    return { nodes, edges, foldpins };
+  }
+  // 把“复制规格”实例化进图（换新 ourId、整体偏移 dx/dy）。keepGroups=true → 克隆并入与源相同的组（再制用）。返回新节点。
+  function materializeSpec(spec, dx, dy, keepGroups) {
+    if (!graph || simpleMode || !spec || !spec.nodes.length) return [];
+    const idMap = {}, exist = new Set((graph._nodes || []).map((n) => n._id));
+    for (const nd of spec.nodes) { let id, k = 0; do { id = nd.oid + "_c" + (++k); } while (exist.has(id)); exist.add(id); idMap[nd.oid] = id; }
+    const created = {};
+    for (const nd of spec.nodes) {
+      const key = typeKeyByType[nd.typeId]; if (!key) continue;
+      const nn = LiteGraph.createNode(key); if (!nn) continue;
+      nn._id = idMap[nd.oid]; nn._typeId = nd.typeId; nn._note = nd.note || "";
+      nn.pos = [nd.pos[0] + dx, nd.pos[1] + dy];
+      for (const w of (nn.widgets || [])) {
+        if (nd.params && Object.prototype.hasOwnProperty.call(nd.params, w._key)) { w.value = nd.params[w._key]; nn.properties[w._key] = nd.params[w._key]; }
+      }
+      graph.add(nn); created[nn._id] = nn;
+    }
+    for (const [so, ss, dt, dslot] of spec.edges) {   // 同类型克隆 → 槽位下标一致，可直接连
+      const na = created[idMap[so]], nb = created[idMap[dt]];
+      if (na && nb) { try { na.connect(ss, nb, dslot); } catch (e) {} }
+    }
+    if (keepGroups) for (const nd of spec.nodes) {
+      const g = nd.gid ? groupById(nd.gid) : null;
+      if (g && idMap[nd.oid]) { g.members = g.members || []; if (!g.members.includes(idMap[nd.oid])) g.members.push(idMap[nd.oid]); }
+    }
+    for (const [nid, pkey] of spec.foldpins) if (idMap[nid]) foldPins.push([idMap[nid], pkey]);
+    refreshGroups(); scheduleSnap();
+    return Object.values(created);
+  }
+  function selectNewNodes(nodes) {   // 复制/粘贴/再制后选中新节点（单个则顺带展开右下角说明）
+    if (!canvas || !nodes.length) return;
+    try { canvas.deselectAllNodes(); } catch (e) {}
+    if (selectedGroupId) selectGroup(null);
+    for (const n of nodes) { try { canvas.selectNode(n, true); } catch (e) {} }
+    selectedNode = nodes.length === 1 ? nodes[0] : null;
+    if (selectedNode) showNodeHelp(selectedNode);
+    canvas.setDirty(true, true);
+  }
+  function selectedNodeList() { return Object.values((canvas && canvas.selected_nodes) || {}); }
+  function copySelection() {
+    const sel = selectedNodeList(); if (!sel.length) return false;
+    _clip = buildCopySpec(sel); _clipPastes = 0;
+    setStatus(`已复制 ${sel.length} 个节点（Ctrl+V 粘贴）`);
+    return true;
+  }
+  function pasteClipboard() {
+    if (!_clip || !_clip.nodes.length) { setStatus("剪贴板为空——先选中节点按 Ctrl+C"); return; }
+    _clipPastes++;
+    const made = materializeSpec(_clip, 36 * _clipPastes, 36 * _clipPastes, false);   // 粘贴=自由节点（不自动并入原组）
+    selectNewNodes(made);
+    setStatus(`已粘贴 ${made.length} 个节点`);
+  }
+  function duplicateSelection() {   // Ctrl+D：选中组→克隆组；选中节点→连内部线整体再制（保留分组归属）
+    if (selectedGroupId) { const g = groupById(selectedGroupId); if (g) { const ng = cloneGroup(g); if (ng) selectGroup(ng.id); } return; }
+    const sel = selectedNodeList(); if (!sel.length) return;
+    selectNewNodes(materializeSpec(buildCopySpec(sel), 32, 32, true));
+    setStatus(`已再制 ${sel.length} 个节点`);
+  }
   // 编辑组的描述（仅展示、不参与运行）。
   function editGroupNote(g) {
     if (!g) return;
@@ -3155,7 +3289,7 @@ const ED = (function () {
       null,
       { content: "分组管理…", callback: () => assignGroupDialog([]) },
       { content: "解散组（成员/子组上提到父层）", callback: () => { dissolveGroup(g); if (selectedGroupId === g.id) selectGroup(null); setStatus("已解散组"); } },
-      { content: "删除组及全部内容（连同内部节点）", callback: async () => { const cnt = groupAllMembers(g).length; if (await confirmBox("删除组及全部内容", `将删除「${groupPathTitle(g)}」及其内部 ${cnt} 个节点` + (childGroupsOf(g).length ? "（含子组）" : "") + "，不可恢复。确定？", "删除")) { deleteGroupAll(g); if (selectedGroupId === g.id) selectGroup(null); setStatus("已删除组及全部内容"); } } },
+      { content: "删除组及全部内容（连同内部节点）", callback: () => { const cnt = groupAllMembers(g).length; deleteGroupAll(g); if (selectedGroupId === g.id) selectGroup(null); setStatus(`已删除组及全部 ${cnt} 个节点——可 Ctrl+Z 撤销`); } },
     ];
     new LiteGraph.ContextMenu(items, { event: e, title: "分组：" + (g.title || "分组") });
   }
@@ -3317,12 +3451,19 @@ const ED = (function () {
       "· 拖动节点标题：移动　· Ctrl+拖动空白：框选多个　· 选中多个后可整体拖动<br>" +
       "· 单击参数输入框：直接编辑，<b>实时生效</b>（无需确认按钮）<br>" +
       "· 右键连线（线上任意处）：删除连线<br>" +
-      "· Ctrl+Z 撤销　· Ctrl+Y 或 Ctrl+Shift+Z 重做<br>" +
+      "· <b>快捷键</b>：<b>Ctrl+Z</b> 撤销　<b>Ctrl+Y</b> / <b>Ctrl+Shift+Z</b> 重做　<b>Ctrl+C</b> 复制　<b>Ctrl+V</b> 粘贴　" +
+      "<b>Ctrl+D</b> 再制（选中组则克隆整组）　<b>Ctrl+A</b> 全选节点　<b>Delete</b> 删除（选中组＝解散该组）<br>" +
+      "<span style='color:#7f8895'>　复制/再制会连同选区内部连线、参数、说明、暴露设置一起带走；再制保留原分组归属，粘贴为自由节点。</span><br>" +
       "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存<br>" +
       "· 选中节点→右下角说明里勾选「显示到控制面板」，把常用开关/数值置顶到顶部面板，" +
       "普通使用时不必进节点图也能调（🎯 定位到节点）<br>" +
-      "· <b>分组</b>：右键节点→「分组…」把它(或多选的若干节点)归入一个彩色分组；节点标题栏会染成分组色、" +
-      "上方标出组名，框也会自动包住它们。一个节点只属于一个组。<br>" +
+      "· <b>分组＝把若干节点封装成一个“函数块”</b>：右键节点→「分组…」把它(或多选)归入一个彩色分组；" +
+      "节点标题栏染成组色、框自动包住它们；一个节点只属于一个组。<br>" +
+      "　- <b>嵌套</b>：按住 <b>Alt</b> 拖节点/子组到另一个组框里＝放进去，拖到空白＝移出（子组当作一个节点看待）。<br>" +
+      "　- <b>选中组</b>：点组标题栏即选中（右下角出详情：改名/颜色/描述/克隆/再分组/解散/删除；描述会显示在组名旁）。<br>" +
+      "　- <b>折叠 ⊟ / 展开 ⊞</b>：把一个组收成紧凑“子图节点”——隐藏内部、跨边界连线汇成箱体端口；单击标题右端图标或双击切换。<br>" +
+      "　- <b>逐级暴露参数</b>：子节点说明里勾「暴露给所在组」→该参数出现在本组折叠箱里；选中组再勾「暴露给父组」才会往上一层显示（不冒泡，像函数封装）。<br>" +
+      "　- 顶部/组标题右键「<b>分组管理</b>」窗口：按嵌套缩进总览所有组，可改名/折叠/归入/解散、新建空组。<br>" +
       "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明<br>" +
       "· <b>使用模式</b>（顶部按钮切换）：把画布转为<b>只读</b>——仍可拖动查看、运行、用控制面板调参，但不能增删改节点/连线/参数；" +
       "其中的调参与拖动都是临时的，<b>不会改动已保存的流程</b>，回到编辑模式即还原（适合“只想用”的场景）</div>" +
@@ -3332,7 +3473,7 @@ const ED = (function () {
       "· <b>试运行＝干跑</b>：只识别、<b>不发任何输入</b>，安全；走过的节点高亮、连线流动、出口显示数据值、底部出日志，用于上线前核对。<br>" +
       "· 每帧间隔＝流程「每帧触发」节点的「循环间隔(秒)」(面板可调)。<br>" +
       "· 走过的<b>分支</b>节点标「真/假」=走了哪条线；执行<b>走到头</b>的出口标「⏹ 结束」(出口空接=本帧到此)。<br>" +
-      "· <b>断点</b>：右键节点→「设为断点 🔴」，运行命中它就自动暂停；「运行到此节点 ⏭」= 跑到它再停。<br>" +
+      "· <b>断点</b>：右键节点→「设为断点 🔴」（标题左上角红点）。运行命中它就<b>自动暂停</b>：视图会<b>居中到该节点</b>并套上<b>红色脉冲环 +「⏸ 已暂停」标牌</b>，一眼看出停在哪一步；点 <b>▶继续</b> 往下跑，或取消该断点。（断点仅作用于节点，是会话级、不随流程保存）<br>" +
       "· 底部日志每行带<b>时间</b>与等级(• 信息 / ▲ 提醒 / ✕ 错误)，可<b>拖上边沿调高度</b>、<b>选中复制</b>；上滚查看时不会被新日志拽回底部。<br>" +
       "· 右上角<b>资源监控</b>小窗显示本工具 CPU/内存曲线，点开可看系统占用与调采样间隔/保留时长。</div>" +
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
@@ -3671,12 +3812,30 @@ const ED = (function () {
       window.addEventListener("keydown", (e) => { if (e.key === "Alt") { altKeyDown = true; if (canvas) canvas.setDirty(true, true); } }, true);
       window.addEventListener("keyup", (e) => { if (e.key === "Alt") { altKeyDown = false; if (canvas) canvas.setDirty(true, true); } }, true);
       window.addEventListener("blur", () => { altKeyDown = false; });
-      // Ctrl+Z 撤销 / Ctrl+Y 或 Ctrl+Shift+Z 重做（编辑输入框内已 stopPropagation，不会误触）
+      // 通用快捷键：Ctrl+Z 撤销 / Ctrl+Y·Ctrl+Shift+Z 重做 / Ctrl+C·V·D 复制·粘贴·再制 / Ctrl+A 全选节点。
       document.addEventListener("keydown", (e) => {
         if (!(e.ctrlKey || e.metaKey)) return;
+        const t = e.target;
+        const inField = t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);   // 文本框/下拉里：让系统的复制粘贴等照常
         const k = e.key.toLowerCase();
-        if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
-        else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+        if (k === "z" && !e.shiftKey) { if (inField) return; e.preventDefault(); undo(); return; }
+        if (k === "y" || (k === "z" && e.shiftKey)) { if (inField) return; e.preventDefault(); redo(); return; }
+        if (inField || simpleMode) return;   // 以下均为“改图”操作：只读（使用）模式 / 文本框内不接管
+        if (k === "c") {   // 选中了文字（如日志）→ 让系统复制文字；否则复制选中的节点
+          const hasTextSel = !!(window.getSelection && String(window.getSelection() || ""));
+          if (!hasTextSel && copySelection()) e.preventDefault();
+          return;
+        }
+        if (k === "v") { e.preventDefault(); pasteClipboard(); return; }
+        if (k === "d") { e.preventDefault(); duplicateSelection(); return; }
+        if (k === "a") {   // 全选所有节点（交给本工具，避免浏览器“全选页面文字”）
+          e.preventDefault();
+          try { canvas.deselectAllNodes(); for (const n of (graph._nodes || [])) canvas.selectNode(n, true); } catch (err) {}
+          if (selectedGroupId) selectGroup(null);
+          canvas.setDirty(true, true);
+          setStatus(`已全选 ${(graph._nodes || []).length} 个节点`);
+          return;
+        }
       });
       // Delete/Backspace：删选中节点；若选中的是【组】则解散该组（节点 Delete=删节点，组=删容器壳=解散，与节点行为对齐）。
       document.addEventListener("keydown", (e) => {
