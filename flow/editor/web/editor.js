@@ -27,6 +27,7 @@ const ED = (function () {
   // Alt 拖拽态：{kind:'node'|'group', detached:Set(ourId 被拖出的成员), keepIds:Set(不排除的组 id), targetGi:将落入的组下标|-1}。
   // 作用：拖拽期间把被拖成员从【源组/祖先】的包裹框里“摘出”(groupBox 跳过它们)，使父框不跟随、能拖出去；并高亮落点组。
   let _altDrag = null;
+  let _lastMenuPos = null;     // 最近一次右键的【图坐标】（空白处“新建组”据此定位新组）
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // —— 试运行（干跑）可视化状态 ——
@@ -122,6 +123,7 @@ const ED = (function () {
       return [
         { content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd },
         null,
+        { content: "新建组", callback: () => createGroupAt(_lastMenuPos) },   // 在右键处新建一个空组，拖节点进去即归入
         { content: "编辑分组…", callback: () => assignGroupDialog(Object.values((canvas && canvas.selected_nodes) || {})) },   // 任意空白处都能管理分组（有选中节点则一并可指派）
       ];
     };
@@ -583,6 +585,7 @@ const ED = (function () {
 
   // 画“分组框”（在节点后面，随成员节点自动包裹）。onDrawBackground 在画布变换内调用，用图坐标。
   const GROUP_PAD = 16, GROUP_TOP = 14;   // 四周留白（顶部留少许，组名做成“标签页”放在框上沿之上，不挤占内部）
+  const GROUP_EMPTY_W = 240, GROUP_EMPTY_H = 130;   // 空组（无成员）的默认框尺寸——保证仍可见、可拖动、可作为拖放落点
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
   // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。
   function groupTabText(g) { return "⠿ " + groupPathTitle(g) + "  ⊟"; }
@@ -608,8 +611,21 @@ const ED = (function () {
       x0 = Math.min(x0, n.pos[0]); y0 = Math.min(y0, top);
       x1 = Math.max(x1, n.pos[0] + n.size[0]); y1 = Math.max(y1, bottom);
     }
-    if (!any) return null;
+    if (!any) {   // 没有（可见）成员：用存下的“锚点框”，让空组依旧可见/可拖/可作为落点（支持空组）；从未定位过则无框
+      if (g.pos && g.size) return [g.pos[0], g.pos[1], g.size[0], g.size[1]];
+      return null;
+    }
     return [x0 - GROUP_PAD, y0 - GROUP_TOP, (x1 - x0) + 2 * GROUP_PAD, (y1 - y0) + GROUP_TOP + GROUP_PAD];
+  }
+  // 维护每个【有直接成员】组的锚点框(pos/size)＝其当前包围盒；成员被拖空/删空后据此把空组留在原地（仍可见、可拖回）。
+  // 每帧（drawGroups）调一次；Alt 拖拽中框会临时收缩，跳过以免把收缩尺寸写进锚点。
+  function syncGroupAnchors(ctx) {
+    if (_altDrag) return;
+    for (const g of groupDefs) {
+      if (!(g.members || []).length) continue;   // 空组 / 纯容器组：锚点保持不动（空组用既有锚点，纯容器靠子组的框）
+      const bb = groupBox(g, ctx, true);
+      if (bb) { g.pos = [bb[0], bb[1]]; g.size = [bb[2], bb[3]]; }
+    }
   }
 
   // ============ 可折叠子图（把一个分组折叠成一个紧凑“子图节点”）============
@@ -650,7 +666,7 @@ const ED = (function () {
   }
   function collapsedGroupList() {         // [{g, i}]：collapsed 且子树有成员的组
     const out = [];
-    groupDefs.forEach((g, i) => { if (g.collapsed && groupAllMembers(g).length) out.push({ g, i }); });
+    groupDefs.forEach((g, i) => { if (g.collapsed) out.push({ g, i }); });   // 含空组：折叠的空组也画成一个箱体
     return out;
   }
   function topCollapsedGroups() {         // collapsed 且无 collapsed 祖先 → 画成可见箱体
@@ -663,6 +679,7 @@ const ED = (function () {
       id: g.id || null, title: g.title || "分组", color: g.color || "",
       collapsed: !!g.collapsed, parent: (g.parent !== undefined ? (g.parent || null) : undefined),
       members: (g.members || []).slice(),
+      pos: Array.isArray(g.pos) ? g.pos.slice() : null, size: Array.isArray(g.size) ? g.size.slice() : null,   // 空组兜底定位（支持空组）
     }));
     const used = new Set(gs.filter((g) => g.id).map((g) => g.id));
     let seq = 1;
@@ -690,17 +707,6 @@ const ED = (function () {
     return gs;
   }
 
-  // 删空组：无直接成员【且】无子组的组才删（保留“纯容器”父组）；级联直到稳定。
-  function pruneEmptyGroups() {
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let i = groupDefs.length - 1; i >= 0; i--) {
-        const g = groupDefs[i];
-        if (!(g.members || []).length && !childGroupsOf(g).length) { groupDefs.splice(i, 1); changed = true; }
-      }
-    }
-  }
   // 把若干节点设为某组的【直接成员】（单一归属：先从所有组移除，再加入目标；gi=null→移出所有组）。
   function setNodesDirectGroup(ourIds, gi) {
     const rm = new Set(ourIds);
@@ -709,16 +715,14 @@ const ED = (function () {
       const g = groupDefs[gi]; g.members = g.members || [];
       for (const id of ourIds) if (!g.members.includes(id)) g.members.push(id);
     }
-    pruneEmptyGroups();
-    refreshGroups();
+    refreshGroups();   // 不再自动删空组：支持空组（拖空/删空仍保留，可拖节点回去；删组走解散/删除菜单）
   }
   // 设某组的父组（parentId=null→顶层）。防环：目标不能是自己或自己的后代。
   function setGroupParent(g, parentId) {
     if (!g) return;
     if (parentId) { const p = groupById(parentId); if (!p || p === g || isDescendantGroup(p, g)) return; }
     g.parent = parentId || null;
-    pruneEmptyGroups();   // 旧父组若因此变成空容器（无直接成员且无子组）则清掉
-    refreshGroups();
+    refreshGroups();   // 支持空组：不再因旧父组变空而删它
   }
   // 解散某组：子组与直接成员上提到它的父组（无父则变顶层/无组），再删除它本身。
   function dissolveGroup(g) {
@@ -728,6 +732,22 @@ const ED = (function () {
     if (p) { p.members = p.members || []; for (const m of (g.members || [])) if (!p.members.includes(m)) p.members.push(m); }
     const k = groupDefs.indexOf(g); if (k >= 0) groupDefs.splice(k, 1);
     refreshGroups();
+  }
+  // 新建一个【空组】(支持空组)：定位在 pos（图坐标；缺省=当前视口中心），默认尺寸 GROUP_EMPTY_W/H。返回新组。
+  function createGroupAt(pos) {
+    let x, y;
+    if (pos && pos.length === 2) { x = pos[0]; y = pos[1]; }
+    else if (canvas) {
+      const s = canvas.ds.scale || 1, o = canvas.ds.offset;
+      x = (canvas.canvas.width / 2) / s - o[0] - GROUP_EMPTY_W / 2;
+      y = (canvas.canvas.height / 2) / s - o[1] - GROUP_EMPTY_H / 2;
+    } else { x = 80; y = 80; }
+    const g = { id: newGroupId(), title: "分组" + (groupDefs.length + 1), color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], parent: null, members: [], pos: [x, y], size: [GROUP_EMPTY_W, GROUP_EMPTY_H] };
+    groupDefs.push(g);
+    refreshGroups();
+    if (typeof selectGroup === "function") selectGroup(g.id);   // 顺手选中，便于改名/设置（selectGroup 见“组选中”一节）
+    setStatus("已新建空组「" + g.title + "」——拖节点进框即归入（按住 Alt 拖动可放进/移出其它组）");
+    return g;
   }
   // 展开态分组的可见包裹框：裹住【可见成员】并并入其【折叠子组】箱体（否则拖折叠子组时父框跟不上＝“浮出父组”）。
   function expandedGroupBox(g, ctx) {
@@ -914,8 +934,8 @@ const ED = (function () {
       ctx.fillStyle = c; ctx.strokeStyle = "#11141a"; ctx.lineWidth = 1;
       ctx.beginPath();
       if (p.type === "exec") {
-        const d = SUBG.PORT_R + 1, sx = side === "in" ? 1 : -1;
-        ctx.moveTo(pos[0] - sx * d, pos[1] - d); ctx.lineTo(pos[0] + sx * d, pos[1]); ctx.lineTo(pos[0] - sx * d, pos[1] + d); ctx.closePath();
+        const d = SUBG.PORT_R + 1;   // 输入/输出三角都【朝右】（与执行流向一致），不再按左右边反向
+        ctx.moveTo(pos[0] - d, pos[1] - d); ctx.lineTo(pos[0] + d, pos[1]); ctx.lineTo(pos[0] - d, pos[1] + d); ctx.closePath();
       } else { ctx.arc(pos[0], pos[1], SUBG.PORT_R, 0, Math.PI * 2); }
       ctx.fill(); ctx.stroke();
       ctx.fillStyle = "#c7ccd6"; ctx.font = "12px 'Microsoft YaHei',sans-serif"; ctx.textBaseline = "middle";
@@ -1072,6 +1092,7 @@ const ED = (function () {
     syncFoldWidgets();           // 折叠节点的可编辑参数 DOM 浮层：跟随平移/缩放，几何变则重建
     if (!groupDefs.length) return;
     ctx.save();
+    syncGroupAnchors(ctx);   // 刷新各组锚点框，供空组兜底定位（必须在用 groupBox 取框之前）
     // 嵌套渲染顺序：按层级——外层（depth 小）先画、内层后画压在上面，保证嵌套子组/子箱体可见。
     const order = groupDefs.map((g, i) => i).sort((a, b) => groupDepth(groupDefs[a]) - groupDepth(groupDefs[b]));
     for (const i of order) {
@@ -1082,8 +1103,9 @@ const ED = (function () {
         if (sbox) { drawSubgBox(ctx, g, i, sbox); if (_altDrag && _altDrag.targetGi === i) drawDropTargetHL(ctx, sbox.x, sbox.y, sbox.w, sbox.h); }
         continue;
       }
-      // 展开态：成员若已全部被折叠父组隐藏，则不画其包裹框（否则框会落在父箱体之上）。
-      if (groupAllMembers(g).every((m) => foldHidden.has(m))) continue;
+      // 展开态：成员若已全部被折叠父组隐藏，则不画其包裹框（否则框会落在父箱体之上）。空组(无成员)不算“全隐藏”，照画。
+      const _am = groupAllMembers(g);
+      if (_am.length && _am.every((m) => foldHidden.has(m))) continue;
       const box = expandedGroupBox(g, ctx);  // 裹住可见成员 + 折叠子组箱体（拖折叠子组时父框跟随，不再浮出）
       if (!box) continue;
       const [x, y, w, h] = box, col = groupColor(g, i), name = groupTabText(g);
@@ -1437,8 +1459,11 @@ const ED = (function () {
         const kb = b.src + "|" + b.src_port + "|" + b.dst + "|" + b.dst_port;
         return ka < kb ? -1 : ka > kb ? 1 : 0;
       });
-      const groups = (c.groups || []).map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: g.members.slice().sort() }))
-        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const groups = (c.groups || []).map((g) => {
+        const o = { id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: g.members.slice().sort() };
+        if (!g.members.length && g.pos) o.pos = [Math.round(g.pos[0]), Math.round(g.pos[1])];   // 空组才把位置纳入签名（有成员时位置由成员推导，避免误判“未保存”）
+        return o;
+      }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const foldparams = (c.foldparams || []).slice().sort((a, b) => ((a + "") < (b + "") ? -1 : 1));
       return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, foldparams, nodes, edges });
     } catch (e) { return null; }
@@ -1511,7 +1536,8 @@ const ED = (function () {
     if (er) out.push(`－ 删除连线 ${er} 条`);
     if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
     if (JSON.stringify(cur.foldparams || []) !== JSON.stringify(savedBaseline.foldparams || [])) out.push("◇ 折叠节点参数已修改");
-    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, p: g.parent || null, m: (g.members || []).slice().sort() }))
+    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, p: g.parent || null, m: (g.members || []).slice().sort(),
+        x: (!(g.members || []).length && g.pos) ? [Math.round(g.pos[0]), Math.round(g.pos[1])] : null }))   // 空组位置变化也算“分组已修改”
       .sort((a, b) => (a.t < b.t ? -1 : 1)));
     if (gsig(cur.groups) !== gsig(savedBaseline.groups)) out.push("◇ 分组已修改");
     return out;
@@ -1688,9 +1714,9 @@ const ED = (function () {
     const panel = panelPins.filter(([nid]) => graph._nodes.some((n) => n._id === nid));
     const ids = new Set(graph._nodes.map((n) => n._id));
     const foldparams = foldPins.filter(([nid]) => ids.has(nid)).map((p) => p.slice(0, 2));
+    // 支持空组：保留所有组（含空组），随流程存盘；pos/size 用于空组兜底定位（有成员时由包围盒每帧刷新）。
     const groups = groupDefs
-      .map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: (g.members || []).filter((m) => ids.has(m)) }))
-      .filter((g) => g.members.length || groupDefs.some((x) => x.parent === g.id));   // 保留有成员的，或作为别人父组的纯容器组
+      .map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: (g.members || []).filter((m) => ids.has(m)), pos: g.pos || null, size: g.size || null }));
     return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, nodes, edges };
   }
 
@@ -3148,6 +3174,7 @@ const ED = (function () {
     if (simpleMode) return;   // 使用模式：不弹“删除连线”，右键交给只读菜单
     let off;
     try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
+    _lastMenuPos = [off[0], off[1]];   // 记下右键位置，供画布菜单“新建组”定位
     if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;  // 节点上交给 LiteGraph
     const link = linkNear(off[0], off[1]);
     if (link) {
@@ -3170,7 +3197,8 @@ const ED = (function () {
       const sb = subgBox(g, ctx); if (!sb) return null;
       return [sb.x, sb.y, sb.w, sb.h];            // 折叠参数的 DOM 控件在更高层(pointer-events:auto)，点控件不会触发拖动
     }
-    if ((g.members || []).every((m) => foldHidden.has(m))) return null;   // 整体被折叠父组隐藏：无可见框
+    const _mm = g.members || [];
+    if (_mm.length && _mm.every((m) => foldHidden.has(m))) return null;   // 成员整体被折叠父组隐藏：无可见框（空组照常有框）
     const box = expandedGroupBox(g, ctx); if (!box) return null;
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     const tw = ctx.measureText(groupTabText(g)).width;
@@ -3325,7 +3353,7 @@ const ED = (function () {
           if (l && (!graph.getNodeById(l.origin_id) || !graph.getNodeById(l.target_id))) delete graph.links[k];
         }
         for (const g of groupDefs) g.members = (g.members || []).filter((m) => ids.has(m));
-        pruneEmptyGroups();   // 清掉空组（保留仍有子组的纯容器父组）
+        // 支持空组：删节点后即使组变空也保留（用户可再拖节点回去；要删组走解散/删除菜单）
         refreshFold();
         renderPanel();
         scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none";
