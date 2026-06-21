@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资源监控</title>
+<style>
+  :root { --fg:#d4d8e0; --fg-dim:#8b929e; --line:#2e333d; --accent:#5a93d4; --btn-line:#3c434f; }
+  html, body { margin:0; height:100%; background:#1e222a; color:var(--fg);
+               font:12px/1.5 "Microsoft YaHei", sans-serif; overflow:hidden; }
+  #app { display:flex; flex-direction:column; height:100%; box-sizing:border-box; padding:8px 12px 10px; }
+  .head { display:flex; align-items:center; font-weight:bold; color:#e6e9ee; margin-bottom:6px; flex:0 0 auto; user-select:none; }
+  .head .spacer { flex:1 1 auto; }
+  .btn { cursor:pointer; color:var(--fg-dim); font-size:14px; line-height:1; padding:1px 5px; user-select:none; border-radius:5px; }
+  .btn:hover { color:var(--fg); }
+  /* 选中态用填充药丸——📌 等彩色 emoji 无视 CSS color，改背景才看得出状态 */
+  .btn.on { color:#fff; background:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .row { display:flex; align-items:baseline; margin:6px 0 2px; font-size:12px; flex:0 0 auto; }
+  .row .spacer { flex:1 1 auto; }
+  .row b { font-weight:normal; color:var(--fg); font-family:Consolas, monospace; }
+  canvas { display:block; width:100%; flex:1 1 0; min-height:36px; background:#14171d;
+           border:1px solid var(--line); border-radius:6px; cursor:ew-resize; }
+  .cfg { margin-top:9px; padding-top:8px; border-top:1px solid var(--line);
+         color:var(--fg-dim); font-size:12px; line-height:2; flex:0 0 auto; }
+  .cfg input { width:54px; background:#15171c; color:var(--fg); border:1px solid var(--btn-line);
+               border-radius:4px; height:22px; font-size:12px; padding:0 4px; }
+  .tip { color:#6b7280; font-size:11px; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:#3a414c; border-radius:6px; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div class="head">资源监控<span class="spacer"></span>
+      <span class="btn on" id="pin" title="置顶：浮在最前（默认开，点击取消）">📌</span>
+      <span class="btn" id="trans" title="半透明：不挡视线（100%→70%→40% 循环）">◐</span>
+    </div>
+    <div class="row"><span style="color:#7fb0ee">本工具 CPU</span><span class="spacer"></span><b id="cpu">--</b></div>
+    <canvas id="cpuchart"></canvas>
+    <div class="row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="mem">--</b></div>
+    <canvas id="memchart"></canvas>
+    <div class="row"><span style="color:#e6a06a">游戏 CPU / 内存</span><span class="spacer"></span><b id="game">--</b></div>
+    <div class="row"><span style="color:#8b929e">系统 CPU / 可用</span><span class="spacer"></span><b id="sys">--</b></div>
+    <div class="cfg">
+      采样间隔 <input id="iv" type="number" min="200" max="10000" step="100"> ms ·
+      保留 <input id="wn" type="number" min="1" max="120" step="1"> 分<br>
+      <span class="tip">曲线：滚轮缩放 · 拖动平移 · 双击复位</span>
+    </div>
+  </div>
+<script>
+(function () {
+  "use strict";
+  const api = () => (window.pywebview && window.pywebview.api) || null;
+  const $ = (id) => document.getElementById(id);
+
+  let cfg = { interval: 1000, minutes: 5 };
+  const hist = { cpu: [], mem: [], gcpu: [], gmem: [] };
+  let last = null, timer = null;
+  let view = { zoom: 1, center: 1 }, pan = null;
+  let pinned = true, transLvl = 0;
+
+  function loadCfg() {
+    try {
+      const v = JSON.parse(localStorage.getItem("flow.sysmon") || "{}");
+      if (v.interval) cfg.interval = Math.max(200, Math.min(10000, v.interval));
+      if (v.minutes) cfg.minutes = Math.max(1, Math.min(120, v.minutes));
+    } catch (e) {}
+  }
+  function saveCfg() { try { localStorage.setItem("flow.sysmon", JSON.stringify(cfg)); } catch (e) {} }
+  function cap() { return Math.max(30, Math.round(cfg.minutes * 60000 / cfg.interval)); }
+  function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(2) + " GB" : Math.round(mb) + " MB"; }
+  function memMax() {
+    let m = 256;
+    for (const v of hist.mem) if (v > m) m = v;
+    for (const v of hist.gmem) if (v > m) m = v;
+    return Math.ceil(m * 1.2 / 64) * 64;
+  }
+  // —— 缩放/平移：zoom=1 显示全部(实时)，>1 放大；center=可视区中心 0..1 ——
+  function visStart(N) {
+    const vis = Math.max(2, Math.round(N / view.zoom));
+    let start = Math.round(view.center * (N - 1) - vis / 2);
+    return [Math.max(0, Math.min(N - vis, start)), vis];
+  }
+  function slice(arr) {
+    const N = arr.length;
+    if (N < 2 || view.zoom <= 1.001) return arr;
+    const [s, vis] = visStart(N);
+    return arr.slice(s, s + vis);
+  }
+  function drawSeries(cv, data, maxv, color, fill, noClear) {
+    if (!cv) return;
+    const ctx = cv.getContext("2d"), w = cv.width, h = cv.height;
+    if (!noClear) ctx.clearRect(0, 0, w, h);
+    if (!data.length) return;
+    const n = data.length, dx = n > 1 ? w / (n - 1) : w, top = 2, bot = h - 2;
+    const y = (v) => bot - Math.max(0, Math.min(1, v / maxv)) * (bot - top);
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) { const px = i * dx, py = y(data[i]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    if (fill) {
+      ctx.lineTo((n - 1) * dx, bot); ctx.lineTo(0, bot); ctx.closePath();
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) { const px = i * dx, py = y(data[i]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    }
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.stroke();
+  }
+  function syncSize() {
+    for (const id of ["cpuchart", "memchart"]) {
+      const cv = $(id);
+      if (cv && cv.clientWidth && (cv.width !== cv.clientWidth || cv.height !== cv.clientHeight)) {
+        cv.width = cv.clientWidth; cv.height = cv.clientHeight;
+      }
+    }
+  }
+  function draw() {
+    if (!last) return;
+    syncSize();
+    const mm = memMax(), cpuCv = $("cpuchart"), memCv = $("memchart");
+    drawSeries(cpuCv, slice(hist.cpu), 100, "#7fb0ee", "#7fb0ee22");   // 本工具 CPU
+    drawSeries(cpuCv, slice(hist.gcpu), 100, "#e6a06a", null, true);   // 游戏 CPU（叠加）
+    drawSeries(memCv, slice(hist.mem), mm, "#6fcf97", "#6fcf9722");    // 本工具 内存
+    drawSeries(memCv, slice(hist.gmem), mm, "#e6a06a", null, true);    // 游戏 内存（叠加）
+    const set = (id, t) => { const e = $(id); if (e) e.textContent = t; };
+    const zt = view.zoom > 1.001 ? "  · 缩放 " + view.zoom.toFixed(1) + "×" : "";
+    set("cpu", last.tool_cpu + "%  （整机 " + last.ncpu + " 核 · 蓝线）" + zt);
+    set("mem", fmtMB(last.tool_mem) + "  （峰值上限 " + fmtMB(mm) + "）");
+    set("game", last.game_running ? (last.game_cpu + "%  /  " + fmtMB(last.game_mem) + "（橙线）") : "未运行");
+    set("sys", last.sys_cpu + "%  /  " + fmtMB(last.sys_avail) + " 可用");
+  }
+  async function poll() {
+    let s = null;
+    try { s = await api().sys_stats(); } catch (e) {}
+    if (s && s.ok) {
+      last = s;
+      const c = cap();
+      hist.cpu.push(s.tool_cpu); hist.mem.push(s.tool_mem);
+      hist.gcpu.push(s.game_cpu || 0); hist.gmem.push(s.game_mem || 0);
+      for (const k of ["cpu", "mem", "gcpu", "gmem"]) while (hist[k].length > c) hist[k].shift();
+      draw();
+    }
+    timer = setTimeout(poll, cfg.interval);
+  }
+
+  // —— 滚轮缩放（朝鼠标处）/ 拖动平移 / 双击复位 ——
+  function wheel(e) {
+    e.preventDefault();
+    const N = hist.cpu.length; if (N < 2) return;
+    const cv = e.currentTarget, frac = Math.max(0, Math.min(1, e.offsetX / (cv.clientWidth || 1)));
+    let idx;
+    if (view.zoom <= 1.001) idx = frac * (N - 1);
+    else { const [s, vis] = visStart(N); idx = s + frac * (vis - 1); }
+    view.zoom = Math.max(1, Math.min(Math.max(1, N / 2), view.zoom * (e.deltaY < 0 ? 1.3 : 1 / 1.3)));
+    if (view.zoom <= 1.001) { view = { zoom: 1, center: 1 }; draw(); return; }
+    const v2 = Math.max(2, Math.round(N / view.zoom));
+    view.center = Math.max(0, Math.min(1, (idx - frac * (v2 - 1) + v2 / 2) / (N - 1)));
+    draw();
+  }
+  function down(e) {
+    if (view.zoom <= 1.001) return;
+    pan = { x: e.clientX, center: view.center, w: e.currentTarget.clientWidth || 1 };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+  }
+  function move(e) {
+    if (!pan) return;
+    const N = hist.cpu.length, vis = Math.max(2, Math.round(N / view.zoom));
+    const d = (e.clientX - pan.x) / pan.w;
+    view.center = Math.max(0, Math.min(1, pan.center - d * (vis - 1) / Math.max(1, N - 1)));
+    draw();
+  }
+  function up() { pan = null; }
+  function resetView() { view = { zoom: 1, center: 1 }; draw(); }
+
+  function togglePin() {
+    pinned = !pinned;
+    const b = $("pin");
+    b.classList.toggle("on", pinned);
+    b.title = pinned ? "置顶中（点击取消）" : "置顶：浮在最前";
+    try { api().mon_set_on_top(pinned); } catch (_) {}
+  }
+  function toggleTrans() {
+    transLvl = (transLvl + 1) % 3;
+    $("trans").classList.toggle("on", transLvl !== 0);
+    try { api().mon_set_opacity(transLvl); } catch (_) {}
+  }
+
+  function wire() {
+    for (const id of ["cpuchart", "memchart"]) {
+      const cv = $(id); if (!cv) continue;
+      cv.addEventListener("wheel", wheel, { passive: false });
+      cv.addEventListener("pointerdown", down);
+      cv.addEventListener("pointermove", move);
+      cv.addEventListener("pointerup", up);
+      cv.addEventListener("dblclick", resetView);
+    }
+    $("pin").addEventListener("click", togglePin);
+    $("trans").addEventListener("click", toggleTrans);
+    const iv = $("iv"), wn = $("wn");
+    iv.value = cfg.interval;
+    iv.onchange = () => {
+      cfg.interval = Math.max(200, Math.min(10000, parseInt(iv.value) || 1000));
+      iv.value = cfg.interval; saveCfg();
+      if (timer) { clearTimeout(timer); timer = setTimeout(poll, cfg.interval); }
+    };
+    wn.value = cfg.minutes;
+    wn.onchange = () => {
+      cfg.minutes = Math.max(1, Math.min(120, parseInt(wn.value) || 5));
+      wn.value = cfg.minutes; saveCfg();
+      const c = cap();
+      for (const k of ["cpu", "mem", "gcpu", "gmem"]) while (hist[k].length > c) hist[k].shift();
+    };
+    window.addEventListener("resize", () => { syncSize(); draw(); });
+  }
+
+  function boot() {
+    loadCfg();
+    wire();
+    // pywebview 注入 api 有延迟：等到 sys_stats 就绪再开始轮询
+    const wait = setInterval(() => {
+      const a = api();
+      if (a && typeof a.sys_stats === "function") { clearInterval(wait); poll(); }
+    }, 60);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();
+</script>
+</body>
+</html>

@@ -125,33 +125,7 @@
   #systext { font: 11px/1.3 Consolas, monospace; color: var(--fg-dim); white-space: nowrap; }
   #systext b { color: var(--fg); font-weight: normal; }
   #systext .sm-cpu { color: #7fb0ee; } #systext .sm-mem { color: #6fcf97; }
-  /* 资源监控详情=可拖动/可缩放的浮窗：默认右上方（小窗下方），拖标题移动、右下角拉伸、滚轮缩放曲线 */
-  #sysdetail { position: absolute; top: 48px; right: 10px; z-index: 130; width: 320px; height: 360px; display: none;
-               flex-direction: column; background: #1e222aef; border: 1px solid #3c434f; border-radius: 10px;
-               padding: 10px 12px 12px; box-shadow: 0 12px 34px #000b; font: 12px/1.5 "Microsoft YaHei", sans-serif;
-               color: var(--fg); resize: both; overflow: hidden; min-width: 240px; min-height: 272px;
-               max-width: 86vw; max-height: 88vh; transition: opacity .15s; }
-  #sysdetail.show { display: flex; }
-  #sysdetail.op70 { opacity: .7; } #sysdetail.op40 { opacity: .4; }
-  #sysdetail.op70:hover, #sysdetail.op40:hover { opacity: 1; }   /* 悬停时恢复不透明，便于读数 */
-  #sysdetail .sd-head { display: flex; align-items: center; font-weight: bold; color: #e6e9ee; margin-bottom: 6px;
-                        cursor: move; flex: 0 0 auto; user-select: none; }
-  #sysdetail .sd-head .spacer { flex: 1 1 auto; }
-  #sysdetail .sd-btn { cursor: pointer; color: var(--fg-dim); font-size: 14px; line-height: 1; padding: 0 4px; user-select: none; }
-  #sysdetail .sd-btn:hover { color: var(--fg); }
-  #sysdetail .sd-btn.on { color: var(--accent); }
-  #sysdetail .sd-close { cursor: pointer; color: var(--fg-dim); font-size: 18px; line-height: 1; padding: 0 2px 0 4px; }
-  #sysdetail .sd-close:hover { color: var(--fg); }
-  #sysdetail .sd-row { display: flex; align-items: baseline; margin: 6px 0 2px; font-size: 12px; flex: 0 0 auto; }
-  #sysdetail .sd-row .spacer { flex: 1 1 auto; }
-  #sysdetail .sd-row b { font-weight: normal; color: var(--fg); font-family: Consolas, monospace; }
-  #sysdetail canvas { display: block; width: 100%; flex: 1 1 0; min-height: 38px; background: #14171d;
-                      border: 1px solid var(--line); border-radius: 6px; cursor: ew-resize; }
-  #sysdetail .sd-cfg { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line);
-                       color: var(--fg-dim); font-size: 12px; line-height: 2; flex: 0 0 auto; }
-  #sysdetail .sd-tip { color: #6b7280; font-size: 11px; }
-  #sysdetail .sd-cfg input { width: 56px; background: #15171c; color: var(--fg); border: 1px solid var(--btn-line);
-                       border-radius: 4px; height: 22px; font-size: 12px; padding: 0 4px; }
+  /* 资源监控详情已独立为单独的系统窗口（web/sysmon.html）；编辑器内只留右上角迷你小窗 */
   /* 滚动条：细、暗，融入主题 */
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: #3a414c; border-radius: 6px; border: 2px solid transparent;
@@ -187,27 +161,10 @@
   <div id="panel"></div>
   <div id="wrap">
     <canvas id="graph"></canvas>
-    <!-- 资源监控小窗（画布右下角常驻）：迷你曲线 + 简要数字，点击展开详情与采样配置 -->
-    <div id="sysmon" title="资源占用 · 点击查看详情" onclick="ED.toggleSysMon()">
+    <!-- 资源监控迷你小窗（画布右上角常驻）：迷你曲线 + 简要数字，点击弹出独立的「资源监控」浮窗 -->
+    <div id="sysmon" title="资源占用 · 点击弹出独立监控浮窗（可置顶/拖到屏幕任意处）" onclick="ED.toggleSysMon()">
       <canvas id="sysspark" width="116" height="26"></canvas>
       <div id="systext">CPU <b class="sm-cpu">--</b> · 内存 <b class="sm-mem">--</b></div>
-    </div>
-    <div id="sysdetail">
-      <div class="sd-head" id="sd-head" title="拖动可移动 · 双击复位到右上方">资源监控<span class="spacer"></span>
-        <span class="sd-btn" id="sd-pin" onclick="ED.sysTogglePin()" title="窗口置顶：让编辑器浮在最前（便于一边看游戏一边盯监控）">📌</span>
-        <span class="sd-btn" id="sd-trans" onclick="ED.sysToggleTrans()" title="半透明：调低不透明度不挡视线（循环 100%→70%→40%，悬停临时恢复）">◐</span>
-        <span class="sd-close" onclick="ED.toggleSysMon()" title="收起">×</span></div>
-      <div class="sd-row"><span style="color:#7fb0ee">本工具 CPU</span><span class="spacer"></span><b id="sd-cpu">--</b></div>
-      <canvas id="sd-cpuchart"></canvas>
-      <div class="sd-row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="sd-mem">--</b></div>
-      <canvas id="sd-memchart"></canvas>
-      <div class="sd-row"><span style="color:#e6a06a">游戏 CPU / 内存</span><span class="spacer"></span><b id="sd-game">--</b></div>
-      <div class="sd-row"><span style="color:#8b929e">系统 CPU / 可用内存</span><span class="spacer"></span><b id="sd-sys">--</b></div>
-      <div class="sd-cfg">
-        采样间隔 <input id="sd-interval" type="number" min="200" max="10000" step="100"> ms<br>
-        保留时长 <input id="sd-window" type="number" min="1" max="120" step="1"> 分钟<br>
-        <span class="sd-tip">图表：滚轮缩放 · 拖动平移 · 双击复位</span>
-      </div>
     </div>
   </div>
   <div id="logresize" title="拖动调整日志高度"></div>

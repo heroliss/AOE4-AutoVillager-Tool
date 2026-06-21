@@ -285,6 +285,7 @@ class Api:
         self._sysmon_proc = None             # 资源监控：缓存本进程的 psutil.Process（cpu_percent 需要复用同一对象建基准）
         self._sysmon_game = {}               # 游戏进程监控：pid -> psutil.Process（找到即缓存复用，省 process_iter）
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
+        self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
 
     def get_defs(self):
         return node_defs()
@@ -352,42 +353,85 @@ class Api:
         self._dirty = bool(flag)
         return True
 
-    def set_on_top(self, flag):
-        """资源监控窗口的「置顶」开关：让整个编辑器窗口浮在最前，便于一边玩游戏一边盯资源监控。
+    @staticmethod
+    def _form_set(native, attr, value):
+        """跨线程安全地设置原生 WinForms 窗体属性（TopMost / Opacity 等）——投递到 UI 线程执行。
 
-        ⚠ pywebview 的 set_on_top 直接写 WinForms `Form.TopMost` 且【不切回 UI 线程】（不像它的
-        show/resize/set_title 那样判 InvokeRequired+Invoke）。而 js_api 处理器跑在【工作线程】上
-        （pywebview 每次调用新开线程），跨线程改 .NET 控件属性会触发窗口句柄重建、与 WebView2 的
-        消息循环死锁——表现就是「点一下置顶就卡死」。故这里取原生 Form，用 BeginInvoke 把改动
-        异步投递到 UI 线程（立即返回、不阻塞），从根上避开跨线程。"""
-        flag = bool(flag)
+        ⚠ js_api 处理器跑在【工作线程】上（pywebview 每次调用新开线程）。直接在工作线程上写
+        .NET 控件属性（如 Form.TopMost）会触发窗口句柄重建、与 WebView2 消息循环互等死锁——
+        表现就是「点一下就卡死」。pywebview 自带的 set_on_top 恰恰没切回 UI 线程，故这里统一用
+        原生 Form.BeginInvoke 把改动异步投递到 UI 线程（立即返回、不阻塞工作线程）。"""
+        if native is None or not hasattr(native, "InvokeRequired"):
+            return False
         try:
-            w = self._window
-            if w is None:
-                return False
-            native = getattr(w, "native", None)
-            if native is not None and hasattr(native, "InvokeRequired"):   # WinForms 后端
-                from System import Action
+            from System import Action
 
-                def _apply():
-                    try:
-                        native.TopMost = flag
-                    except Exception:
-                        pass
-                if native.InvokeRequired:
-                    native.BeginInvoke(Action(_apply))   # 投递到 UI 线程异步执行，不在工作线程上动控件
-                else:
-                    _apply()
+            def _apply():
                 try:
-                    w._Window__on_top = flag             # 同步 pywebview 内部状态（best-effort）
+                    setattr(native, attr, value)
                 except Exception:
                     pass
-                return True
-            # 兜底：非 WinForms 后端（自有线程模型）
-            w.on_top = flag
+            if native.InvokeRequired:
+                native.BeginInvoke(Action(_apply))
+            else:
+                _apply()
             return True
         except Exception:
             return False
+
+    def set_on_top(self, flag):
+        """主编辑器窗口置顶（保留备用；资源监控已改为独立窗口，见 toggle_monitor）。"""
+        w = self._window
+        return self._form_set(getattr(w, "native", None), "TopMost", bool(flag)) if w else False
+
+    # ==================== 独立「资源监控」浮窗（单独系统窗口）====================
+    # 监控做成另一个 OS 窗口：只它能置顶、可拖到屏幕任意处（含游戏上方/副屏）、原生缩放，
+    # 主编辑器不受影响（解决“整个编辑器被一起置顶 / 监控拖不出主窗”）。
+    def toggle_monitor(self):
+        """开/关独立资源监控窗口；返回 {open: bool}。供主编辑器右上角迷你窗点击调用。"""
+        if self._mon_window is not None:
+            try:
+                self._mon_window.destroy()
+            except Exception:
+                pass
+            self._mon_window = None
+            return {"open": False}
+        return self._open_monitor()
+
+    def _open_monitor(self):
+        import webview
+        page = os.path.join(WEB_DIR, "sysmon.html")
+        kw = dict(width=360, height=430, js_api=self, on_top=True, min_size=(260, 300))
+        try:                                   # 默认摆到主屏右上角
+            scr = webview.screens[0]
+            kw["x"] = max(0, int(scr.width) - 392)
+            kw["y"] = 64
+        except Exception:
+            pass
+        try:
+            self._mon_window = webview.create_window("资源监控", url=page, **kw)
+            try:
+                self._mon_window.events.closed += self._on_monitor_closed
+            except Exception:
+                pass
+            return {"open": True}
+        except Exception as e:
+            self._mon_window = None
+            return {"open": False, "reason": str(e)}
+
+    def _on_monitor_closed(self):
+        self._mon_window = None
+
+    def mon_set_on_top(self, flag):
+        """资源监控窗口自己的置顶开关（只影响它，不动主编辑器）。"""
+        w = self._mon_window
+        return self._form_set(getattr(w, "native", None), "TopMost", bool(flag)) if w else False
+
+    def mon_set_opacity(self, level):
+        """level: 0=不透明 1=70% 2=40%。设原生 Form.Opacity 做真·半透明（透出后面的游戏/桌面）。"""
+        op = {0: 1.0, 1: 0.7, 2: 0.4}.get(int(level or 0), 1.0)
+        w = self._mon_window
+        return self._form_set(getattr(w, "native", None), "Opacity", float(op)) if w else False
 
     # ==================== 运行可视化（引擎在后台线程自行全速跑，前端只轮询）====================
     @staticmethod
@@ -816,6 +860,18 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
             return True   # 对话框不可用就不阻拦关闭
     try:
         api._window.events.closing += _confirm_close
+    except Exception:
+        pass
+
+    def _close_monitor():           # 主编辑器关掉时，连带关掉独立的资源监控浮窗（否则它会让进程不退出）
+        if api._mon_window is not None:
+            try:
+                api._mon_window.destroy()
+            except Exception:
+                pass
+            api._mon_window = None
+    try:
+        api._window.events.closed += _close_monitor
     except Exception:
         pass
     # 前端通过 js_api 轮询拉取启动数据（pywebview 注入 api 有延迟，前端会等到就绪再拉），
