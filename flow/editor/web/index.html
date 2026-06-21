@@ -115,7 +115,7 @@
   #logpanel .lp-row.lv-ERROR .lp-dot { color: #ff7a7a; } #logpanel .lp-row.lv-ERROR .lp-msg { color: #ff9a9a; font-weight: bold; }
   #logpanel .lp-clear { cursor: pointer; color: #7fb0ee; }
   #logpanel .lp-clear:hover { text-decoration: underline; }
-  /* —— 资源监控：迷你小窗在画布【右上角】常驻，点击展开右下角详情（两者分处不同角，互不遮挡）—— */
+  /* —— 资源监控：迷你小窗在画布【右上角】常驻，点击展开下方的浮窗详情（可拖动/缩放/滚轮缩放曲线/置顶/半透明）—— */
   #sysmon { position: absolute; top: 10px; right: 10px; z-index: 60; display: flex; flex-direction: column;
             gap: 2px; background: #1d212bdd; border: 1px solid var(--line); border-radius: 8px;
             padding: 5px 8px 4px; cursor: pointer; opacity: .82; user-select: none;
@@ -125,21 +125,31 @@
   #systext { font: 11px/1.3 Consolas, monospace; color: var(--fg-dim); white-space: nowrap; }
   #systext b { color: var(--fg); font-weight: normal; }
   #systext .sm-cpu { color: #7fb0ee; } #systext .sm-mem { color: #6fcf97; }
-  #sysdetail { position: absolute; bottom: 10px; right: 10px; z-index: 130; width: 320px; display: none;
-               background: #1e222add; border: 1px solid #3c434f; border-radius: 10px; padding: 12px 14px;
-               box-shadow: 0 12px 34px #000b; font: 12px/1.5 "Microsoft YaHei", sans-serif; color: var(--fg); }
-  #sysdetail.show { display: block; }
-  #sysdetail .sd-head { display: flex; align-items: center; font-weight: bold; color: #e6e9ee; margin-bottom: 8px; }
+  /* 资源监控详情=可拖动/可缩放的浮窗：默认右上方（小窗下方），拖标题移动、右下角拉伸、滚轮缩放曲线 */
+  #sysdetail { position: absolute; top: 48px; right: 10px; z-index: 130; width: 320px; height: 360px; display: none;
+               flex-direction: column; background: #1e222aef; border: 1px solid #3c434f; border-radius: 10px;
+               padding: 10px 12px 12px; box-shadow: 0 12px 34px #000b; font: 12px/1.5 "Microsoft YaHei", sans-serif;
+               color: var(--fg); resize: both; overflow: hidden; min-width: 240px; min-height: 272px;
+               max-width: 86vw; max-height: 88vh; transition: opacity .15s; }
+  #sysdetail.show { display: flex; }
+  #sysdetail.op70 { opacity: .7; } #sysdetail.op40 { opacity: .4; }
+  #sysdetail.op70:hover, #sysdetail.op40:hover { opacity: 1; }   /* 悬停时恢复不透明，便于读数 */
+  #sysdetail .sd-head { display: flex; align-items: center; font-weight: bold; color: #e6e9ee; margin-bottom: 6px;
+                        cursor: move; flex: 0 0 auto; user-select: none; }
   #sysdetail .sd-head .spacer { flex: 1 1 auto; }
-  #sysdetail .sd-close { cursor: pointer; color: var(--fg-dim); font-size: 18px; line-height: 1; padding: 0 4px; }
+  #sysdetail .sd-btn { cursor: pointer; color: var(--fg-dim); font-size: 14px; line-height: 1; padding: 0 4px; user-select: none; }
+  #sysdetail .sd-btn:hover { color: var(--fg); }
+  #sysdetail .sd-btn.on { color: var(--accent); }
+  #sysdetail .sd-close { cursor: pointer; color: var(--fg-dim); font-size: 18px; line-height: 1; padding: 0 2px 0 4px; }
   #sysdetail .sd-close:hover { color: var(--fg); }
-  #sysdetail .sd-row { display: flex; align-items: baseline; margin: 8px 0 3px; font-size: 12px; }
+  #sysdetail .sd-row { display: flex; align-items: baseline; margin: 6px 0 2px; font-size: 12px; flex: 0 0 auto; }
   #sysdetail .sd-row .spacer { flex: 1 1 auto; }
   #sysdetail .sd-row b { font-weight: normal; color: var(--fg); font-family: Consolas, monospace; }
-  #sysdetail canvas { display: block; width: 100%; height: 56px; background: #14171d;
-                      border: 1px solid var(--line); border-radius: 6px; }
-  #sysdetail .sd-cfg { margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--line);
-                       color: var(--fg-dim); font-size: 12px; line-height: 2; }
+  #sysdetail canvas { display: block; width: 100%; flex: 1 1 0; min-height: 38px; background: #14171d;
+                      border: 1px solid var(--line); border-radius: 6px; cursor: ew-resize; }
+  #sysdetail .sd-cfg { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line);
+                       color: var(--fg-dim); font-size: 12px; line-height: 2; flex: 0 0 auto; }
+  #sysdetail .sd-tip { color: #6b7280; font-size: 11px; }
   #sysdetail .sd-cfg input { width: 56px; background: #15171c; color: var(--fg); border: 1px solid var(--btn-line);
                        border-radius: 4px; height: 22px; font-size: 12px; padding: 0 4px; }
   /* 滚动条：细、暗，融入主题 */
@@ -183,7 +193,10 @@
       <div id="systext">CPU <b class="sm-cpu">--</b> · 内存 <b class="sm-mem">--</b></div>
     </div>
     <div id="sysdetail">
-      <div class="sd-head">资源监控<span class="spacer"></span><span class="sd-close" onclick="ED.toggleSysMon()" title="收起">×</span></div>
+      <div class="sd-head" id="sd-head" title="拖动可移动 · 双击复位到右上方">资源监控<span class="spacer"></span>
+        <span class="sd-btn" id="sd-pin" onclick="ED.sysTogglePin()" title="窗口置顶：让编辑器浮在最前（便于一边看游戏一边盯监控）">📌</span>
+        <span class="sd-btn" id="sd-trans" onclick="ED.sysToggleTrans()" title="半透明：调低不透明度不挡视线（循环 100%→70%→40%，悬停临时恢复）">◐</span>
+        <span class="sd-close" onclick="ED.toggleSysMon()" title="收起">×</span></div>
       <div class="sd-row"><span style="color:#7fb0ee">本工具 CPU</span><span class="spacer"></span><b id="sd-cpu">--</b></div>
       <canvas id="sd-cpuchart"></canvas>
       <div class="sd-row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="sd-mem">--</b></div>
@@ -192,7 +205,8 @@
       <div class="sd-row"><span style="color:#8b929e">系统 CPU / 可用内存</span><span class="spacer"></span><b id="sd-sys">--</b></div>
       <div class="sd-cfg">
         采样间隔 <input id="sd-interval" type="number" min="200" max="10000" step="100"> ms<br>
-        保留时长 <input id="sd-window" type="number" min="1" max="120" step="1"> 分钟
+        保留时长 <input id="sd-window" type="number" min="1" max="120" step="1"> 分钟<br>
+        <span class="sd-tip">图表：滚轮缩放 · 拖动平移 · 双击复位</span>
       </div>
     </div>
   </div>

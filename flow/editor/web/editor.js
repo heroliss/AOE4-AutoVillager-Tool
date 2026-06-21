@@ -2039,6 +2039,8 @@ const ED = (function () {
   const SYS_DOT = "#2a2f38";
   let sysCfg = { interval: 1000, minutes: 5 };       // 采样间隔(ms) / 保留时长(分钟)
   let sysHist = { cpu: [], mem: [], gcpu: [], gmem: [] }, sysLast = null, sysTimer = null, sysDetailOpen = false;
+  // 详情窗口：时间轴缩放/平移（zoom=1 显示全部=实时；>1 放大；center=可视区中心 0..1），拖动/平移/置顶/透明状态
+  let sysView = { zoom: 1, center: 1 }, _sysPan = null, _sysDrag = null, sysWired = false, sysPinned = false, sysTransLvl = 0;
   function sysCap() { return Math.max(30, Math.round(sysCfg.minutes * 60000 / sysCfg.interval)); }
   function sysLoadCfg() {
     try {
@@ -2089,17 +2091,30 @@ const ED = (function () {
       if (m) m.textContent = fmtMB(sysLast.tool_mem);
     }
   }
+  // 时间轴缩放/平移：取可视区起点与样本数（zoom=1 时返回全部）
+  function sysVisStart(N) {
+    const vis = Math.max(2, Math.round(N / sysView.zoom));
+    let start = Math.round(sysView.center * (N - 1) - vis / 2);
+    return [Math.max(0, Math.min(N - vis, start)), vis];
+  }
+  function sliceView(arr) {
+    const N = arr.length;
+    if (N < 2 || sysView.zoom <= 1.001) return arr;       // 未缩放：显示全部（实时跟随最新）
+    const [s, vis] = sysVisStart(N);
+    return arr.slice(s, s + vis);
+  }
   function drawSysDetail() {
     if (!sysDetailOpen || !sysLast) return;
     syncDetailCanvasSize();                        // 跟随窗口尺寸（CSS 拉伸）对齐位图，曲线才清晰
     const mm = memMax();
     const cpuCv = document.getElementById("sd-cpuchart"), memCv = document.getElementById("sd-memchart");
-    drawSeries(cpuCv, sysHist.cpu, 100, "#7fb0ee", "#7fb0ee22");          // 本工具 CPU（蓝）
-    drawSeries(cpuCv, sysHist.gcpu, 100, "#e6a06a", null, true);          // 游戏 CPU（橙，叠加）
-    drawSeries(memCv, sysHist.mem, mm, "#6fcf97", "#6fcf9722");           // 本工具 内存（绿）
-    drawSeries(memCv, sysHist.gmem, mm, "#e6a06a", null, true);          // 游戏 内存（橙，叠加）
+    drawSeries(cpuCv, sliceView(sysHist.cpu), 100, "#7fb0ee", "#7fb0ee22");   // 本工具 CPU（蓝）
+    drawSeries(cpuCv, sliceView(sysHist.gcpu), 100, "#e6a06a", null, true);   // 游戏 CPU（橙，叠加）
+    drawSeries(memCv, sliceView(sysHist.mem), mm, "#6fcf97", "#6fcf9722");    // 本工具 内存（绿）
+    drawSeries(memCv, sliceView(sysHist.gmem), mm, "#e6a06a", null, true);    // 游戏 内存（橙，叠加）
     const set = (id, txt) => { const e = document.getElementById(id); if (e) e.textContent = txt; };
-    set("sd-cpu", sysLast.tool_cpu + "%  （整机 " + sysLast.ncpu + " 核 · 蓝线）");
+    const zoomTag = sysView.zoom > 1.001 ? "  · 缩放 " + sysView.zoom.toFixed(1) + "×" : "";
+    set("sd-cpu", sysLast.tool_cpu + "%  （整机 " + sysLast.ncpu + " 核 · 蓝线）" + zoomTag);
     set("sd-mem", fmtMB(sysLast.tool_mem) + "  （峰值上限 " + fmtMB(mm) + "）");
     set("sd-game", sysLast.game_running
       ? (sysLast.game_cpu + "%  /  " + fmtMB(sysLast.game_mem) + "（橙线）")
@@ -2152,15 +2167,120 @@ const ED = (function () {
     }
     sysPoll();
   }
+  // —— 滚轮缩放（朝鼠标处缩放）/ 拖动平移 / 双击复位 —— 作用于两张曲线图的共享时间轴 ——
+  function sysWheel(e) {
+    e.preventDefault();
+    const N = sysHist.cpu.length; if (N < 2) return;
+    const cv = e.currentTarget, frac = Math.max(0, Math.min(1, e.offsetX / (cv.clientWidth || 1)));
+    let idxAtMouse;
+    if (sysView.zoom <= 1.001) idxAtMouse = frac * (N - 1);
+    else { const [s, vis] = sysVisStart(N); idxAtMouse = s + frac * (vis - 1); }
+    sysView.zoom = Math.max(1, Math.min(Math.max(1, N / 2), sysView.zoom * (e.deltaY < 0 ? 1.3 : 1 / 1.3)));
+    if (sysView.zoom <= 1.001) { sysView = { zoom: 1, center: 1 }; drawSysDetail(); return; }   // 缩回到底＝回到实时
+    const vis2 = Math.max(2, Math.round(N / sysView.zoom));
+    sysView.center = Math.max(0, Math.min(1, (idxAtMouse - frac * (vis2 - 1) + vis2 / 2) / (N - 1)));
+    drawSysDetail();
+  }
+  function sysChartDown(e) {
+    if (sysView.zoom <= 1.001) return;                  // 未缩放无需平移
+    _sysPan = { x: e.clientX, center: sysView.center, w: e.currentTarget.clientWidth || 1 };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+  }
+  function sysChartMove(e) {
+    if (!_sysPan) return;
+    const N = sysHist.cpu.length, vis = Math.max(2, Math.round(N / sysView.zoom));
+    const dxFrac = (e.clientX - _sysPan.x) / _sysPan.w;  // 右拖→看更早的数据→center 减小
+    sysView.center = Math.max(0, Math.min(1, _sysPan.center - dxFrac * (vis - 1) / Math.max(1, N - 1)));
+    drawSysDetail();
+  }
+  function sysChartUp() { _sysPan = null; }
+  function sysResetView() { sysView = { zoom: 1, center: 1 }; drawSysDetail(); }
+  // —— 拖动标题移动窗口；双击标题把位置/尺寸复位到默认右上方 ——
+  function sysHeadDown(e) {
+    if (e.target.closest(".sd-btn") || e.target.closest(".sd-close")) return;  // 点按钮/关闭不触发拖动
+    const d = document.getElementById("sysdetail");
+    _sysDrag = { x: e.clientX, y: e.clientY, left: d.offsetLeft, top: d.offsetTop };
+    d.style.left = d.offsetLeft + "px"; d.style.top = d.offsetTop + "px"; d.style.right = "auto";
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  }
+  function sysHeadMove(e) {
+    if (!_sysDrag) return;
+    const d = document.getElementById("sysdetail"), wrap = document.getElementById("wrap");
+    let nl = _sysDrag.left + (e.clientX - _sysDrag.x), nt = _sysDrag.top + (e.clientY - _sysDrag.y);
+    nl = Math.max(2, Math.min(wrap.clientWidth - d.offsetWidth - 2, nl));
+    nt = Math.max(2, Math.min(wrap.clientHeight - 28, nt));      // 至少露出标题，不拖出视口
+    d.style.left = nl + "px"; d.style.top = nt + "px";
+  }
+  function sysHeadUp() { if (_sysDrag) { _sysDrag = null; sysSaveGeom(); } }
+  function sysResetGeom() {
+    const d = document.getElementById("sysdetail");
+    d.style.left = "auto"; d.style.right = "10px"; d.style.top = "48px"; d.style.width = "320px"; d.style.height = "360px";
+    sysResetView(); sysSaveGeom();
+  }
+  function sysTogglePin() {
+    sysPinned = !sysPinned;
+    document.getElementById("sd-pin")?.classList.toggle("on", sysPinned);
+    try { api().set_on_top(sysPinned); } catch (_) {}
+  }
+  function sysToggleTrans() {
+    sysTransLvl = (sysTransLvl + 1) % 3;                 // 100% → 70% → 40%
+    const d = document.getElementById("sysdetail");
+    d.classList.toggle("op70", sysTransLvl === 1);
+    d.classList.toggle("op40", sysTransLvl === 2);
+    document.getElementById("sd-trans")?.classList.toggle("on", sysTransLvl !== 0);
+    sysSaveGeom();
+  }
+  function sysSaveGeom() {
+    try {
+      const d = document.getElementById("sysdetail");
+      localStorage.setItem("flow.sysmon.win", JSON.stringify({
+        left: d.style.left, right: d.style.right, top: d.style.top,
+        width: d.style.width, height: d.style.height, trans: sysTransLvl }));
+    } catch (_) {}
+  }
+  function sysLoadGeom() {       // 恢复上次的窗口位置/尺寸/透明度（不恢复置顶——避免启动就强制最前）
+    try {
+      const v = JSON.parse(localStorage.getItem("flow.sysmon.win") || "{}");
+      const d = document.getElementById("sysdetail"); if (!d) return;
+      if (v.width) d.style.width = v.width;
+      if (v.height) d.style.height = v.height;
+      if (v.left && v.left !== "auto") { d.style.left = v.left; d.style.right = "auto"; }
+      if (v.top) d.style.top = v.top;
+      if (v.trans) { sysTransLvl = v.trans % 3; d.classList.toggle("op70", sysTransLvl === 1);
+        d.classList.toggle("op40", sysTransLvl === 2); document.getElementById("sd-trans")?.classList.add("on"); }
+    } catch (_) {}
+  }
+  function wireSysWindow() {
+    if (sysWired) return;
+    const d = document.getElementById("sysdetail"), head = document.getElementById("sd-head");
+    if (!d || !head) return;
+    sysLoadGeom();                                       // 首次打开时恢复上次的位置/尺寸/透明度
+    head.addEventListener("pointerdown", sysHeadDown);
+    head.addEventListener("pointermove", sysHeadMove);
+    head.addEventListener("pointerup", sysHeadUp);
+    head.addEventListener("dblclick", sysResetGeom);
+    for (const id of ["sd-cpuchart", "sd-memchart"]) {
+      const cv = document.getElementById(id); if (!cv) continue;
+      cv.addEventListener("wheel", sysWheel, { passive: false });
+      cv.addEventListener("pointerdown", sysChartDown);
+      cv.addEventListener("pointermove", sysChartMove);
+      cv.addEventListener("pointerup", sysChartUp);
+      cv.addEventListener("dblclick", sysResetView);
+    }
+    if (window.ResizeObserver)                          // 拉伸窗口时即时重画曲线并记住尺寸（不必等下一次轮询）
+      new ResizeObserver(() => { if (sysDetailOpen) { syncDetailCanvasSize(); drawSysDetail(); sysSaveGeom(); } }).observe(d);
+    sysWired = true;
+  }
   function toggleSysMon() {
     sysDetailOpen = !sysDetailOpen;
     const d = document.getElementById("sysdetail");
-    if (d) d.classList.toggle("show", sysDetailOpen);   // 迷你窗在右上角常驻不隐藏；详情在右下角独立开合
-    if (sysDetailOpen) { syncDetailCanvasSize(); drawSysDetail(); }
+    if (d) d.classList.toggle("show", sysDetailOpen);   // 迷你窗在右上角常驻不隐藏；详情为独立浮窗，可拖动/缩放
+    if (sysDetailOpen) { wireSysWindow(); syncDetailCanvasSize(); drawSysDetail(); }
   }
 
   const self = {
-    toggleRun, dryRun, stopRun, toggleSimple, toggleSysMon,
+    toggleRun, dryRun, stopRun, toggleSimple, toggleSysMon, sysTogglePin, sysToggleTrans,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {

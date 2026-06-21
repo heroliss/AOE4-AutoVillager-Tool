@@ -352,6 +352,15 @@ class Api:
         self._dirty = bool(flag)
         return True
 
+    def set_on_top(self, flag):
+        """资源监控窗口的「置顶」开关：让整个编辑器窗口浮在最前，便于一边玩游戏一边盯资源监控。"""
+        try:
+            if self._window is not None:
+                self._window.on_top = bool(flag)
+            return True
+        except Exception:
+            return False
+
     # ==================== 运行可视化（引擎在后台线程自行全速跑，前端只轮询）====================
     @staticmethod
     def _interval_of(graph) -> float:
