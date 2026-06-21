@@ -99,6 +99,7 @@ def build_combined_graph() -> Graph:
         {"region": QUEUE_REGION, "templates": ["templates/cunmin.png"], "threshold": 0.6, "transition_guard": True})
     add("if_qvill", "control.if")
     add("sel_tc_v", "action.press_key", {"key": "h"})       # 选中所有TC
+    add("wait_tc_v", "control.delay", {"seconds": 0.05})    # ⚠按H后必须等游戏UI刷新出TC面板，再去数TC（否则面板还没出来→数到0→产0）
     add("c_per_v", "data.const_number", {"value": 3})
     add("plan_v", "math.arith", {"op": "*"})
     add("prod_v", "game.produce_count", {"cost_per_unit": 50, "cap": -1})
@@ -111,6 +112,7 @@ def build_combined_graph() -> Graph:
         {"region": QUEUE_REGION, "templates": ["templates/xiangqi.png"], "threshold": 0.6, "transition_guard": True})
     add("if_qxq", "control.if")
     add("sel_tc_x", "action.press_key", {"key": "h"})
+    add("wait_tc_x", "control.delay", {"seconds": 0.05})    # 同村民段：按H后等UI刷新再数TC
     add("c_per_x", "data.const_number", {"value": 2})
     add("plan_x", "math.arith", {"op": "*"})
     add("prod_x", "game.produce_count", {"cost_per_unit": 80, "cap": -1})
@@ -163,10 +165,10 @@ def build_combined_graph() -> Graph:
                      "pop", "slots", "food", "gold", "tc",
                      "lock", "block_begin", "save_sel", "relmod1"]},
         {"title": "村民段", "color": "#3a6ea5",
-         "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v",
+         "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v", "wait_tc_v",
                      "c_per_v", "plan_v", "prod_v", "queue_v"]},
         {"title": "乡骑段（金朝）", "color": "#8a5a9a",
-         "members": ["sw_xq", "if_sw_xq", "q_xq", "if_qxq", "sel_tc_x",
+         "members": ["sw_xq", "if_sw_xq", "q_xq", "if_qxq", "sel_tc_x", "wait_tc_x",
                      "c_per_x", "plan_x", "prod_x", "queue_x"]},
         {"title": "商队段（市场）", "color": "#a5793a",
          "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market",
@@ -214,7 +216,8 @@ def build_combined_graph() -> Graph:
         "if_sw_vill": "村民开关：开→进入村民段；关→直接跳到乡骑段。",
         "q_vill": "检测生产队列里是否已经有村民（避免重复排队）。",
         "if_qvill": "队列已有村民则跳过本段。",
-        "sel_tc_v": "按 H 选中所有城镇中心。",
+        "sel_tc_v": "按 H 选中所有城镇中心。⚠必须在游戏里把“选所有TC”绑定到 H。",
+        "wait_tc_v": "等一小会（默认0.05秒）让游戏UI刷新出TC面板，再去数TC——否则面板还没出来就数，会数到0、当帧不生产。凡是“按键/点击后紧接着做图像识别”都要留这种刷新等待。",
         "c_per_v": "每个城镇中心一次排几个村民。",
         "plan_v": "计划数 = 每TC数量 × TC个数。",
         "prod_v": "实际产量 = min(计划, 人口空位, 食物÷单价)。",
@@ -224,6 +227,7 @@ def build_combined_graph() -> Graph:
         "q_xq": "检测队列里是否已有乡骑。",
         "if_qxq": "队列已有乡骑则跳过本段。",
         "sel_tc_x": "按 H 选中所有城镇中心。",
+        "wait_tc_x": "同村民段：按H后等UI刷新出TC面板再数TC（避免数到0）。",
         "c_per_x": "每个城镇中心一次排几个乡骑。",
         "plan_x": "计划数 = 每TC数量 × TC个数。",
         "prod_x": "实际产量 = min(计划, 人口空位, 黄金÷单价)。",
@@ -278,7 +282,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_sw_vill", "false", "if_sw_xq", "in")
     g.connect_exec("if_qvill", "false", "sel_tc_v", "in")   # 队列没有村民才生产
     g.connect_exec("if_qvill", "true", "if_sw_xq", "in")
-    g.connect_exec("sel_tc_v", "out", "queue_v", "in")
+    g.connect_exec("sel_tc_v", "out", "wait_tc_v", "in")    # 按H -> 等UI刷新 -> 数TC并排队
+    g.connect_exec("wait_tc_v", "out", "queue_v", "in")
     g.connect_exec("queue_v", "out", "if_sw_xq", "in")   # 出完村民 -> 进乡骑段（最后统一恢复选择，不按 ESC）
 
     # 乡骑段
@@ -286,7 +291,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_sw_xq", "false", "if_sw_cart", "in")
     g.connect_exec("if_qxq", "false", "sel_tc_x", "in")
     g.connect_exec("if_qxq", "true", "if_sw_cart", "in")
-    g.connect_exec("sel_tc_x", "out", "queue_x", "in")
+    g.connect_exec("sel_tc_x", "out", "wait_tc_x", "in")
+    g.connect_exec("wait_tc_x", "out", "queue_x", "in")
     g.connect_exec("queue_x", "out", "if_sw_cart", "in")
 
     # 商队段

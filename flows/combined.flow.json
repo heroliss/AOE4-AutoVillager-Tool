@@ -103,6 +103,7 @@
         "q_vill",
         "if_qvill",
         "sel_tc_v",
+        "wait_tc_v",
         "c_per_v",
         "plan_v",
         "prod_v",
@@ -118,6 +119,7 @@
         "q_xq",
         "if_qxq",
         "sel_tc_x",
+        "wait_tc_x",
         "c_per_x",
         "plan_x",
         "prod_x",
@@ -335,7 +337,7 @@
       "type": "sense.ocr_number",
       "pos": [
         4533.5,
-        822.0
+        584.0
       ],
       "params": {
         "region": [
@@ -355,7 +357,7 @@
       "type": "sense.ocr_number",
       "pos": [
         4533.5,
-        1178.0
+        228.0
       ],
       "params": {
         "region": [
@@ -375,7 +377,7 @@
       "type": "game.tc_count",
       "pos": [
         4516.0,
-        228.0
+        940.0
       ],
       "params": {
         "icon_region": [
@@ -409,7 +411,7 @@
       "id": "c_one",
       "type": "data.const_number",
       "pos": [
-        7802.5,
+        8456.5,
         1016.0
       ],
       "params": {
@@ -605,7 +607,7 @@
       "id": "if_qvill",
       "type": "control.if",
       "pos": [
-        5334.5,
+        5326.0,
         40.0
       ],
       "params": {},
@@ -615,7 +617,7 @@
       "id": "sel_tc_v",
       "type": "action.press_key",
       "pos": [
-        5635.0,
+        5601.0,
         40.0
       ],
       "params": {
@@ -623,14 +625,26 @@
         "modifiers": "",
         "repeat": 1
       },
-      "note": "按 H 选中所有城镇中心。"
+      "note": "按 H 选中所有城镇中心。⚠必须在游戏里把“选所有TC”绑定到 H。"
+    },
+    {
+      "id": "wait_tc_v",
+      "type": "control.delay",
+      "pos": [
+        5987.5,
+        40.0
+      ],
+      "params": {
+        "seconds": 0.05
+      },
+      "note": "等一小会（默认0.05秒）让游戏UI刷新出TC面板，再去数TC——否则面板还没出来就数，会数到0、当帧不生产。凡是“按键/点击后紧接着做图像识别”都要留这种刷新等待。"
     },
     {
       "id": "c_per_v",
       "type": "data.const_number",
       "pos": [
-        4946.5,
-        852.0
+        5291.0,
+        216.0
       ],
       "params": {
         "value": 3
@@ -641,8 +655,8 @@
       "id": "plan_v",
       "type": "math.arith",
       "pos": [
-        5291.0,
-        216.0
+        5609.5,
+        360.0
       ],
       "params": {
         "op": "*"
@@ -653,8 +667,8 @@
       "id": "prod_v",
       "type": "game.produce_count",
       "pos": [
-        5618.0,
-        328.0
+        5945.0,
+        308.0
       ],
       "params": {
         "cost_per_unit": 50,
@@ -666,7 +680,7 @@
       "id": "queue_v",
       "type": "action.press_key",
       "pos": [
-        5996.0,
+        6323.0,
         40.0
       ],
       "params": {
@@ -680,7 +694,7 @@
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
-        6374.5,
+        6701.5,
         232.0
       ],
       "params": {
@@ -692,7 +706,7 @@
       "id": "if_sw_xq",
       "type": "control.if",
       "pos": [
-        6409.5,
+        6736.5,
         40.0
       ],
       "params": {},
@@ -702,7 +716,7 @@
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
-        6340.0,
+        6667.0,
         412.0
       ],
       "params": {
@@ -724,7 +738,7 @@
       "id": "if_qxq",
       "type": "control.if",
       "pos": [
-        6762.5,
+        7081.0,
         40.0
       ],
       "params": {},
@@ -734,7 +748,7 @@
       "id": "sel_tc_x",
       "type": "action.press_key",
       "pos": [
-        7063.0,
+        7356.0,
         40.0
       ],
       "params": {
@@ -745,11 +759,23 @@
       "note": "按 H 选中所有城镇中心。"
     },
     {
+      "id": "wait_tc_x",
+      "type": "control.delay",
+      "pos": [
+        7742.5,
+        40.0
+      ],
+      "params": {
+        "seconds": 0.05
+      },
+      "note": "同村民段：按H后等UI刷新出TC面板再数TC（避免数到0）。"
+    },
+    {
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
-        6374.5,
-        836.0
+        7046.0,
+        216.0
       ],
       "params": {
         "value": 2
@@ -760,8 +786,8 @@
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
-        6719.0,
-        216.0
+        7364.5,
+        328.0
       ],
       "params": {
         "op": "*"
@@ -772,8 +798,8 @@
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
-        7046.0,
-        328.0
+        7700.0,
+        244.0
       ],
       "params": {
         "cost_per_unit": 80,
@@ -785,7 +811,7 @@
       "id": "queue_x",
       "type": "action.press_key",
       "pos": [
-        7424.0,
+        8078.0,
         40.0
       ],
       "params": {
@@ -799,7 +825,7 @@
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
-        7802.5,
+        8456.5,
         232.0
       ],
       "params": {
@@ -811,7 +837,7 @@
       "id": "if_sw_cart",
       "type": "control.if",
       "pos": [
-        7837.5,
+        8491.5,
         40.0
       ],
       "params": {},
@@ -821,7 +847,7 @@
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
-        7768.0,
+        8422.0,
         412.0
       ],
       "params": {
@@ -843,7 +869,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        8190.5,
+        8844.5,
         40.0
       ],
       "params": {},
@@ -853,7 +879,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        8491.0,
+        9145.0,
         40.0
       ],
       "params": {
@@ -867,7 +893,7 @@
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        7802.5,
+        8456.5,
         836.0
       ],
       "params": {
@@ -879,7 +905,7 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        8147.0,
+        8801.0,
         216.0
       ],
       "params": {
@@ -891,7 +917,7 @@
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        8474.0,
+        9128.0,
         328.0
       ],
       "params": {
@@ -904,7 +930,7 @@
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        8852.0,
+        9506.0,
         40.0
       ],
       "params": {
@@ -918,7 +944,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        9196.0,
+        9850.0,
         40.0
       ],
       "params": {
@@ -932,7 +958,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        9540.0,
+        10194.0,
         40.0
       ],
       "params": {
@@ -946,7 +972,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        9884.0,
+        10538.0,
         40.0
       ],
       "params": {},
@@ -956,7 +982,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        10124.0,
+        10778.0,
         40.0
       ],
       "params": {},
@@ -966,7 +992,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        10364.0,
+        11018.0,
         40.0
       ],
       "params": {
@@ -978,7 +1004,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        10657.0,
+        11311.0,
         40.0
       ],
       "params": {},
@@ -1133,6 +1159,12 @@
     [
       "sel_tc_v",
       "out",
+      "wait_tc_v",
+      "in"
+    ],
+    [
+      "wait_tc_v",
+      "out",
       "queue_v",
       "in"
     ],
@@ -1168,6 +1200,12 @@
     ],
     [
       "sel_tc_x",
+      "out",
+      "wait_tc_x",
+      "in"
+    ],
+    [
+      "wait_tc_x",
       "out",
       "queue_x",
       "in"
