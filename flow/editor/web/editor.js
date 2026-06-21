@@ -1881,9 +1881,8 @@ const ED = (function () {
       return runSession;
     } catch (e) { showError("启动运行失败：" + (e && (e.stack || e.message) || e)); return false; }
   }
-  // 引擎在 Python 后台线程里按流程「每帧触发」的间隔【自行全速跑】；前端只以固定节奏轮询取最近一帧，
+  // 引擎在 Python 后台线程里按流程「每帧触发」的间隔【自行全速跑】；前端只轮询取最近一帧，
   // 与引擎执行解耦——UI 再慢/暂停也不会拖慢底层逻辑的执行速度。
-  const POLL_MS = 80;
   // 这一轮“为什么没动作”：停在某个判断分支＝被它拦下。原因优先用作者写在节点上的描述（如“不在游戏中”
   // “修饰键被按下”），否则退而用“接到分支条件的那个检测节点”的标题，保持一句话、简短直白。
   function branchStopReason(term) {
@@ -1914,6 +1913,7 @@ const ED = (function () {
   function applyPoll(r) {
     if (!r) return;
     const t = r.trace;
+    if (t && t.tick === _lastTick && !(r.logs && r.logs.length) && !r.bp_hit) return;  // 帧未推进、无新日志/断点 → 跳过，免去高频轮询下的无谓重绘与集合重建
     if (t) {
       runPathArr = t.path || [];
       runPath = new Set(runPathArr);
@@ -1938,7 +1938,9 @@ const ED = (function () {
     }
     if (canvas) canvas.setDirty(true, false);      // 背景(网格/分组)不随帧变 → 只刷前景，省一半重绘
   }
-  // 轮询循环：与引擎节奏【解耦】，固定 ~POLL_MS 采样一次最近帧。run_poll 极轻量、不触发任何引擎计算。
+  // 轮询循环：用 requestAnimationFrame 驱动——自动贴合显示器刷新率（这里≈120Hz），取完一帧再约下一帧，
+  // 既不堆叠/超采样，也尽量让画面贴近刷新率上限；窗口最小化时 rAF 自动暂停省 CPU（引擎仍在后台线程全速跑，
+  // _pending_logs 有上限不会堆积）。run_poll 极轻量、只读最近快照、不触发任何引擎计算，故再快也不影响底层执行速度。
   function startPoll() {
     if (pollTimer) return;
     const tick = async () => {
@@ -1946,11 +1948,11 @@ const ED = (function () {
       let r = null;
       try { r = await api().run_poll(); } catch (e) {}
       if (r) applyPoll(r);
-      if (runSession && running) pollTimer = setTimeout(tick, POLL_MS); else pollTimer = null;
+      if (runSession && running) pollTimer = requestAnimationFrame(tick); else pollTimer = null;
     };
-    pollTimer = setTimeout(tick, 0);
+    pollTimer = requestAnimationFrame(tick);
   }
-  function stopPoll() { if (pollTimer) clearTimeout(pollTimer); pollTimer = null; }
+  function stopPoll() { if (pollTimer) cancelAnimationFrame(pollTimer); pollTimer = null; }
   async function startRun() {
     if (running) return;
     if (!(await ensureRunSession())) return;

@@ -443,6 +443,8 @@ class Api:
                 with self._snap_lock:        # 出 _run_lock 后再短暂占快照锁发布（轮询绝不阻塞跑帧）
                     self._latest = {"tick": tick, "path": path, "ports": ports, "data": data}
                     self._pending_logs.extend(new_logs)
+                    if len(self._pending_logs) > _RUN_LOG_CAP:   # 前端长时间不取（窗口最小化时 rAF 暂停）也不无限堆积
+                        del self._pending_logs[: len(self._pending_logs) - _RUN_LOG_CAP]
                     if hit:
                         self._bp_hit = hit
                         self._run_paused = True
