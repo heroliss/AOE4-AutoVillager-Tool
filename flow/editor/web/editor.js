@@ -3274,13 +3274,14 @@ const ED = (function () {
     window.removeEventListener("pointermove", onGroupDragMove, true);
     window.removeEventListener("pointerup", onGroupDragUp, true);
     const gd = _groupDrag; _groupDrag = null;
-    const wasAlt = !!_altDrag; _altDrag = null;   // 结束 Alt 拖拽态（恢复源组框跟随）
+    const ad = _altDrag; const wasAlt = !!_altDrag; _altDrag = null;   // 先捕获再清空 Alt 拖拽态（恢复源组框跟随）
     if (canvas) canvas.setDirty(true, true);
     if (!gd || !gd.moved) return;
     const g = groupDefs[gd.gi];
     if (g && (altKeyDown || wasAlt)) {
       // 【按住 Alt】放下才改父组：落在某个组内 → 设为其子组（最内层那个）；落在空白 → 设为顶层。否则只是移动。
-      const ti = innermostGroupAt(gd.last[0], gd.last[1], g);
+      // 用拖拽时实时算好的落点：那时祖先框已排除本组成员，不会因清空 _altDrag 后“回弹”把子组又判回原父组（=子组拖不进别的组）。
+      const ti = (ad && ad.kind === "group") ? ad.targetGi : innermostGroupAt(gd.last[0], gd.last[1], g);
       const tTitle = ti >= 0 ? (groupDefs[ti].title || "分组") : null;
       setGroupParent(g, ti >= 0 ? groupDefs[ti].id : null);
       setStatus(tTitle ? `已把「${g.title || "分组"}」嵌入「${tTitle}」` : `「${g.title || "分组"}」移到顶层`);
@@ -3332,11 +3333,13 @@ const ED = (function () {
       canvas.onNodeMoved = (node) => {
         // 仅【按住 Alt】拖放才改归属：拖到某展开组框内 → 成为其直接成员；拖到空白→移出。否则只是移动位置。
         // 与“拖组进组”一致：落点决定归属。多选则随主拖动节点一起归到同一组。
-        const wasAlt = !!_altDrag; _altDrag = null;   // 结束 Alt 拖拽态
+        const ad = _altDrag; const wasAlt = !!_altDrag; _altDrag = null;   // 先捕获再清空 Alt 拖拽态
         if (node && !simpleMode && (altKeyDown || wasAlt)) {
           const sel = Object.values((canvas && canvas.selected_nodes) || {});
           const moved = (sel.length > 1 && sel.includes(node)) ? sel : [node];
-          const ti = nodeDropGroupIndex(node);   // 以主拖动节点落点为准
+          // 用拖拽过程中【实时算好】的落点（那时 groupBox 已排除被拖成员，源/祖先框不会回弹把它“吸回”）；
+          // 不要在清空 _altDrag 后再 nodeDropGroupIndex——那样源组框已恢复跟随、会把刚拖出的节点又判回源组（=拖不出去）。
+          const ti = (ad && ad.kind === "node") ? ad.targetGi : nodeDropGroupIndex(node);
           if (!moved.every((nd) => nodeGroupIndex(nd._id) === ti)) {
             setNodesDirectGroup(moved.map((n) => n._id), ti >= 0 ? ti : null);   // 内含 refreshGroups（已计快照）
             return;
