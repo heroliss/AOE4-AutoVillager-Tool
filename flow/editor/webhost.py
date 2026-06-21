@@ -353,10 +353,38 @@ class Api:
         return True
 
     def set_on_top(self, flag):
-        """资源监控窗口的「置顶」开关：让整个编辑器窗口浮在最前，便于一边玩游戏一边盯资源监控。"""
+        """资源监控窗口的「置顶」开关：让整个编辑器窗口浮在最前，便于一边玩游戏一边盯资源监控。
+
+        ⚠ pywebview 的 set_on_top 直接写 WinForms `Form.TopMost` 且【不切回 UI 线程】（不像它的
+        show/resize/set_title 那样判 InvokeRequired+Invoke）。而 js_api 处理器跑在【工作线程】上
+        （pywebview 每次调用新开线程），跨线程改 .NET 控件属性会触发窗口句柄重建、与 WebView2 的
+        消息循环死锁——表现就是「点一下置顶就卡死」。故这里取原生 Form，用 BeginInvoke 把改动
+        异步投递到 UI 线程（立即返回、不阻塞），从根上避开跨线程。"""
+        flag = bool(flag)
         try:
-            if self._window is not None:
-                self._window.on_top = bool(flag)
+            w = self._window
+            if w is None:
+                return False
+            native = getattr(w, "native", None)
+            if native is not None and hasattr(native, "InvokeRequired"):   # WinForms 后端
+                from System import Action
+
+                def _apply():
+                    try:
+                        native.TopMost = flag
+                    except Exception:
+                        pass
+                if native.InvokeRequired:
+                    native.BeginInvoke(Action(_apply))   # 投递到 UI 线程异步执行，不在工作线程上动控件
+                else:
+                    _apply()
+                try:
+                    w._Window__on_top = flag             # 同步 pywebview 内部状态（best-effort）
+                except Exception:
+                    pass
+                return True
+            # 兜底：非 WinForms 后端（自有线程模型）
+            w.on_top = flag
             return True
         except Exception:
             return False
