@@ -24,6 +24,9 @@ const ED = (function () {
   // collapsed=true 时该组折叠成一个紧凑“子图节点”：隐藏成员、把跨边界连线汇成箱体输入/输出端口（见“可折叠子图”一节）。
   let groupDefs = [];
   let foldHidden = new Set();   // 当前被折叠组隐藏的成员 ourId（仅影响显示/命中；collect 仍输出完整扁平图供引擎用）
+  // Alt 拖拽态：{kind:'node'|'group', detached:Set(ourId 被拖出的成员), keepIds:Set(不排除的组 id), targetGi:将落入的组下标|-1}。
+  // 作用：拖拽期间把被拖成员从【源组/祖先】的包裹框里“摘出”(groupBox 跳过它们)，使父框不跟随、能拖出去；并高亮落点组。
+  let _altDrag = null;
   let groupDlgRender = null;   // 分组弹窗打开时的重绘函数（撤销/重做后用于刷新弹窗）
   const GROUP_COLORS = ["#3a6ea5", "#5a9367", "#a5793a", "#8a5a9a", "#b05a5a", "#4a8a8a"];
   // —— 试运行（干跑）可视化状态 ——
@@ -165,6 +168,18 @@ const ED = (function () {
           const cv = this.canvas;
           if (!cv) return ret;
           if (this.dragging_canvas) { cv.style.cursor = "grabbing"; return ret; }   // 正在平移整个画布 → 抓握
+          if (_groupDrag) { cv.style.cursor = altKeyDown ? "copy" : "crosshair"; return ret; }   // 拖整组中：Alt=拖进/出组(copy)，否则移动(十字)
+          if (this.node_dragged && !simpleMode) {     // 拖动节点中：按住 Alt 才是“拖去/拖出分组”，并实时摘出+高亮落点
+            if (altKeyDown) {
+              const dn = this.node_dragged;
+              const sel = Object.values(this.selected_nodes || {});
+              const nodes = (sel.length > 1 && sel.includes(dn)) ? sel : [dn];
+              _altDrag = { kind: "node", detached: new Set(nodes.map((n) => n._id)), keepIds: new Set(), targetGi: -1 };
+              _altDrag.targetGi = nodeDropGroupIndex(dn);   // groupBox 此刻已排除 detached → 不会误判回源组
+              cv.style.cursor = "copy"; this.setDirty(true, true); return ret;   // 重绘背景层（分组框在背景）
+            }
+            if (_altDrag && _altDrag.kind === "node") { _altDrag = null; this.setDirty(true, true); }   // 松开 Alt：源组恢复跟随
+          }
           if (this.node_dragged || this.resizing_node || this.connecting_node ||
               this.dragging_rectangle || this.selected_group) return ret;
           if (cv.style.cursor === "se-resize") return ret;            // 缩放角保持
@@ -584,6 +599,7 @@ const ED = (function () {
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
     for (const mid of groupAllMembers(g)) {
       if (visibleOnly && foldHidden.has(mid)) continue;
+      if (_altDrag && !_altDrag.keepIds.has(g.id) && _altDrag.detached.has(mid)) continue;   // Alt 拖拽中：被拖出的成员不计入源组/祖先框（父框不跟随，可拖出）
       const n = nodeByOurId(mid);
       if (!n) continue;
       any = true;
@@ -614,6 +630,11 @@ const ED = (function () {
     return out;
   }
   function isDescendantGroup(a, b) { return groupAncestors(a).includes(b); }   // a 在 b 的子树内
+  function groupSubtreeIds(g) {   // g 及其所有后代组的 id 集合（Alt 拖组时，这些组的框保留成员=随组一起移动，不被“摘出”）
+    const ids = new Set([g.id]);
+    for (const x of groupDefs) if (isDescendantGroup(x, g)) ids.add(x.id);
+    return ids;
+  }
   function groupDepth(g) { return groupAncestors(g).length; }                  // 嵌套深度（顶层=0）
   function groupPathTitle(g) {        // 显示用「路径名」：祖先→自身的标题以 / 连接（如 A/B），直观看出嵌套层级
     const chain = groupAncestors(g).reverse(); chain.push(g);
@@ -1037,6 +1058,15 @@ const ED = (function () {
     }
     ctx.restore();
   }
+  // Alt 拖拽时，给「将落入的目标组」描一圈金色光晕（松手前的落点提示）。
+  function drawDropTargetHL(ctx, x, y, w, h) {
+    ctx.save();
+    roundRect(ctx, x - 3, y - 3, w + 6, h + 6, 11);
+    ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 3;
+    ctx.shadowColor = "#ffb300"; ctx.shadowBlur = 14;
+    ctx.stroke();
+    ctx.restore();
+  }
   function drawGroups(ctx) {
     drawExtraExecLinks(ctx);     // 先补画 LiteGraph 漏掉的“汇入”执行连线（与分组无关，总要画）
     syncFoldWidgets();           // 折叠节点的可编辑参数 DOM 浮层：跟随平移/缩放，几何变则重建
@@ -1049,7 +1079,7 @@ const ED = (function () {
       if (g.collapsed) {         // 折叠态：画紧凑“子图节点”箱体（仅顶层折叠组；嵌套在折叠父组里的子组不单独画）
         if (isInsideCollapsed(g)) continue;
         const sbox = subgBox(g, ctx);
-        if (sbox) drawSubgBox(ctx, g, i, sbox);
+        if (sbox) { drawSubgBox(ctx, g, i, sbox); if (_altDrag && _altDrag.targetGi === i) drawDropTargetHL(ctx, sbox.x, sbox.y, sbox.w, sbox.h); }
         continue;
       }
       // 展开态：成员若已全部被折叠父组隐藏，则不画其包裹框（否则框会落在父箱体之上）。
@@ -1060,6 +1090,8 @@ const ED = (function () {
       roundRect(ctx, x, y, w, h, 10);
       ctx.fillStyle = col + "22"; ctx.fill();          // 半透明填充
       ctx.strokeStyle = col + "cc"; ctx.lineWidth = 2; ctx.stroke();
+      if (_altDrag && _altDrag.targetGi === i) drawDropTargetHL(ctx, x, y, w, h);   // Alt 拖拽落点提示
+
       // 组名做成“标签页”贴在框的左上沿之上——不会和框内第一个节点重叠
       ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
       ctx.textBaseline = "alphabetic";
@@ -3228,14 +3260,25 @@ const ED = (function () {
       _groupDrag.last = off; _groupDrag.moved = true;
       if (canvas) canvas.setDirty(true, true);
     }
+    // Alt 拖组：把整组从【祖先】框里摘出（自身/子组保留＝随组移动），并高亮将落入的目标组。
+    if (e.altKey) {
+      const g = groupDefs[_groupDrag.gi];
+      if (g) {
+        _altDrag = { kind: "group", detached: new Set(groupAllMembers(g)), keepIds: groupSubtreeIds(g), targetGi: -1 };
+        _altDrag.targetGi = innermostGroupAt(off[0], off[1], g);
+        if (canvas) canvas.setDirty(true, true);
+      }
+    } else if (_altDrag && _altDrag.kind === "group") { _altDrag = null; if (canvas) canvas.setDirty(true, true); }
   }
   function onGroupDragUp() {
     window.removeEventListener("pointermove", onGroupDragMove, true);
     window.removeEventListener("pointerup", onGroupDragUp, true);
     const gd = _groupDrag; _groupDrag = null;
+    const wasAlt = !!_altDrag; _altDrag = null;   // 结束 Alt 拖拽态（恢复源组框跟随）
+    if (canvas) canvas.setDirty(true, true);
     if (!gd || !gd.moved) return;
     const g = groupDefs[gd.gi];
-    if (g && altKeyDown) {
+    if (g && (altKeyDown || wasAlt)) {
       // 【按住 Alt】放下才改父组：落在某个组内 → 设为其子组（最内层那个）；落在空白 → 设为顶层。否则只是移动。
       const ti = innermostGroupAt(gd.last[0], gd.last[1], g);
       const tTitle = ti >= 0 ? (groupDefs[ti].title || "分组") : null;
@@ -3289,7 +3332,8 @@ const ED = (function () {
       canvas.onNodeMoved = (node) => {
         // 仅【按住 Alt】拖放才改归属：拖到某展开组框内 → 成为其直接成员；拖到空白→移出。否则只是移动位置。
         // 与“拖组进组”一致：落点决定归属。多选则随主拖动节点一起归到同一组。
-        if (node && !simpleMode && altKeyDown) {
+        const wasAlt = !!_altDrag; _altDrag = null;   // 结束 Alt 拖拽态
+        if (node && !simpleMode && (altKeyDown || wasAlt)) {
           const sel = Object.values((canvas && canvas.selected_nodes) || {});
           const moved = (sel.length > 1 && sel.includes(node)) ? sel : [node];
           const ti = nodeDropGroupIndex(node);   // 以主拖动节点落点为准
