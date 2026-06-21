@@ -68,8 +68,7 @@ def build_single_type(cfg: dict) -> Graph:
     add("if_trans", "control.if")
     add("if_vill", "control.if")
 
-    # —— 资源识别 ——
-    add("prefetch", "control.prefetch_full")
+    # —— 资源识别（区域截图按需进行、逐帧自动缓存共享，无需整屏预取）——
     add("pop", "sense.ocr_number", {"region": cfg["pop_region"], "regex": r"(\d+)[/\\|](\d+)"})
     add("food", "sense.ocr_number",
         {"region": cfg["resource_region"], "regex": cfg["resource_regex"],
@@ -119,8 +118,7 @@ def build_single_type(cfg: dict) -> Graph:
     g.connect_exec("if_win", "true", "if_blocked", "in")
     g.connect_exec("if_blocked", "false", "if_trans", "in")
     g.connect_exec("if_trans", "false", "if_vill", "in")
-    g.connect_exec("if_vill", "false", "prefetch", "in")
-    g.connect_exec("prefetch", "out", "if_popok", "in")
+    g.connect_exec("if_vill", "false", "if_popok", "in")
     g.connect_exec("if_popok", "true", "if_foodok", "in")
     g.connect_exec("if_foodok", "true", "if_slots", "in")
     g.connect_exec("if_slots", "true", "lock", "in")

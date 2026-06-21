@@ -17,7 +17,14 @@ from ..core import ControlNode, DataNode, ParamSpec, DataType, exec_in, exec_out
 
 @register
 class PrefetchFull(ControlNode):
-    """整屏截图并缓存一次；之后下游所有"截图(区域)"直接切片复用，避免多次截图。"""
+    """整屏截图并缓存一次；之后下游所有"截图(区域)"直接切片复用。
+
+    ⚠ 一般用不到，多数情况下反而更慢——保留它只为兼容老流程/特殊场景。原因：在 Windows 下
+    每次截屏（无论大小）都要和桌面合成器(DWM)同步一次，约 8ms 的固定开销；整屏截图还要额外
+    传输/拷贝整块位图（2560×1440 实测约 62ms）。而本工具识别的区域都很小（合计约占屏幕 1%），
+    每个区域单独截、按帧自动缓存共享（见 ExecutionContext.capture_region），只有 2~3 次小截图，
+    远比整屏一次便宜。只有当一帧要读「很多」个不同区域（多到累计截图次数 >整屏一次）时，
+    预取整屏才划算。"""
     type_id = "control.prefetch_full"
     category = "控制"
     title = "整屏预取"

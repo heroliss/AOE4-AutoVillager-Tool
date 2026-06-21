@@ -2,7 +2,7 @@
 统一生产流程：在同一张图里、同一帧内依次生产【村民 / 乡骑 / 商队】，每段都有独立开关。
 
 设计要点（回答"能否同图同时跑、阶段复用"）：
-- 共享前段只跑一次：修饰键/窗口/遮挡/渐变判断 -> 整屏预取 -> 取锁 -> 屏蔽 -> 存编组。
+- 共享前段只跑一次：修饰键/窗口/遮挡/渐变判断 -> 取锁 -> 屏蔽 -> 存编组。
 - 之后三段生产串成接力，每段：[开关?] -> [队列已有该单位?] -> 选建筑 -> 产能计算 -> 排队；
   段内任一"跳过"都接到【下一段】（而非结束本帧），所以关掉/跳过某段不影响其它段。
 - 取锁/屏蔽/存编组/收尾对整批生产只做一次（一次输入屏蔽窗口内做完所有生产）。
@@ -33,7 +33,8 @@ TC = {
 def build_combined_graph() -> Graph:
     g = Graph(name="统一生产(村民/乡骑/商队)",
               description="同一帧内依次生产 村民/乡骑/商队，每段由一个开关节点单独启停（默认只开村民）。\n"
-                          "前段做一次共享判断（暂停/窗口/遮挡）与整屏预取，三段复用人口/资源/TC 等识别结果。\n"
+                          "前段做一次共享判断（暂停/窗口/遮挡）；三段复用人口/资源/TC 等识别结果"
+                          "（每个区域每帧只截一次、自动缓存共享，无需整屏预取）。\n"
                           "区域/模板/按键/成本均为占位默认值，请按你的分辨率与实际界面在节点上调整。")
 
     def add(nid, type_id, params=None):
@@ -53,7 +54,6 @@ def build_combined_graph() -> Graph:
     add("occ", "game.occlusion", {"region": BLOCKED_REGION, "template": "templates/blocked.png"})
     add("if_blocked", "control.if")
     add("if_trans", "control.if")
-    add("prefetch", "control.prefetch_full")
 
     # 共享传感器（数据，按需且逐帧记忆化）
     add("pop", "sense.ocr_number", {"region": POP_REGION, "regex": r"(\d+)[/\\|](\d+)"})
@@ -157,7 +157,7 @@ def build_combined_graph() -> Graph:
         # 放一起对齐、视觉一致（食物虽只村民用，但与其它资源对齐更清楚）。
         {"title": "共享前段（每帧一次）", "color": "#4a8a8a",
          "members": ["tick", "mod", "if_mod", "win", "and_win", "if_win", "occ", "if_blocked", "if_trans",
-                     "prefetch", "pop", "slots", "food", "gold", "tc",
+                     "pop", "slots", "food", "gold", "tc",
                      "lock", "block_begin", "save_sel", "relmod1"]},
         {"title": "村民段", "color": "#3a6ea5",
          "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v",
@@ -187,7 +187,6 @@ def build_combined_graph() -> Graph:
         "occ": "三态遮挡检测：生产相关区域是否被 UI 盖住 / 正在渐变。",
         "if_blocked": "界面被遮挡：本帧结束（这时识别/点击都不可靠）。",
         "if_trans": "界面渐变中：UI 渐入渐出动画时本帧结束，避免误判。",
-        "prefetch": "整屏截图一次并缓存，后面所有识别都复用它，省去多次截图。",
         "pop": "识别人口「当前/上限」：数值=当前，数值2=上限。",
         "slots": "人口空位 = 上限 - 当前，作为可生产数量的上限之一。",
         "food": "识别当前食物存量（约束村民产量）。",
@@ -252,10 +251,10 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_mod", "false", "if_win", "in")       # 没按修饰键才继续
     g.connect_exec("if_win", "true", "if_blocked", "in")    # 在游戏中才继续
     g.connect_exec("if_blocked", "false", "if_trans", "in") # 未遮挡才继续
-    g.connect_exec("if_trans", "false", "prefetch", "in")   # 非渐变才继续
+    # 非渐变才继续 -> 直接进入生产门控（区域截图按需进行、逐帧自动缓存，无需整屏预取）
+    g.connect_exec("if_trans", "false", "pre_sw_vill", "in")
 
     # 生产门控：逐段「开关→队列空→产能>0」短路；任一段满足才进操作区(lock)，全不满足＝本帧结束
-    g.connect_exec("prefetch", "out", "pre_sw_vill", "in")
     g.connect_exec("pre_sw_vill", "true", "pre_q_vill", "in")
     g.connect_exec("pre_sw_vill", "false", "pre_sw_xq", "in")
     g.connect_exec("pre_q_vill", "true", "pre_sw_xq", "in")     # 已在造 → 跳过本段
