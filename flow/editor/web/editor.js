@@ -600,8 +600,16 @@ const ED = (function () {
     return out;
   }
   function subgPortLabel(node, slot, isInput) {
-    if (slot.type === "exec") return node.title || (isInput ? "入口" : "出口");   // exec 端口用成员节点名更达意
-    return slot.label || slot.name || (isInput ? "入" : "出");                    // 数据端口用槽位名（如“食物”）
+    const title = (node.title || "").trim();
+    const sn = slot.label || slot.name || "";
+    if (slot.type === "exec") {
+      // exec 端口：成员节点名最达意；槽位若具名（真/假/分支…）再补上，避免多个 exec 口同名
+      const tag = (sn && sn !== "in" && sn !== "out") ? "·" + sn : "";
+      return (title || (isInput ? "入口" : "出口")) + tag;
+    }
+    // 数据端口：用“节点名·槽位”——很多节点的输出都叫“数值/结果/数量”，只写槽位名根本看不出来自哪个内部节点
+    const slotName = sn || (isInput ? "入" : "出");
+    return title ? title + "·" + slotName : slotName;
   }
   // 某折叠组的边界端口：外部→组内=输入端口；组内→外部=输出端口。按 (成员,槽位) 去重，每个唯一槽位一个端口。
   // 注意：link.origin_id/target_id 是 LiteGraph 的【数字 id】，分组成员存的是【ourId(_id)】，必须经 getNodeById 转换后再比对/拼 key。
@@ -653,9 +661,12 @@ const ED = (function () {
     let li = 0, lo = 0;
     for (const p of ports.ins) li = Math.max(li, ctx.measureText(p.label).width);
     for (const p of ports.outs) lo = Math.max(lo, ctx.measureText(p.label).width);
-    const w = Math.max(SUBG.MINW, titleW + 24, li + lo + 34, fparams.length ? SUBG.PARAM_MINW : 0);
-    const h = SUBG.TITLE_H + rows * SUBG.PORT_GAP + (fparams.length ? fparams.length * SUBG.PARAM_ROW_H + 12 : SUBG.PAD);
-    return { x: bb[0], y: bb[1], w, h, ports, fparams };
+    // 宽度：取“标题宽 / 左右端口标签不重叠 / 折叠参数最小宽”的最大值。左右标签各内缩 9px，中间再留 22px 空隙（共 40）。
+    const w = Math.max(SUBG.MINW, titleW + 16, li + lo + 40, fparams.length ? SUBG.PARAM_MINW : 0);
+    // paramsTop = 端口区下沿（折叠参数从这里起）。箱体高度、分隔线、DOM 参数浮层三处共用，确保对齐一致。
+    const paramsTop = SUBG.TITLE_H + rows * SUBG.PORT_GAP + SUBG.PAD;
+    const h = paramsTop + (fparams.length ? fparams.length * SUBG.PARAM_ROW_H + 8 : 0);
+    return { x: bb[0], y: bb[1], w, h, ports, fparams, paramsTop };
   }
   function subgPortPos(box, side, idx) {
     const y = box.y + SUBG.TITLE_H + SUBG.PORT_GAP * (idx + 0.5);
@@ -663,15 +674,16 @@ const ED = (function () {
   }
   // 一次性算出本帧折叠所需：每个组的箱体 + 边界端口 key→屏幕坐标（供连线改接）。图很小，按需重算即可。
   function foldInfo() {
-    const ctx = _measCtx(), boxes = [], portPos = new Map();
-    if (!ctx) return { boxes, portPos };
+    const ctx = _measCtx(), boxes = [], portPos = new Map(), memberGroup = new Map();
+    if (!ctx) return { boxes, portPos, memberGroup };
     for (const { g, i } of collapsedGroupList()) {
       const box = subgBox(g, ctx); if (!box) continue;
       box.ports.ins.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "in", idx)));
       box.ports.outs.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "out", idx)));
+      for (const m of (g.members || [])) memberGroup.set(m, i);   // ourId → 折叠组下标（用于判断两端是否“同一折叠组”）
       boxes.push({ g, i, box });
     }
-    return { boxes, portPos };
+    return { boxes, portPos, memberGroup };
   }
   // 折叠态的连线绘制：跳过“内部线”，把跨边界线的隐藏端改接到箱体端口（其余正常）。复用 LiteGraph 的 renderLink。
   function drawFoldedConnections(ctx) {
@@ -684,7 +696,9 @@ const ED = (function () {
         const link = this.graph.links[input.link]; if (!link) continue;
         const start = this.graph.getNodeById(link.origin_id); if (!start) continue;
         const oH = foldHidden.has(start._id), tH = foldHidden.has(node._id);   // 用 ourId 判断隐藏，非数字 id
-        if (oH && tH) continue;   // 内部线：折叠态不画
+        // 两端都隐藏且属于【同一折叠组】→ 组内部线，折叠态不画；分属【不同折叠组】（组与组之间的线）则
+        // 两端各改接到各自箱体端口，照常画出（修复：之前只要两端都隐藏就跳过，导致折叠组之间的连线消失）。
+        if (oH && tH && fi.memberGroup.get(start._id) === fi.memberGroup.get(node._id)) continue;
         let a = oH ? fi.portPos.get(start._id + "#o#" + link.origin_slot)
                    : start.getConnectionPos(false, link.origin_slot, [0, 0]);
         let b = tH ? fi.portPos.get(node._id + "#i#" + i)
@@ -741,7 +755,7 @@ const ED = (function () {
     box.ports.outs.forEach((p, idx) => drawPort(p, subgPortPos(box, "out", idx), "out"));
     // 折叠参数区：实际的可编辑控件由 DOM 浮层（rebuildFoldWidgets）叠加在此区域；canvas 这里只画一条分隔线。
     if (box.fparams && box.fparams.length) {
-      const sy = box.y + SUBG.TITLE_H + Math.max(box.ports.ins.length, box.ports.outs.length, 1) * SUBG.PORT_GAP + 4;
+      const sy = box.y + box.paramsTop - 5;   // 端口区与折叠参数区之间的分隔线（与 subgBox.paramsTop 对齐）
       ctx.strokeStyle = col + "55"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(box.x + 8, sy); ctx.lineTo(box.x + box.w - 8, sy); ctx.stroke();
     }
@@ -800,7 +814,7 @@ const ED = (function () {
     const ctx = _measCtx();
     if (ctx) for (const { g } of collapsedGroupList()) {
       const box = subgBox(g, ctx); if (!box || !box.fparams.length) continue;
-      const y0 = box.y + SUBG.TITLE_H + Math.max(box.ports.ins.length, box.ports.outs.length, 1) * SUBG.PORT_GAP + 8;
+      const y0 = box.y + box.paramsTop;   // 与 subgBox.paramsTop / 分隔线保持一致
       box.fparams.forEach((f, k) => {
         const row = document.createElement("div");
         row.className = "fw-row";
@@ -857,7 +871,7 @@ const ED = (function () {
         const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
         if (!a || !b || !a.outputs || !a.outputs[l.origin_slot]) return;
         const oH = foldHidden.has(a._id), tH = foldHidden.has(b._id);   // 用 ourId 判断隐藏
-        if (oH && tH) return;     // 内部汇入线：折叠态不画
+        if (oH && tH && fi && fi.memberGroup.get(a._id) === fi.memberGroup.get(b._id)) return;   // 同组内部汇入线：不画；跨折叠组则改接箱体端口照画
         let pa, pb;
         try {
           pa = oH ? fi.portPos.get(a._id + "#o#" + l.origin_slot) : a.getConnectionPos(false, l.origin_slot, [0, 0]);
@@ -896,7 +910,7 @@ const ED = (function () {
       const tw = ctx.measureText(name).width;   // name 含占位的 ⊟，使标签留出按钮宽度
       roundRect(ctx, x, y - 18, tw + 18, 20, 5);
       ctx.fillStyle = col; ctx.fill();
-      ctx.fillStyle = contrastText(col);
+      ctx.fillStyle = contrastText(col); ctx.textAlign = "left";   // 显式置左：折叠箱体端口标签会把 textAlign 设成 right 且不复位，否则本组名被右对齐而整体左移错位
       ctx.fillText("⠿ " + (g.title || "分组"), x + 9, y - 4);   // 文字不含 ⊟（⊟ 改用右端明显按钮）
       const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
     });
