@@ -131,6 +131,47 @@ const ED = (function () {
       }
       return opts;
     };
+    // 鼠标光标随「左键点下去会发生什么」变化，让用户下意识知道当前操作类型（#9/#10）：
+    //   · 节点上的控件/按钮、端口(编辑模式可连线) = 可点击 → 小手(pointer)
+    //   · 节点标题/空白节点体、分组(含组名) = 可拖动 → 十字(crosshair)
+    //   · 右下角缩放角 → se-resize（LiteGraph 已设，不覆盖）
+    // 做法：包裹 processMouseMove，在它(已)按粗粒度设好光标后，用更细的命中测试微调；
+    // 拖动/连线/缩放/平移/框选/拖组进行中则交给 LiteGraph、不干预。
+    if (!LGraphCanvas.prototype.__cursorHooked) {
+      const _NWH = (LiteGraph.NODE_WIDGET_HEIGHT || 20);
+      const _hitWidget = (node, lx, ly) => {
+        const ws = node.widgets;
+        if (!ws || !ws.length) return false;
+        const W = node.size[0];
+        for (const w of ws) {
+          if (!w || w.hidden || w.last_y == null) continue;
+          if (lx >= 6 && lx <= W - 12 && ly >= w.last_y && ly <= w.last_y + _NWH) return true;
+        }
+        return false;
+      };
+      const _origPMM = LGraphCanvas.prototype.processMouseMove;
+      LGraphCanvas.prototype.processMouseMove = function (e) {
+        const ret = _origPMM.call(this, e);
+        try {
+          const cv = this.canvas;
+          if (!cv) return ret;
+          if (this.node_dragged || this.resizing_node || this.connecting_node ||
+              this.dragging_canvas || this.dragging_rectangle || this.selected_group) return ret;
+          if (cv.style.cursor === "se-resize") return ret;            // 缩放角保持
+          const x = e.canvasX, y = e.canvasY;
+          const node = this.graph && this.graph.getNodeOnPos(x, y, this.visible_nodes);
+          if (node) {
+            // 可点击区（仅编辑模式有意义：使用模式下控件/端口不响应，整节点只能拖动）
+            if (!simpleMode && node.getSlotInPosition && node.getSlotInPosition(x, y)) { cv.style.cursor = "pointer"; return ret; }
+            if (!simpleMode && _hitWidget(node, x - node.pos[0], y - node.pos[1])) { cv.style.cursor = "pointer"; return ret; }
+            return ret;                                                // 标题/节点体：维持 crosshair（可拖动）
+          }
+          if (this.graph && this.graph.getGroupOnPos && this.graph.getGroupOnPos(x, y)) { cv.style.cursor = "crosshair"; return ret; }
+        } catch (_) { }
+        return ret;
+      };
+      LGraphCanvas.prototype.__cursorHooked = true;
+    }
     // 值编辑浮框：去掉 OK 按钮，输入即"实时生效"；回车/失焦/点外部即关闭。
     LGraphCanvas.prototype.prompt = function (title, value, callback, event, multiline) {
       const that = this;
