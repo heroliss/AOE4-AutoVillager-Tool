@@ -592,6 +592,30 @@ class Api:
         except Exception:
             return False
 
+    def delete_flow(self, path=None):
+        """删除一个【我的流程】文件（仅限 user_flows 目录；内置只读流程拒绝删除）。
+        返回 {ok, reason?}。删的若是当前打开的流程，清掉 _path 与“上次流程”记录。"""
+        p = path or self._path
+        try:
+            ap = os.path.abspath(p)
+        except Exception:
+            return {"ok": False, "reason": "路径无效"}
+        if self._is_builtin(p) or not ap.startswith(USER_FLOWS_DIR + os.sep):
+            return {"ok": False, "reason": "只能删除「我的流程」（内置流程为只读）"}
+        try:
+            if os.path.isfile(ap):
+                os.remove(ap)
+            if self._path and os.path.abspath(self._path) == ap:
+                self._path = None
+                try:    # 当前流程被删 → 清掉“上次打开”记录，免得下次启动指向已删文件
+                    if os.path.exists(_STATE_FILE):
+                        os.remove(_STATE_FILE)
+                except Exception:
+                    pass
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "reason": str(e)}
+
     def open_path(self, path):
         if path and os.path.exists(path):
             self._graph = Graph.load(path)

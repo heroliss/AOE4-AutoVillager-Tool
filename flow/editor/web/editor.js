@@ -2327,6 +2327,43 @@ const ED = (function () {
     return { nodes: ns.length, execE, dataE, groups: groupDefs.length, pins: panelPins.length, cats };
   }
 
+  // 通用确认框（返回 Promise<bool>）：点窗口外/取消＝false，确定＝true。
+  function confirmBox(title, msg, okLabel) {
+    return new Promise((resolve) => {
+      document.getElementById("confirmdlg")?.remove();
+      const box = document.createElement("div");
+      box.id = "confirmdlg"; box.className = "popdlg";
+      box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(420px,92vw);" +
+        "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:170;" +
+        "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+      box.innerHTML = `<b style='color:#e6c07b'>${esc(title)}</b>` +
+        `<div style='margin-top:8px;color:#cdd3db;white-space:pre-wrap'>${esc(msg)}</div>` +
+        "<div style='margin-top:12px;text-align:right'>" +
+        `<button id='cf_ok' style='background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:4px 14px;cursor:pointer'>${esc(okLabel || "确定")}</button> ` +
+        "<button id='cf_cancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:4px 14px;cursor:pointer'>取消</button></div>";
+      document.body.appendChild(box);
+      const done = (v) => { box.remove(); resolve(v); };
+      box.querySelector("#cf_ok").onclick = () => done(true);
+      box.querySelector("#cf_cancel").onclick = () => done(false);
+    });
+  }
+  // 删除“我的流程”：确认后删文件、刷新下拉、打开列表里的第一个流程（内置只读流程不可删）。
+  async function deleteCurrentFlow() {
+    if (!flowMeta.path || flowMeta.readonly) return;
+    const nm = flowMeta.name;
+    if (!(await confirmBox("删除流程", `确定删除「${nm}」吗？\n文件会从「我的流程」中移除，且不可恢复。`, "删除"))) return;
+    try {
+      const r = await api().delete_flow(flowMeta.path);
+      if (!r || !r.ok) { showError("删除失败：" + ((r && r.reason) || "未知原因")); return; }
+      document.getElementById("flowdlg")?.remove();
+      const list = await api().list_builtin();
+      fillFlowList(list);
+      const first = (list && list[0] && list[0].path) || null;   // 优先打开列表第一个（通常是内置「统一生产」）
+      if (first) { const f = await api().open_path(first); if (f) load(f); }
+      setStatus("已删除流程：" + nm);
+    } catch (e) { showError("删除失败：" + (e && (e.stack || e.message) || e)); }
+  }
+
   // 流程信息：默认【只读】展示（名称/来源/说明/统计），点“编辑”才能改名称与说明。
   function editFlowInfo() {
     document.getElementById("flowdlg")?.remove();
@@ -2355,8 +2392,12 @@ const ED = (function () {
         `<div style='margin-top:4px;color:#cdd3db'>节点 ${s.nodes} · 连线 执行${s.execE}/数据${s.dataE} · 分组 ${s.groups} · 控制面板项 ${s.pins}</div>` +
         `<div style='margin-top:4px'><span style='color:#9aa3af'>节点构成：</span>${esc(cats)}</div></div>` +
         "<div style='margin-top:12px;text-align:right'>" +
+        ((flowMeta.path && !flowMeta.readonly)   // 只有「我的流程」才可删；内置只读流程不显示删除
+          ? `<button id='fi_del' style='${btn};background:#3a2222;color:#ffb3b3;border-color:#a33;float:left'>🗑 删除此流程</button>` : "") +
         `<button id='fi_edit' style='${btn}'>编辑名称/说明</button></div>`;
       box.querySelector("#fi_edit").onclick = () => { editing = true; renderEdit(); };
+      const del = box.querySelector("#fi_del");
+      if (del) del.onclick = () => deleteCurrentFlow();
     };
     const renderEdit = () => {
       box.innerHTML = "<b style='color:#e6c07b'>编辑流程信息</b>（仅展示，不影响运行）" +
