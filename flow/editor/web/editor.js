@@ -158,18 +158,22 @@ const ED = (function () {
         try {
           const cv = this.canvas;
           if (!cv) return ret;
+          if (this.dragging_canvas) { cv.style.cursor = "grabbing"; return ret; }   // 正在平移整个画布 → 抓握
           if (this.node_dragged || this.resizing_node || this.connecting_node ||
-              this.dragging_canvas || this.dragging_rectangle || this.selected_group) return ret;
+              this.dragging_rectangle || this.selected_group) return ret;
           if (cv.style.cursor === "se-resize") return ret;            // 缩放角保持
           const x = e.canvasX, y = e.canvasY;
           const node = this.graph && this.graph.getNodeOnPos(x, y, this.visible_nodes);
           if (node) {
-            // 可点击区（仅编辑模式有意义：使用模式下控件/端口不响应，整节点只能拖动）
-            if (!simpleMode && node.getSlotInPosition && node.getSlotInPosition(x, y)) { cv.style.cursor = "pointer"; return ret; }
-            if (!simpleMode && _hitWidget(node, x - node.pos[0], y - node.pos[1])) { cv.style.cursor = "pointer"; return ret; }
-            return ret;                                                // 标题/节点体：维持 crosshair（可拖动）
+            if (simpleMode) { cv.style.cursor = "default"; return ret; }   // 使用模式：节点只读（不可拖/连/改）
+            if (node.getSlotInPosition && node.getSlotInPosition(x, y)) { cv.style.cursor = "pointer"; return ret; }   // 端口=可点(连线)
+            if (_hitWidget(node, x - node.pos[0], y - node.pos[1])) { cv.style.cursor = "pointer"; return ret; }       // 控件=可点
+            cv.style.cursor = "crosshair"; return ret;                // 标题/节点体：可拖动 → 十字
           }
-          if (this.graph && this.graph.getGroupOnPos && this.graph.getGroupOnPos(x, y)) { cv.style.cursor = "crosshair"; return ret; }
+          if (foldIconAt(x, y) >= 0) { cv.style.cursor = "pointer"; return ret; }                     // 折叠/展开按钮 → 小手
+          if (!simpleMode && overGroupHandle(x, y)) { cv.style.cursor = "crosshair"; return ret; }    // 分组标签/箱体标题：可拖整组 → 十字(同节点)
+          if (foldedBoxAt(x, y) >= 0) { cv.style.cursor = "pointer"; return ret; }                    // 折叠箱体：可双击展开 → 小手
+          cv.style.cursor = "grab";                                   // 空白处：可平移 → 抓手
         } catch (_) { }
         return ret;
       };
@@ -598,25 +602,29 @@ const ED = (function () {
     return slot.label || slot.name || (isInput ? "入" : "出");                    // 数据端口用槽位名（如“食物”）
   }
   // 某折叠组的边界端口：外部→组内=输入端口；组内→外部=输出端口。按 (成员,槽位) 去重，每个唯一槽位一个端口。
+  // 注意：link.origin_id/target_id 是 LiteGraph 的【数字 id】，分组成员存的是【ourId(_id)】，必须经 getNodeById 转换后再比对/拼 key。
   function subgPorts(g) {
     const members = new Set(g.members || []);
     const ins = [], outs = [], seenI = new Set(), seenO = new Set();
     for (const k in (graph.links || {})) {
       const l = graph.links[k]; if (!l) continue;
-      const oIn = members.has(l.origin_id), tIn = members.has(l.target_id);
+      const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
+      if (!a || !b) continue;
+      const oIn = members.has(a._id), tIn = members.has(b._id);
       if (oIn === tIn) continue;   // 都在组内（内部线）或都在组外（无关）→ 非边界
       if (tIn) {
-        const n = graph.getNodeById(l.target_id); if (!n || !n.inputs || !n.inputs[l.target_slot]) continue;
-        const key = l.target_id + "#i#" + l.target_slot; if (seenI.has(key)) continue; seenI.add(key);
-        const slot = n.inputs[l.target_slot];
-        ins.push({ key, label: subgPortLabel(n, slot, true), type: slot.type });
+        if (!b.inputs || !b.inputs[l.target_slot]) continue;
+        const key = b._id + "#i#" + l.target_slot; if (seenI.has(key)) continue; seenI.add(key);
+        const slot = b.inputs[l.target_slot];
+        ins.push({ key, label: subgPortLabel(b, slot, true), type: slot.type, _y: b.pos[1] });
       } else {
-        const n = graph.getNodeById(l.origin_id); if (!n || !n.outputs || !n.outputs[l.origin_slot]) continue;
-        const key = l.origin_id + "#o#" + l.origin_slot; if (seenO.has(key)) continue; seenO.add(key);
-        const slot = n.outputs[l.origin_slot];
-        outs.push({ key, label: subgPortLabel(n, slot, false), type: slot.type });
+        if (!a.outputs || !a.outputs[l.origin_slot]) continue;
+        const key = a._id + "#o#" + l.origin_slot; if (seenO.has(key)) continue; seenO.add(key);
+        const slot = a.outputs[l.origin_slot];
+        outs.push({ key, label: subgPortLabel(a, slot, false), type: slot.type, _y: a.pos[1] });
       }
     }
+    ins.sort((p, q) => p._y - q._y); outs.sort((p, q) => p._y - q._y);   // 端口按成员节点上下顺序排，贴合原布局
     return { ins, outs };
   }
   // 该组被钉选（出现在控制面板）的参数：折叠箱体上列出 [{label, val}]，即“挑选出的一部分有用参数”。
@@ -639,7 +647,7 @@ const ED = (function () {
     const ports = subgPorts(g), pins = subgPinnedParams(g);
     const rows = Math.max(ports.ins.length, ports.outs.length, 1);
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
-    const titleW = ctx.measureText("◳ " + (g.title || "子图") + "  ▸").width;
+    const titleW = ctx.measureText("◳ " + (g.title || "子图")).width + GROUP_ICON_W + 14;   // 标题 + 右端展开按钮留位
     ctx.font = "12px 'Microsoft YaHei',sans-serif";
     let li = 0, lo = 0, lp = 0;
     for (const p of ports.ins) li = Math.max(li, ctx.measureText(p.label).width);
@@ -675,9 +683,9 @@ const ED = (function () {
         const input = node.inputs[i]; if (!input || input.link == null) continue;
         const link = this.graph.links[input.link]; if (!link) continue;
         const start = this.graph.getNodeById(link.origin_id); if (!start) continue;
-        const oH = foldHidden.has(link.origin_id), tH = foldHidden.has(node._id);
+        const oH = foldHidden.has(start._id), tH = foldHidden.has(node._id);   // 用 ourId 判断隐藏，非数字 id
         if (oH && tH) continue;   // 内部线：折叠态不画
-        let a = oH ? fi.portPos.get(link.origin_id + "#o#" + link.origin_slot)
+        let a = oH ? fi.portPos.get(start._id + "#o#" + link.origin_slot)
                    : start.getConnectionPos(false, link.origin_slot, [0, 0]);
         let b = tH ? fi.portPos.get(node._id + "#i#" + i)
                    : node.getConnectionPos(true, i, [0, 0]);
@@ -688,6 +696,19 @@ const ED = (function () {
       }
     }
     ctx.globalAlpha = 1;
+  }
+  // 折叠/展开小按钮：在标签/标题右端画一个明显的圆角按钮（半透明白底+白边+图标），一眼看出可点。
+  function drawFoldChip(ctx, rect, glyph) {
+    const s = Math.min(rect[3] - 5, 17);
+    const cx = rect[0] + rect[2] / 2, cy = rect[1] + rect[3] / 2;
+    ctx.save();
+    roundRect(ctx, cx - s / 2, cy - s / 2, s, s, 4);
+    ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.font = "bold " + (s - 2) + "px 'Microsoft YaHei',sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(glyph, cx, cy + 0.5);
+    ctx.restore();
   }
   // 画一个折叠子图箱体（标题栏=拖动手柄/双击展开；左输入、右输出端口；下方列出钉选参数）。
   function drawSubgBox(ctx, g, i, box) {
@@ -701,8 +722,7 @@ const ED = (function () {
     ctx.fillStyle = tcol; ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
     ctx.fillText("◳ " + (g.title || "子图"), box.x + 10, box.y + SUBG.TITLE_H / 2);
-    ctx.font = "bold 15px 'Microsoft YaHei',sans-serif";
-    ctx.textAlign = "right"; ctx.fillText("⊞", box.x + box.w - 8, box.y + SUBG.TITLE_H / 2);  // ⊞=单击/双击展开
+    drawFoldChip(ctx, [box.x + box.w - GROUP_ICON_W, box.y, GROUP_ICON_W, SUBG.TITLE_H], "⊞");  // 右端：单击展开按钮
     // 端口：exec=三角、data=圆点；标签在内侧
     const drawPort = (p, pos, side) => {
       const c = p.type === "exec" ? SUBG.EXEC : SUBG.DATA;
@@ -779,12 +799,12 @@ const ED = (function () {
       byTarget[key].forEach((l, j) => {
         const a = graph.getNodeById(l.origin_id), b = graph.getNodeById(l.target_id);
         if (!a || !b || !a.outputs || !a.outputs[l.origin_slot]) return;
-        const oH = foldHidden.has(l.origin_id), tH = foldHidden.has(l.target_id);
+        const oH = foldHidden.has(a._id), tH = foldHidden.has(b._id);   // 用 ourId 判断隐藏
         if (oH && tH) return;     // 内部汇入线：折叠态不画
         let pa, pb;
         try {
-          pa = oH ? fi.portPos.get(l.origin_id + "#o#" + l.origin_slot) : a.getConnectionPos(false, l.origin_slot, [0, 0]);
-          pb = tH ? fi.portPos.get(l.target_id + "#i#" + l.target_slot) : b.getConnectionPos(true, l.target_slot, [0, 0]);
+          pa = oH ? fi.portPos.get(a._id + "#o#" + l.origin_slot) : a.getConnectionPos(false, l.origin_slot, [0, 0]);
+          pb = tH ? fi.portPos.get(b._id + "#i#" + l.target_slot) : b.getConnectionPos(true, l.target_slot, [0, 0]);
         } catch (e) { return; }
         if (!pa || !pb) return;
         const cc = linkCtrlPts([pa[0], pa[1]], [pb[0], pb[1]]);
@@ -815,11 +835,12 @@ const ED = (function () {
       // 组名做成“标签页”贴在框的左上沿之上——不会和框内第一个节点重叠
       ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
       ctx.textBaseline = "alphabetic";
-      const tw = ctx.measureText(name).width;
+      const tw = ctx.measureText(name).width;   // name 含占位的 ⊟，使标签留出按钮宽度
       roundRect(ctx, x, y - 18, tw + 18, 20, 5);
       ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = contrastText(col);
-      ctx.fillText(name, x + 9, y - 4);
+      ctx.fillText("⠿ " + (g.title || "分组"), x + 9, y - 4);   // 文字不含 ⊟（⊟ 改用右端明显按钮）
+      const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
     });
     ctx.restore();
   }
@@ -2889,6 +2910,14 @@ const ED = (function () {
       if (gx >= r[0] && gx <= r[0] + r[2] && gy >= r[1] && gy <= r[1] + r[3]) return i;
     }
     return -1;
+  }
+  // 命中测试：坐标是否落在任一分组的标签页/折叠箱体标题（可拖动整组的“手柄”）上。
+  function overGroupHandle(gx, gy) {
+    for (let i = 0; i < groupDefs.length; i++) {
+      const r = groupTabRect(groupDefs[i]); if (!r) continue;
+      if (gx >= r[0] && gx <= r[0] + r[2] && gy >= r[1] && gy <= r[1] + r[3]) return true;
+    }
+    return false;
   }
   // 折叠 / 展开某个分组（i=组下标）。折叠＝把该组收成一个紧凑子图节点；展开＝还原成员节点视图。
   function setGroupCollapsed(i, collapsed) {
