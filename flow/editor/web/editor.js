@@ -613,6 +613,19 @@ const ED = (function () {
   }
   // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。⊟ 占位保证标签留出按钮宽度。
   function groupTabText(g) { return groupTabLeft(g) + "  ⊟"; }
+  // 画「组名(主) + 描述(更小、斜体、更淡)」——让描述和名称一眼可区分。nameText 已含前缀(⠿/◳)。
+  function drawGroupNameWithDesc(ctx, x, y, nameText, g, color, nameFont) {
+    ctx.font = nameFont; ctx.fillStyle = color; ctx.textAlign = "left";
+    ctx.fillText(nameText, x, y);
+    const d = groupDescShort(g);
+    if (!d) return;
+    const nameW = ctx.measureText(nameText).width;
+    const saveFont = ctx.font, saveAlpha = ctx.globalAlpha;
+    ctx.font = "italic 11px 'Microsoft YaHei',sans-serif";   // 描述：斜体小字
+    ctx.globalAlpha = saveAlpha * 0.66;                       // 描述：更淡
+    ctx.fillText("📝 " + d, x + nameW + 8, y);
+    ctx.font = saveFont; ctx.globalAlpha = saveAlpha;
+  }
   const GROUP_ICON_W = 24;   // 标签/标题栏最右侧用于“折叠/展开”单击的小图标命中宽度（图坐标）
   // 依据背景色亮度选黑/白文字，保证标题在分组色上清晰可读。
   function contrastText(hex) {
@@ -979,9 +992,8 @@ const ED = (function () {
     ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke();
     roundRect(ctx, box.x, box.y, box.w, SUBG.TITLE_H, 9);            // 标题栏（实色）
     ctx.fillStyle = col; ctx.fill();
-    ctx.fillStyle = tcol; ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
-    ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    ctx.fillText(subgTitleText(g), box.x + 10, box.y + SUBG.TITLE_H / 2);
+    ctx.fillStyle = tcol; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    drawGroupNameWithDesc(ctx, box.x + 10, box.y + SUBG.TITLE_H / 2, "◳ " + groupPathTitle(g), g, tcol, "bold 13px 'Microsoft YaHei',sans-serif");   // 名(主)+描述(小淡斜体)，宽度按 subgTitleText 量过
     drawFoldChip(ctx, [box.x + box.w - GROUP_ICON_W, box.y, GROUP_ICON_W, SUBG.TITLE_H], "⊞");  // 右端：单击展开按钮
     // 端口：exec=三角、data=圆点；标签在内侧
     const drawPort = (p, pos, side) => {
@@ -1204,7 +1216,7 @@ const ED = (function () {
       roundRect(ctx, x, y - 18, tw + 18, 20, 5);
       ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = contrastText(col); ctx.textAlign = "left";   // 显式置左：折叠箱体端口标签会把 textAlign 设成 right 且不复位，否则本组名被右对齐而整体左移错位
-      ctx.fillText(groupTabLeft(g), x + 9, y - 4);   // 路径名（A/B）显示嵌套 + 📝 描述短版；文字不含 ⊟（⊟ 改用右端明显按钮）
+      drawGroupNameWithDesc(ctx, x + 9, y - 4, "⠿ " + groupPathTitle(g), g, contrastText(col), "bold 13px 'Microsoft YaHei',sans-serif");   // 组名(主)+描述(小淡斜体)；⊟ 占位见 groupTabText
       const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
     }
     ctx.restore();
