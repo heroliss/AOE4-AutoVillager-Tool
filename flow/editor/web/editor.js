@@ -2675,12 +2675,6 @@ const ED = (function () {
     if (runSession) { try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {} }
     setStatus(breakpoints.has(id) ? "已设断点 🔴（运行命中即暂停）" : "已取消断点");
   }
-  function runToNode(id) {              // 连续运行直到该节点被执行到，然后暂停（一次性）
-    runUntil = id;
-    if (runSession) { try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {} }
-    setStatus("运行到此节点…（命中即暂停）");
-    if (!running) startRun(); else setRunUI();
-  }
   function toggleRun() {                 // 主按钮：运行（向游戏发输入）。暂停中点「继续」沿用原会话模式
     if (running) { pauseRun(); return; }
     if (!runSession) realRun = true;     // 新会话＝正式运行
