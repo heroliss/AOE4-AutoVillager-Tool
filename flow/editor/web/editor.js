@@ -558,7 +558,9 @@ const ED = (function () {
   // 画“分组框”（在节点后面，随成员节点自动包裹）。onDrawBackground 在画布变换内调用，用图坐标。
   const GROUP_PAD = 16, GROUP_TOP = 14;   // 四周留白（顶部留少许，组名做成“标签页”放在框上沿之上，不挤占内部）
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
-  function groupTabText(g) { return "⠿ " + (g.title || "分组"); }   // 标签页带抓手图标，提示这一小块可拖动整组
+  // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。
+  function groupTabText(g) { return "⠿ " + (g.title || "分组") + "  ⊟"; }
+  const GROUP_ICON_W = 24;   // 标签/标题栏最右侧用于“折叠/展开”单击的小图标命中宽度（图坐标）
   // 依据背景色亮度选黑/白文字，保证标题在分组色上清晰可读。
   function contrastText(hex) {
     const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ""));
@@ -699,7 +701,8 @@ const ED = (function () {
     ctx.fillStyle = tcol; ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
     ctx.fillText("◳ " + (g.title || "子图"), box.x + 10, box.y + SUBG.TITLE_H / 2);
-    ctx.textAlign = "right"; ctx.fillText("▸", box.x + box.w - 9, box.y + SUBG.TITLE_H / 2);  // ▸=可双击展开
+    ctx.font = "bold 15px 'Microsoft YaHei',sans-serif";
+    ctx.textAlign = "right"; ctx.fillText("⊞", box.x + box.w - 8, box.y + SUBG.TITLE_H / 2);  // ⊞=单击/双击展开
     // 端口：exec=三角、data=圆点；标签在内侧
     const drawPort = (p, pos, side) => {
       const c = p.type === "exec" ? SUBG.EXEC : SUBG.DATA;
@@ -1740,7 +1743,9 @@ const ED = (function () {
     if (simpleMode) closeEditPopups();                         // 进只读模式：关掉所有编辑相关的弹窗/右键菜单
     if (simpleMode && helpEl) helpEl.style.display = "none";   // 使用模式不显示可编辑的节点说明
     renderPanel();
-    if (canvas) { canvas.resize(); canvas.setDirty(true, true); }   // 两种模式都显示画布：切换后重算尺寸
+    // 使用模式 = LiteGraph 只读：一处堵住「从端口拖出连线 / 拖动节点 / 改控件 / 克隆」等所有改图交互，
+    // 但保留平移/缩放（dragging_canvas 不受 read_only 限制）。比逐个 hook 拦截更彻底（橡皮筋线根本不会出现）。
+    if (canvas) { canvas.read_only = simpleMode; canvas.resize(); canvas.setDirty(true, true); }   // 两种模式都显示画布：切换后重算尺寸
   }
   function toggleSimple() {
     if (!simpleMode) {                         // 编辑 → 使用：记下此刻的图，退出使用模式时据此还原（调参/拖动不落盘）
@@ -2871,6 +2876,20 @@ const ED = (function () {
     }
     return -1;
   }
+  // 标签页/箱体标题栏【最右侧】的折叠/展开图标命中区（⊟ 折叠 / ⊞ 展开）——单击即切换，不必进任何弹窗。
+  function groupIconRect(g) {
+    const r = groupTabRect(g); if (!r) return null;
+    const iw = Math.min(GROUP_ICON_W, r[2]);
+    return [r[0] + r[2] - iw, r[1], iw, r[3]];
+  }
+  // 命中测试：坐标是否落在某个分组的“折叠/展开图标”上；返回组下标，无则 -1。
+  function foldIconAt(gx, gy) {
+    for (let i = 0; i < groupDefs.length; i++) {
+      const r = groupIconRect(groupDefs[i]); if (!r) continue;
+      if (gx >= r[0] && gx <= r[0] + r[2] && gy >= r[1] && gy <= r[1] + r[3]) return i;
+    }
+    return -1;
+  }
   // 折叠 / 展开某个分组（i=组下标）。折叠＝把该组收成一个紧凑子图节点；展开＝还原成员节点视图。
   function setGroupCollapsed(i, collapsed) {
     const g = groupDefs[i]; if (!g) return;
@@ -2878,19 +2897,29 @@ const ED = (function () {
     refreshFold();
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
-    setStatus(g.collapsed ? `已折叠「${g.title || "分组"}」为子图（双击展开）` : `已展开「${g.title || "分组"}」`);
+    setStatus(g.collapsed ? `已折叠「${g.title || "分组"}」为子图（单击 ⊞ 或双击展开）` : `已展开「${g.title || "分组"}」`);
   }
   function onCanvasDblClick(e) {
-    if (!graph || !canvas || simpleMode) return;
+    if (!graph || !canvas) return;     // 折叠/展开是纯视图操作，使用模式（只读）下也允许
     let off; try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
     if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;   // 节点上交给 LiteGraph
-    const gi = foldedBoxAt(off[0], off[1]);
-    if (gi >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(gi, false); }
+    const gi = foldedBoxAt(off[0], off[1]);                                  // 双击折叠箱体 → 展开
+    if (gi >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(gi, false); return; }
+    for (let i = 0; i < groupDefs.length; i++) {                             // 双击展开态分组标签 → 折叠
+      if (groupDefs[i].collapsed) continue;
+      const r = groupTabRect(groupDefs[i]); if (!r) continue;
+      if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
+        e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(i, true); return;
+      }
+    }
   }
   function onGroupDragDown(e) {
     if (e.button !== 0 || !graph || !canvas) return;
     let off; try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { return; }
     if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) return;   // 在节点上交给 LiteGraph
+    const ii = foldIconAt(off[0], off[1]);                                   // 先：单击右端 ⊟/⊞ 图标 → 折叠/展开（两种模式都可用）
+    if (ii >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(ii, !groupDefs[ii].collapsed); return; }
+    if (simpleMode) return;            // 使用模式（只读）：不允许拖动整组移动节点（位置属于“改图”）
     for (let i = 0; i < groupDefs.length; i++) {
       const r = groupTabRect(groupDefs[i]); if (!r) continue;
       if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
