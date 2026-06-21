@@ -63,6 +63,26 @@ def build_combined_graph() -> Graph:
     add("tc", "game.tc_count", TC)
     add("c_one", "data.const_number", {"value": 1})
 
+    # ============ 生产门控（前置短路）============
+    # 关键修复：操作区（抢锁/屏蔽输入/Ctrl+0 存编组/0 恢复/Ctrl+Alt+0 解散）对整批只做一次，
+    # 但必须先确认「真的有东西要生产」才进——否则队列里已有单位在造（最常见的稳态）时，
+    # 每帧仍抢锁、屏蔽输入、折腾编组 0，等于不停骚扰玩家键鼠/选择（这正是单出农没有、统一流程独有的 bug）。
+    # 这里按段短路判定：开关? -> 队列空? -> 产能>0?，任一段满足即开操作区，全不满足＝本帧到此结束。
+    # 队列被占用时只算一次便宜的模板匹配就退出（不做 OCR），与单出农一致、不拖性能。
+    add("c_zero", "data.const_number", {"value": 0})
+    add("pre_sw_vill", "control.if")
+    add("pre_q_vill", "control.if")
+    add("cmp_prod_v", "logic.compare", {"op": ">"})
+    add("pre_prod_v", "control.if")
+    add("pre_sw_xq", "control.if")
+    add("pre_q_xq", "control.if")
+    add("cmp_prod_x", "logic.compare", {"op": ">"})
+    add("pre_prod_x", "control.if")
+    add("pre_sw_cart", "control.if")
+    add("pre_q_cart", "control.if")
+    add("cmp_prod_cart", "logic.compare", {"op": ">"})
+    add("pre_prod_cart", "control.if")
+
     # 操作锁 / 输入屏蔽 / 存当前编组（整批生产共用一次）
     add("lock", "control.lock_acquire")
     add("block_begin", "control.input_block_begin", {"max_duration": 3.0})
@@ -148,6 +168,10 @@ def build_combined_graph() -> Graph:
         {"title": "商队段（市场）", "color": "#a5793a",
          "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market",
                      "c_per_cart", "c_one", "plan_cart", "prod_cart", "queue_cart"]},
+        {"title": "生产门控（无活则跳过）", "color": "#7a6a4a",
+         "members": ["c_zero", "pre_sw_vill", "pre_q_vill", "cmp_prod_v", "pre_prod_v",
+                     "pre_sw_xq", "pre_q_xq", "cmp_prod_x", "pre_prod_x",
+                     "pre_sw_cart", "pre_q_cart", "cmp_prod_cart", "pre_prod_cart"]},
         {"title": "收尾（整批一次）", "color": "#5a9367",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
     ]
@@ -174,6 +198,19 @@ def build_combined_graph() -> Graph:
         "block_begin": "开始屏蔽鼠标键盘：操作期间防止人为误触打断。",
         "save_sel": "Ctrl+0：把当前选中的单位暂存为编组 0，操作完再恢复。",
         "relmod1": "松开 Shift/Ctrl/Alt，避免修饰键粘连影响后续按键。",
+        "c_zero": "常量 0：用于「产能>0」比较。",
+        "pre_sw_vill": "门控·村民开关开着吗？开→看队列；关→看乡骑段。",
+        "pre_q_vill": "门控·村民队列空吗？空→看产能；已在造→跳过本段（不抢锁）。",
+        "cmp_prod_v": "门控·村民产能>0？（含人口/食物/TC 限制；队列空时才会算到这里）。",
+        "pre_prod_v": "门控·村民能产>0→开操作区(lock)；否则看乡骑段。",
+        "pre_sw_xq": "门控·乡骑开关开着吗？",
+        "pre_q_xq": "门控·乡骑队列空吗？",
+        "cmp_prod_x": "门控·乡骑产能>0？",
+        "pre_prod_x": "门控·乡骑能产>0→开操作区；否则看商队段。",
+        "pre_sw_cart": "门控·商队开关开着吗？关→本帧结束（无活）。",
+        "pre_q_cart": "门控·商队队列空吗？已在造→本帧结束。",
+        "cmp_prod_cart": "门控·商队产能>0？",
+        "pre_prod_cart": "门控·商队能产>0→开操作区；否则本帧到此结束（不抢锁/不屏蔽/不动编组）。",
         "sw_vill": "【开关】是否生产村民。关掉则整段跳过。",
         "if_sw_vill": "村民开关：开→进入村民段；关→直接跳到乡骑段。",
         "q_vill": "检测生产队列里是否已经有村民（避免重复排队）。",
@@ -216,7 +253,25 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_win", "true", "if_blocked", "in")    # 在游戏中才继续
     g.connect_exec("if_blocked", "false", "if_trans", "in") # 未遮挡才继续
     g.connect_exec("if_trans", "false", "prefetch", "in")   # 非渐变才继续
-    g.connect_exec("prefetch", "out", "lock", "in")
+
+    # 生产门控：逐段「开关→队列空→产能>0」短路；任一段满足才进操作区(lock)，全不满足＝本帧结束
+    g.connect_exec("prefetch", "out", "pre_sw_vill", "in")
+    g.connect_exec("pre_sw_vill", "true", "pre_q_vill", "in")
+    g.connect_exec("pre_sw_vill", "false", "pre_sw_xq", "in")
+    g.connect_exec("pre_q_vill", "true", "pre_sw_xq", "in")     # 已在造 → 跳过本段
+    g.connect_exec("pre_q_vill", "false", "pre_prod_v", "in")   # 队列空 → 看产能
+    g.connect_exec("pre_prod_v", "true", "lock", "in")          # 能产 → 开操作区
+    g.connect_exec("pre_prod_v", "false", "pre_sw_xq", "in")
+    g.connect_exec("pre_sw_xq", "true", "pre_q_xq", "in")
+    g.connect_exec("pre_sw_xq", "false", "pre_sw_cart", "in")
+    g.connect_exec("pre_q_xq", "true", "pre_sw_cart", "in")
+    g.connect_exec("pre_q_xq", "false", "pre_prod_x", "in")
+    g.connect_exec("pre_prod_x", "true", "lock", "in")
+    g.connect_exec("pre_prod_x", "false", "pre_sw_cart", "in")
+    g.connect_exec("pre_sw_cart", "true", "pre_q_cart", "in")   # false 不接 = 本帧结束
+    g.connect_exec("pre_q_cart", "false", "pre_prod_cart", "in")  # true 不接 = 本帧结束
+    g.connect_exec("pre_prod_cart", "true", "lock", "in")        # false 不接 = 本帧结束
+
     g.connect_exec("lock", "ok", "block_begin", "in")       # 占用中(busy)则结束本帧
     g.connect_exec("block_begin", "out", "save_sel", "in")
     g.connect_exec("save_sel", "out", "relmod1", "in")
@@ -294,5 +349,22 @@ def build_combined_graph() -> Graph:
     g.connect_data("slots", "value", "prod_cart", "available_slots")
     g.connect_data("gold", "value", "prod_cart", "resource")
     g.connect_data("prod_cart", "count", "queue_cart", "count")
+
+    # 生产门控数据（复用各段已有的开关/队列/产能节点，按帧记忆化、不重复计算）
+    g.connect_data("sw_vill", "value", "pre_sw_vill", "cond")
+    g.connect_data("q_vill", "found", "pre_q_vill", "cond")
+    g.connect_data("prod_v", "count", "cmp_prod_v", "a")
+    g.connect_data("c_zero", "value", "cmp_prod_v", "b")
+    g.connect_data("cmp_prod_v", "result", "pre_prod_v", "cond")
+    g.connect_data("sw_xq", "value", "pre_sw_xq", "cond")
+    g.connect_data("q_xq", "found", "pre_q_xq", "cond")
+    g.connect_data("prod_x", "count", "cmp_prod_x", "a")
+    g.connect_data("c_zero", "value", "cmp_prod_x", "b")
+    g.connect_data("cmp_prod_x", "result", "pre_prod_x", "cond")
+    g.connect_data("sw_cart", "value", "pre_sw_cart", "cond")
+    g.connect_data("q_cart", "found", "pre_q_cart", "cond")
+    g.connect_data("prod_cart", "count", "cmp_prod_cart", "a")
+    g.connect_data("c_zero", "value", "cmp_prod_cart", "b")
+    g.connect_data("cmp_prod_cart", "result", "pre_prod_cart", "cond")
 
     return g
