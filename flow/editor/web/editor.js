@@ -2270,7 +2270,8 @@ const ED = (function () {
   const _t0 = [0, 0], _t1 = [0, 0];
   function outSlotIndex(n, portName) { return (n.outputs || []).findIndex((o) => o.name === portName); }
   function execInSlotIndex(n) { const i = (n.inputs || []).findIndex((p) => p.type === "exec"); return i < 0 ? 0 : i; }
-  function drawValPill(ctx, x, y, v) {
+  // anchorRight=true 时 x 为药丸【右边界】（用于把输入值贴在输入端口左侧）；dim=true 时略淡（区分“输入侧回显”与权威的输出值）。
+  function drawValPill(ctx, x, y, v, anchorRight, dim) {
     const text = fmtRunVal(v);
     let bg = "#27496b", fg = "#dff0ff";                 // 默认（数值/其它）
     if (v === true) { bg = "#1f8a47"; fg = "#eafff0"; }
@@ -2279,12 +2280,14 @@ const ED = (function () {
     else if (typeof v === "string") { bg = "#3f6a4a"; fg = "#e7ffe7"; }
     ctx.save();
     ctx.font = "bold 12px Consolas, monospace";
-    const tw = ctx.measureText(text).width;
-    roundRect(ctx, x, y - 9, tw + 12, 18, 5);
+    const tw = ctx.measureText(text).width, bw = tw + 12;
+    const bx = anchorRight ? (x - bw) : x;              // 右对齐：右边界落在 x
+    if (dim) ctx.globalAlpha = 0.82;
+    roundRect(ctx, bx, y - 9, bw, 18, 5);
     ctx.shadowColor = "#000a"; ctx.shadowBlur = 5; ctx.fillStyle = bg; ctx.fill();
     ctx.shadowBlur = 0; ctx.strokeStyle = "#0007"; ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = fg; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    ctx.fillText(text, x + 6, y + 0.5);
+    ctx.fillText(text, bx + 6, y + 0.5);
     ctx.restore();
   }
   // 性能监控药丸：节点上方标「自身ms · Σ帧内累计ms」。rx=右边界（与节点右沿对齐），by=底边（节点顶部上方）。
@@ -2485,7 +2488,7 @@ const ED = (function () {
       lightPort(ctx, [pa[0], pa[1]], col);   // 输出端
       lightPort(ctx, [pb[0], pb[1]], col);   // 输入端
     }
-    // ⑤ 数据输出值（彩色标签）
+    // ⑤ 数据输出值（彩色标签）——贴在输出端口右侧
     for (const n of nodes) {
       if (foldHidden.has(n._id)) continue;   // 折叠隐藏成员：数据值标签不画
       const def = defByType[n._typeId]; if (!def) continue;
@@ -2495,6 +2498,24 @@ const ED = (function () {
         if (!(key in runData)) return;
         const ap = n.getConnectionPos(false, i, _t0);
         drawValPill(ctx, ap[0] + 12, ap[1], runData[key]);
+      });
+    }
+    // ⑤b 数据输入值（回显）——贴在【输入端口左侧】，让长连线也能就近看到“喂进来的是多少”。略淡，区别于权威的输出值。
+    for (const n of nodes) {
+      if (foldHidden.has(n._id)) continue;
+      const def = defByType[n._typeId]; if (!def) continue;
+      (def.inputs || []).forEach((p, i) => {
+        if (p.kind === "exec") return;
+        const slot = n.inputs && n.inputs[i];
+        if (!slot || slot.link == null) return;                       // 该输入没接线 → 无值可显
+        const link = graph.links[slot.link]; if (!link) return;
+        const A = graph.getNodeById(link.origin_id);
+        if (!A || foldHidden.has(A._id)) return;
+        const outSlot = A.outputs && A.outputs[link.origin_slot]; if (!outSlot) return;
+        const key = A._id + RUNSEP + outSlot.name;
+        if (!(key in runData)) return;                                // 上游本帧没产出这个值 → 不显
+        const bp = n.getConnectionPos(true, i, _t0);
+        drawValPill(ctx, bp[0] - 12, bp[1], runData[key], true, true);   // 右对齐贴端口左侧、略淡
       });
     }
     // ⑥ 走过的“分支/多出口”节点：在它本帧实际走的那个出口上标结果（真/假、成功/占用…）。
@@ -3505,7 +3526,7 @@ const ED = (function () {
       "<div style='border-top:1px solid #3a404a;margin-top:10px;padding-top:8px;color:#9aa3af'>" +
       "<b style='color:#e6c07b'>运行 / 试运行</b>　顶部 <b style='color:#8fe0a8'>▶运行</b> / 停止；试运行(干跑)在编辑模式下可见<br>" +
       "· <b style='color:#8fe0a8'>运行</b>：执行当前流程，<b>真正向游戏发按键/鼠标</b>（再点变「暂停」，运行中可按住 Shift/Ctrl/Alt 暂停）。<br>" +
-      "· <b>试运行＝干跑</b>：只识别、<b>不发任何输入</b>，安全；走过的节点高亮、连线流动、出口显示数据值、底部出日志，用于上线前核对。<br>" +
+      "· <b>试运行＝干跑</b>：只识别、<b>不发任何输入</b>，安全；走过的节点高亮、连线流动、<b>端口旁显示当前数据值（输出在右、输入回显在左）</b>、底部出日志，用于上线前核对。<br>" +
       "· 每帧间隔＝流程「每帧触发」节点的「循环间隔(秒)」(面板可调)。<br>" +
       "· 走过的<b>分支</b>节点标「真/假」=走了哪条线；执行<b>走到头</b>的出口标「⏹ 结束」(出口空接=本帧到此)。<br>" +
       "· <b>断点</b>：右键节点→「设为断点 🔴」（标题左上角红点）。运行命中它就<b>自动暂停</b>：视图会<b>居中到该节点</b>并套上<b>红色脉冲环 +「⏸ 已暂停」标牌</b>，一眼看出停在哪一步；点 <b>▶继续</b> 往下跑，或取消该断点。（断点仅作用于节点，是会话级、不随流程保存）<br>" +
