@@ -65,6 +65,21 @@
   #toolbar optgroup { color: var(--fg-dim); font-style: normal; }
   #wrap { flex: 1 1 auto; position: relative; min-height: 0; }
   canvas { display: block; }
+  /* 折叠节点的可编辑参数浮层：容器按图坐标摆放控件，整体 transform 跟随画布（见 applyFoldWidgetTransform） */
+  #foldwidgets { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden;
+                 transform-origin: 0 0; pointer-events: none; z-index: 5; }
+  #foldwidgets .fw-row { position: absolute; display: flex; align-items: center; gap: 6px;
+                 height: 24px; pointer-events: auto; }
+  #foldwidgets .fw-label { color: #aeb6c2; font-size: 12px; white-space: nowrap;
+                 overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; max-width: 48%; }
+  #foldwidgets input, #foldwidgets select { background: #15171c; color: #cfd3da; border: 1px solid #444;
+                 border-radius: 4px; height: 20px; font-size: 12px; padding: 1px 4px; box-sizing: border-box; }
+  #foldwidgets input[type=number] { width: 66px; }
+  #foldwidgets input[type=text] { width: 104px; }
+  #foldwidgets input[type=checkbox] { width: 16px; height: 16px; }
+  #foldwidgets select { max-width: 132px; }
+  #foldwidgets button { background: #2b313b; color: #cfd3da; border: 1px solid #3c434f; border-radius: 4px;
+                 height: 20px; font-size: 11px; cursor: pointer; padding: 0 6px; }
   /* 控制面板：置顶常用开关/数值，普通用户不进节点图也能调（在节点说明里勾选要显示的参数）。 */
   #panel { flex: none; display: none; flex-wrap: wrap; align-items: center; gap: 8px 12px;
            padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
@@ -165,6 +180,8 @@
   <div id="panel"></div>
   <div id="wrap">
     <canvas id="graph"></canvas>
+    <!-- 折叠节点的可编辑参数浮层：真·DOM 控件，按图坐标定位，整体 transform 跟随画布平移/缩放 -->
+    <div id="foldwidgets"></div>
     <!-- 资源监控迷你小窗（画布右上角常驻）：迷你曲线 + 简要数字，点击弹出独立的「资源监控」浮窗 -->
     <div id="sysmon" title="资源占用 · 点击弹出独立监控浮窗（可置顶/拖到屏幕任意处）" onclick="ED.toggleSysMon()">
       <canvas id="sysspark" width="116" height="26"></canvas>

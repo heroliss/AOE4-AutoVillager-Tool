@@ -214,6 +214,7 @@ def graph_to_payload(graph: Graph) -> dict:
     return {"name": graph.name, "description": graph.description,
             "panel": [list(x) for x in graph.panel],
             "groups": [dict(x) for x in graph.groups],
+            "foldparams": [list(x) for x in getattr(graph, "foldparams", [])],
             "nodes": nodes, "edges": edges}
 
 
@@ -235,6 +236,8 @@ def payload_to_graph(payload: dict) -> Graph:
             g.notes[nd["id"]] = nd["note"]
     # 面板置顶项：仅保留指向现存节点的 [node_id, key]
     g.panel = [list(p) for p in payload.get("panel", []) if len(p) >= 2 and p[0] in g.nodes]
+    # “显示到折叠节点”的参数：仅保留指向现存节点的 [node_id, key]
+    g.foldparams = [list(p)[:2] for p in payload.get("foldparams", []) if len(p) >= 2 and p[0] in g.nodes]
     # 分组：成员只保留现存节点；丢弃空组
     for gr in payload.get("groups", []):
         members = [m for m in (gr.get("members") or []) if m in g.nodes]

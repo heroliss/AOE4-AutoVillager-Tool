@@ -15,6 +15,8 @@ const ED = (function () {
   let flowMeta = { name: "", desc: "", path: null, readonly: false };
   // 控制面板置顶项：有序的 [nodeId, paramKey, 自定义显示名?]（随流程保存）。
   let panelPins = [];
+  // “显示到折叠节点”的参数：[nodeId, paramKey]（随流程保存）。折叠箱体里渲染成和节点一样的可编辑控件。
+  let foldPins = [];
   // 记住每个参数填过的“面板显示名”（键= nodeId|key）：取消勾选不丢，重新勾选自动回填；清空文本即“手动删除”。
   let pinLabels = {};
   let _panelDrag = null;                        // 控制面板项拖动调序：正在拖的项 "nodeId|key"（仅编辑模式）
@@ -591,7 +593,7 @@ const ED = (function () {
   // 纯编辑器视图层：折叠只隐藏成员节点的“显示与命中”，collect() 输出的底层扁平图不变（引擎照常跑）。
   // 折叠后，把“跨越分组边界”的连线汇成箱体左/右侧的输入/输出端口，并列出该组被钉选的参数，
   // 看起来像一个独立节点；双击箱体即展开。组内连线在折叠态隐藏。
-  const SUBG = { TITLE_H: 28, PORT_GAP: 22, PORT_R: 4.5, PAD: 10, MINW: 156, EXEC: "#e6a23c", DATA: "#59b6c7" };
+  const SUBG = { TITLE_H: 28, PORT_GAP: 22, PORT_R: 4.5, PAD: 10, MINW: 156, PARAM_ROW_H: 30, PARAM_MINW: 210, EXEC: "#e6a23c", DATA: "#59b6c7" };
   function collapsedGroupList() {           // [{g, i}]：collapsed 且仍有成员的组
     const out = [];
     groupDefs.forEach((g, i) => { if (g.collapsed && (g.members || []).length) out.push({ g, i }); });
@@ -627,35 +629,33 @@ const ED = (function () {
     ins.sort((p, q) => p._y - q._y); outs.sort((p, q) => p._y - q._y);   // 端口按成员节点上下顺序排，贴合原布局
     return { ins, outs };
   }
-  // 该组被钉选（出现在控制面板）的参数：折叠箱体上列出 [{label, val}]，即“挑选出的一部分有用参数”。
-  function subgPinnedParams(g) {
+  // 该组里被勾选“显示到折叠节点”的参数：折叠箱体里用和节点上一样的可编辑控件呈现（DOM 浮层，见 rebuildFoldWidgets）。
+  function subgFoldParams(g) {
     const members = new Set(g.members || []), out = [];
-    for (const [nid, key, custom] of panelPins) {
+    for (const [nid, key] of foldPins) {
       if (!members.has(nid)) continue;
-      const n = nodeByOurId(nid); if (!n) continue;
-      const w = (n.widgets || []).find((x) => x._key === key);
-      const label = custom || (w && w.name) || key;
-      let val = w ? w.value : (n.properties ? n.properties[key] : undefined);
-      if (val === true) val = "是"; else if (val === false) val = "否";
-      out.push({ label, val: (val == null ? "" : String(val)) });
+      const node = nodeByOurId(nid); if (!node) continue;
+      const w = (node.widgets || []).find((x) => x._key === key); if (!w) continue;
+      const d = defByType[node._typeId];
+      const p = d && (d.params || []).find((q) => q.key === key);
+      out.push({ nid, key, node, label: (p && p.label) || key });
     }
     return out;
   }
-  // 折叠箱体几何：锚定在成员包围盒左上角（成员仍保留 pos），尺寸按端口数 / 标题 / 参数自适应。
+  // 折叠箱体几何：锚定在成员包围盒左上角（成员仍保留 pos），尺寸按端口数 / 标题 / 折叠参数行自适应。
   function subgBox(g, ctx) {
     const bb = groupBox(g, ctx); if (!bb) return null;
-    const ports = subgPorts(g), pins = subgPinnedParams(g);
+    const ports = subgPorts(g), fparams = subgFoldParams(g);
     const rows = Math.max(ports.ins.length, ports.outs.length, 1);
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     const titleW = ctx.measureText("◳ " + (g.title || "子图")).width + GROUP_ICON_W + 14;   // 标题 + 右端展开按钮留位
     ctx.font = "12px 'Microsoft YaHei',sans-serif";
-    let li = 0, lo = 0, lp = 0;
+    let li = 0, lo = 0;
     for (const p of ports.ins) li = Math.max(li, ctx.measureText(p.label).width);
     for (const p of ports.outs) lo = Math.max(lo, ctx.measureText(p.label).width);
-    for (const p of pins) lp = Math.max(lp, ctx.measureText(p.label + "：" + p.val).width);
-    const w = Math.max(SUBG.MINW, titleW + 24, li + lo + 34, lp + 22);
-    const h = SUBG.TITLE_H + rows * SUBG.PORT_GAP + (pins.length ? pins.length * 17 + 8 : SUBG.PAD);
-    return { x: bb[0], y: bb[1], w, h, ports, pins };
+    const w = Math.max(SUBG.MINW, titleW + 24, li + lo + 34, fparams.length ? SUBG.PARAM_MINW : 0);
+    const h = SUBG.TITLE_H + rows * SUBG.PORT_GAP + (fparams.length ? fparams.length * SUBG.PARAM_ROW_H + 12 : SUBG.PAD);
+    return { x: bb[0], y: bb[1], w, h, ports, fparams };
   }
   function subgPortPos(box, side, idx) {
     const y = box.y + SUBG.TITLE_H + SUBG.PORT_GAP * (idx + 0.5);
@@ -739,14 +739,11 @@ const ED = (function () {
     };
     box.ports.ins.forEach((p, idx) => drawPort(p, subgPortPos(box, "in", idx), "in"));
     box.ports.outs.forEach((p, idx) => drawPort(p, subgPortPos(box, "out", idx), "out"));
-    // 钉选参数（“挑选出的一部分有用参数”）：标签:值，逐行列在端口下方
-    let py = box.y + SUBG.TITLE_H + Math.max(box.ports.ins.length, box.ports.outs.length, 1) * SUBG.PORT_GAP + 4;
-    ctx.font = "12px 'Microsoft YaHei',sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    for (const pp of box.pins) {
-      ctx.fillStyle = "#8b929e"; ctx.fillText(pp.label + "：", box.x + 10, py + 8);
-      const lw = ctx.measureText(pp.label + "：").width;
-      ctx.fillStyle = "#dfe4ec"; ctx.fillText(pp.val, box.x + 10 + lw, py + 8);
-      py += 17;
+    // 折叠参数区：实际的可编辑控件由 DOM 浮层（rebuildFoldWidgets）叠加在此区域；canvas 这里只画一条分隔线。
+    if (box.fparams && box.fparams.length) {
+      const sy = box.y + SUBG.TITLE_H + Math.max(box.ports.ins.length, box.ports.outs.length, 1) * SUBG.PORT_GAP + 4;
+      ctx.strokeStyle = col + "55"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(box.x + 8, sy); ctx.lineTo(box.x + box.w - 8, sy); ctx.stroke();
     }
     // 运行时若组内有节点正在本帧路径上，箱体描金光提示“此处有活动”
     if (runSession) {
@@ -775,6 +772,66 @@ const ED = (function () {
       const box = subgBox(g, mctx); if (!box) continue;
       drawTimePill(ctx, box.x + box.w, box.y - 3, sumSelf, maxCum);
     }
+  }
+  // ============ 折叠节点里的“可编辑参数”DOM 浮层 ============
+  // 勾了“显示到折叠节点”的参数，用和节点上一样的【真·DOM 控件】呈现：放进 #foldwidgets 容器，
+  // 按【图坐标】绝对定位，容器整体 transform 跟随画布平移/缩放（screen=(graph+offset)*scale，与 LiteGraph 一致），
+  // 故缩放时控件也跟着缩放、始终贴在箱体内。
+  let _foldWidgetSig = "";
+  function foldWidgetSig() {
+    const ctx = _measCtx(); if (!ctx) return "";
+    const parts = [];
+    for (const { g } of collapsedGroupList()) {
+      const box = subgBox(g, ctx); if (!box || !box.fparams.length) continue;
+      parts.push(Math.round(box.x) + "," + Math.round(box.y) + "," + Math.round(box.w) + ":" +
+                 box.fparams.map((f) => f.nid + "|" + f.key).join(","));
+    }
+    return parts.join(";");
+  }
+  function applyFoldWidgetTransform() {
+    const host = document.getElementById("foldwidgets"); if (!host || !canvas) return;
+    const s = canvas.ds.scale, o = canvas.ds.offset;
+    host.style.transform = "translate(" + (o[0] * s) + "px," + (o[1] * s) + "px) scale(" + s + ")";
+    host.style.display = host.childElementCount ? "block" : "none";
+  }
+  function rebuildFoldWidgets() {
+    const host = document.getElementById("foldwidgets"); if (!host || !canvas) return;
+    host.innerHTML = "";
+    const ctx = _measCtx();
+    if (ctx) for (const { g } of collapsedGroupList()) {
+      const box = subgBox(g, ctx); if (!box || !box.fparams.length) continue;
+      const y0 = box.y + SUBG.TITLE_H + Math.max(box.ports.ins.length, box.ports.outs.length, 1) * SUBG.PORT_GAP + 8;
+      box.fparams.forEach((f, k) => {
+        const row = document.createElement("div");
+        row.className = "fw-row";
+        row.style.left = (box.x + SUBG.PAD) + "px";
+        row.style.top = (y0 + k * SUBG.PARAM_ROW_H) + "px";
+        row.style.width = (box.w - 2 * SUBG.PAD) + "px";
+        const lab = document.createElement("span");
+        lab.className = "fw-label"; lab.textContent = f.label; lab.title = f.label;
+        row.appendChild(lab);
+        const ctrl = buildParamControl(f.node, f.key);
+        if (ctrl) row.appendChild(ctrl);
+        host.appendChild(row);
+      });
+    }
+    _foldWidgetSig = foldWidgetSig();
+    applyFoldWidgetTransform();
+  }
+  function syncFoldWidgets() {        // 每帧（onDrawBackground）调：几何/内容变了才重建，否则只更新 transform
+    const host = document.getElementById("foldwidgets"); if (!host) return;
+    if (foldWidgetSig() !== _foldWidgetSig) rebuildFoldWidgets();
+    applyFoldWidgetTransform();
+  }
+  function syncFoldWidgetValues() {   // 值在别处被改（撤销/控制面板/采集）时，刷新折叠控件显示值
+    const host = document.getElementById("foldwidgets"); if (!host) return;
+    host.querySelectorAll("[data-fwk]").forEach((ctrl) => {
+      const s = ctrl.dataset.fwk, ix = s.indexOf("|");
+      const node = nodeByOurId(s.slice(0, ix)); if (!node) return;
+      const w = (node.widgets || []).find((x) => x._key === s.slice(ix + 1)); if (!w) return;
+      if (ctrl.type === "checkbox") ctrl.checked = !!w.value;
+      else if ("value" in ctrl) ctrl.value = w.value == null ? "" : String(w.value);
+    });
   }
   // 补画 LiteGraph 漏掉的“汇入同一入口”的执行连线：它的 drawConnections 每个输入口只画 input.link 那一条，
   // 而我们允许 exec 输入多条汇入(见 vendor 改动)，这里把其余 exec 连线按相同样条补上，保证都可见。
@@ -818,6 +875,7 @@ const ED = (function () {
   }
   function drawGroups(ctx) {
     drawExtraExecLinks(ctx);     // 先补画 LiteGraph 漏掉的“汇入”执行连线（与分组无关，总要画）
+    syncFoldWidgets();           // 折叠节点的可编辑参数 DOM 浮层：跟随平移/缩放，几何变则重建
     if (!groupDefs.length) return;
     ctx.save();
     groupDefs.forEach((g, i) => {
@@ -1182,7 +1240,8 @@ const ED = (function () {
       });
       const groups = (c.groups || []).map((g) => ({ title: g.title, color: g.color, collapsed: !!g.collapsed, members: g.members.slice().sort() }))
         .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
-      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, nodes, edges });
+      const foldparams = (c.foldparams || []).slice().sort((a, b) => ((a + "") < (b + "") ? -1 : 1));
+      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, foldparams, nodes, edges });
     } catch (e) { return null; }
   }
   function markSaved() {         // 保存/载入后：把“当前”设为基线，清除所有标记
@@ -1252,6 +1311,7 @@ const ED = (function () {
     if (ea) out.push(`＋ 新增连线 ${ea} 条`);
     if (er) out.push(`－ 删除连线 ${er} 条`);
     if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
+    if (JSON.stringify(cur.foldparams || []) !== JSON.stringify(savedBaseline.foldparams || [])) out.push("◇ 折叠节点参数已修改");
     const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, m: (g.members || []).slice().sort() }))
       .sort((a, b) => (a.t < b.t ? -1 : 1)));
     if (gsig(cur.groups) !== gsig(savedBaseline.groups)) out.push("◇ 分组已修改");
@@ -1428,10 +1488,11 @@ const ED = (function () {
     }
     const panel = panelPins.filter(([nid]) => graph._nodes.some((n) => n._id === nid));
     const ids = new Set(graph._nodes.map((n) => n._id));
+    const foldparams = foldPins.filter(([nid]) => ids.has(nid)).map((p) => p.slice(0, 2));
     const groups = groupDefs
       .map((g) => ({ title: g.title, color: g.color, collapsed: !!g.collapsed, members: (g.members || []).filter((m) => ids.has(m)) }))
       .filter((g) => g.members.length);
-    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, nodes, edges };
+    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, nodes, edges };
   }
 
   // 操作提示走底部居中的临时浮层（toast），与工具栏的“文件信息”分开、互不覆盖；几秒后淡出。
@@ -1488,6 +1549,7 @@ const ED = (function () {
     if (!keepHistory) { undoStack = []; redoStack = []; breakpoints = new Set(); runUntil = null; }   // 新流程：清空撤销历史与断点（排版除外）
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
     for (const p of panelPins) if (p[2]) pinLabels[p[0] + "|" + p[1]] = p[2];   // 把已保存的显示名种进记忆
+    foldPins = Array.isArray(flow.foldparams) ? flow.foldparams.map((x) => x.slice(0, 2)) : [];   // “显示到折叠节点”的参数
     groupDefs = Array.isArray(flow.groups)
       ? flow.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", collapsed: !!g.collapsed, members: (g.members || []).slice() }))
       : [];
@@ -1563,6 +1625,17 @@ const ED = (function () {
     renderPanel(); scheduleSnap(); refreshDirty();
     if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
   }
+  // “显示到折叠节点”：与“显示到控制面板”并排的第二维勾选。勾上的参数会在其所属分组折叠后的箱体里
+  // 以和节点上一样的可编辑控件出现（见 rebuildFoldWidgets）。
+  function isFoldPinned(nid, key) { return foldPins.some((p) => p[0] === nid && p[1] === key); }
+  function toggleFoldPin(nid, key) {
+    const i = foldPins.findIndex((p) => p[0] === nid && p[1] === key);
+    if (i >= 0) foldPins.splice(i, 1); else foldPins.push([nid, key]);
+    rebuildFoldWidgets();                       // 箱体行数/控件随之变
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty();
+    if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
+  }
   // 设置某置顶项“在面板上显示的名称”（空＝用默认名）。同步记进 pinLabels，取消勾选后仍保留。
   function setPinLabel(nid, key, name) {
     const e = pinEntry(nid, key);
@@ -1598,6 +1671,40 @@ const ED = (function () {
     if (node.properties) node.properties[key] = val;
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
+    syncFoldWidgetValues();   // 折叠箱体里若也显示了同一参数，同步其控件显示值
+  }
+  // 按参数类型构建一个可编辑控件（控制面板与折叠箱体共用）：改值统一走 setPanelValue（回写 widget + 实时生效）。
+  function buildParamControl(node, key) {
+    const w = (node.widgets || []).find((x) => x._key === key);
+    if (!w) return null;
+    const def = defByType[node._typeId];
+    const pspec = def && (def.params || []).find((q) => q.key === key);
+    const pt = pspec && pspec.ptype;
+    let ctrl;
+    if (pt === "key" || pt === "region" || pt === "point" || pt === "color") {
+      ctrl = captureControl(node, key, pt);   // 采集型：按钮 + 当前值
+    } else if (w.type === "toggle") {
+      ctrl = document.createElement("input"); ctrl.type = "checkbox"; ctrl.checked = !!w.value;
+      ctrl.onchange = () => setPanelValue(node, key, ctrl.checked);
+    } else if (w.type === "combo") {
+      ctrl = document.createElement("select");
+      for (const v of ((w.options && w.options.values) || [])) {
+        const o = document.createElement("option"); o.value = v; o.textContent = v;
+        if (String(v) === String(w.value)) o.selected = true;
+        ctrl.appendChild(o);
+      }
+      ctrl.onchange = () => setPanelValue(node, key, ctrl.value);
+    } else if (w.type === "number") {
+      ctrl = document.createElement("input"); ctrl.type = "number"; ctrl.value = w.value;
+      if (w.options && w.options.precision === 0) ctrl.step = "1";
+      ctrl.onchange = () => setPanelValue(node, key, Number(ctrl.value));
+    } else {
+      ctrl = document.createElement("input"); ctrl.type = "text";
+      ctrl.value = w.value == null ? "" : String(w.value);
+      ctrl.onchange = () => setPanelValue(node, key, ctrl.value);
+    }
+    ctrl.dataset.fwk = node._id + "|" + key;   // 供 syncFoldWidgetValues 找到并更新
+    return ctrl;
   }
   // 面板上的“采集型”参数控件：显示当前值 + 用游戏内采集按钮设置（按键用“捕获”，区域/坐标/颜色用“采集”）。
   function captureControl(node, key, pt) {
@@ -1690,33 +1797,8 @@ const ED = (function () {
       // 悬停才显示节点描述（描述可能很长，平时不占地方）
       lab.title = (node._note || "").trim() || panelLabel(node, key);
       item.appendChild(lab);
-      const def = defByType[node._typeId];
-      const pspec = def && (def.params || []).find((q) => q.key === key);
-      const pt = pspec && pspec.ptype;
-      let ctrl;
-      if (pt === "key" || pt === "region" || pt === "point" || pt === "color") {
-        ctrl = captureControl(node, key, pt);   // 用“捕获/采集”按钮，并显示当前值（最易用）
-      } else if (w.type === "toggle") {
-        ctrl = document.createElement("input"); ctrl.type = "checkbox"; ctrl.checked = !!w.value;
-        ctrl.onchange = () => setPanelValue(node, key, ctrl.checked);
-      } else if (w.type === "combo") {
-        ctrl = document.createElement("select");
-        for (const v of ((w.options && w.options.values) || [])) {
-          const o = document.createElement("option"); o.value = v; o.textContent = v;
-          if (String(v) === String(w.value)) o.selected = true;
-          ctrl.appendChild(o);
-        }
-        ctrl.onchange = () => setPanelValue(node, key, ctrl.value);
-      } else if (w.type === "number") {
-        ctrl = document.createElement("input"); ctrl.type = "number"; ctrl.value = w.value;
-        if (w.options && w.options.precision === 0) ctrl.step = "1";
-        ctrl.onchange = () => setPanelValue(node, key, Number(ctrl.value));
-      } else {
-        ctrl = document.createElement("input"); ctrl.type = "text";
-        ctrl.value = w.value == null ? "" : String(w.value);
-        ctrl.onchange = () => setPanelValue(node, key, ctrl.value);
-      }
-      item.appendChild(ctrl);
+      const ctrl = buildParamControl(node, key);
+      if (ctrl) item.appendChild(ctrl);
       // 🎯 定位：选中并居中到该节点（取代“移除”按钮，避免误点删除；移除在右下角说明里取消勾选）
       const loc = document.createElement("span");
       loc.className = "ploc"; loc.textContent = "🎯";
@@ -2538,23 +2620,26 @@ const ED = (function () {
       html += section("adv", "进阶（一般用不到）", b, advPorts.length + advParams.length);
     }
 
-    // 显示到控制面板：勾选哪些参数置顶到顶部面板；已勾选的可单独设“面板显示名”。
+    // 显示到 控制面板 / 折叠节点：两列勾选——左=置顶到顶部面板；右=折叠该参数所属分组后在折叠箱体里显示可编辑控件。
     const pinnable = (d.params || []);
     if (pinnable.length) {
-      let b = "";
+      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>左：置顶到顶部控制面板 ｜ 右：折叠分组后显示在折叠节点里（可直接编辑）</div>";
       for (const p of pinnable) {
-        const pinned = isPinned(node._id, p.key);
-        b += `<div style="margin-top:3px"><label style="cursor:pointer;color:#aeb6c2">` +
-             `<input type="checkbox" data-pin="${esc(p.key)}" ${pinned ? "checked" : ""}> ${esc(p.label)}</label>`;
+        const pinned = isPinned(node._id, p.key), fpinned = isFoldPinned(node._id, p.key);
+        b += `<div style="margin-top:3px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">` +
+             `<label style="cursor:pointer;color:#aeb6c2;flex:1 1 120px;min-width:120px">` +
+             `<input type="checkbox" data-pin="${esc(p.key)}" ${pinned ? "checked" : ""}> ${esc(p.label)}</label>` +
+             `<label style="cursor:pointer;color:#8fb6e0;white-space:nowrap" title="折叠该参数所属分组后，在折叠节点里显示这个可编辑控件（需先把节点加入分组）">` +
+             `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 折叠节点</label>`;
         if (pinned) {
           const cur = (pinEntry(node._id, p.key) || [])[2] || "";
-          b += ` <input type="text" data-pinlabel="${esc(p.key)}" value="${esc(cur)}" ` +
+          b += `<input type="text" data-pinlabel="${esc(p.key)}" value="${esc(cur)}" ` +
                `placeholder="${esc(defaultPinLabel(node, p.key))}" title="在控制面板上显示的名称（留空＝用默认）" ` +
-               `style="width:110px;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;font-size:12px;padding:1px 4px">`;
+               `style="flex-basis:100%;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;font-size:12px;padding:1px 4px">`;
         }
         b += `</div>`;
       }
-      html += section("pin", "显示到控制面板", b, null);
+      html += section("pin", "显示到 控制面板 / 折叠节点", b, null);
     }
     helpEl.innerHTML = html;
     helpEl.querySelectorAll("details[data-sec]").forEach((dt) => {
@@ -2562,6 +2647,9 @@ const ED = (function () {
     });
     helpEl.querySelectorAll("[data-pin]").forEach((cb) => {
       cb.onchange = () => togglePin(node._id, cb.getAttribute("data-pin"));
+    });
+    helpEl.querySelectorAll("[data-foldpin]").forEach((cb) => {
+      cb.onchange = () => toggleFoldPin(node._id, cb.getAttribute("data-foldpin"));
     });
     helpEl.querySelectorAll("[data-pinlabel]").forEach((inp) => {
       inp.onchange = () => setPinLabel(node._id, inp.getAttribute("data-pinlabel"), inp.value);
@@ -2799,9 +2887,11 @@ const ED = (function () {
     buildGraph(data);
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
     panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 3)) : [];   // 置顶项(含自定义名)随撤销/重做恢复
+    foldPins = Array.isArray(data.foldparams) ? data.foldparams.map((x) => x.slice(0, 2)) : [];   // 折叠节点参数随撤销/重做恢复
     groupDefs = Array.isArray(data.groups)
-      ? data.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", members: (g.members || []).slice() }))
-      : [];   // 分组随撤销/重做恢复
+      ? data.groups.map((g) => ({ title: g.title || "分组", color: g.color || "", collapsed: !!g.collapsed, members: (g.members || []).slice() }))
+      : [];   // 分组（含折叠态）随撤销/重做恢复
+    refreshFold();
     applyGroupColors();
     if (groupDlgRender && document.getElementById("grpdlg")) groupDlgRender();   // 分组弹窗开着则刷新
     attachBaselineRefs();   // 重建控件后重新挂基线引用，保证“已修改”橙点正确
@@ -3005,6 +3095,7 @@ const ED = (function () {
       // 删除节点：除快照外，隐藏右下角说明面板（否则被删节点的说明会残留）
       graph.onNodeRemoved = () => {
         panelPins = panelPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));   // 删节点连带移除其面板项
+        foldPins = foldPins.filter((p) => graph._nodes.some((n) => n._id === p[0]));     // 删节点连带移除其折叠参数
         const ids = new Set(graph._nodes.map((n) => n._id));
         breakpoints = new Set([...breakpoints].filter((id) => ids.has(id)));   // 删节点连带移除其断点
         if (runUntil && !ids.has(runUntil)) runUntil = null;
