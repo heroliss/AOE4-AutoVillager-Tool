@@ -574,9 +574,10 @@ const ED = (function () {
     const n = parseInt(m[1], 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
     return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#15181d" : "#ffffff";
   }
-  function groupBox(g, ctx) {
+  function groupBox(g, ctx, visibleOnly) {
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
     for (const mid of (g.members || [])) {
+      if (visibleOnly && foldHidden.has(mid)) continue;   // 展开态包裹框：只裹【可见】成员（部分被折叠父组吞掉时只裹剩余部分）
       const n = nodeByOurId(mid);
       if (!n) continue;
       any = true;
@@ -598,6 +599,38 @@ const ED = (function () {
     const out = [];
     groupDefs.forEach((g, i) => { if (g.collapsed && (g.members || []).length) out.push({ g, i }); });
     return out;
+  }
+  // ===== 嵌套（重叠成员模型）：B 的成员是 A 成员的【真子集】⇒ B 嵌套在 A 内。一个节点可同属多个组。=====
+  function groupContains(outer, inner) {   // outer 成员严格多于 inner 且为其超集
+    const om = outer.members || [], im = inner.members || [];
+    if (om.length <= im.length) return false;
+    const s = new Set(om);
+    return im.every((m) => s.has(m));
+  }
+  // 顶层折叠组：collapsed 且【不】嵌套在另一个 collapsed 组里——只有它们画成可见箱体；
+  // 嵌套在折叠父组里的子组其成员已被父组隐藏，不单独画箱体（父箱体已覆盖之）。
+  function topCollapsedGroups() {
+    const all = collapsedGroupList();
+    return all.filter(({ g }) => !all.some(({ g: h }) => h !== g && groupContains(h, g)));
+  }
+  // 某组是否被另一个【折叠】组包含（用于：展开态子组若整体落在折叠父组内，则不画其包裹框）。
+  function isInsideCollapsed(g) {
+    return collapsedGroupList().some(({ g: h }) => h !== g && groupContains(h, g));
+  }
+  // 把若干节点【加入】某分组（不从其它分组移除——这正是嵌套/重叠的关键）。
+  function addNodesToGroup(ourIds, gi) {
+    const g = groupDefs[gi]; if (!g) return;
+    g.members = g.members || [];
+    for (const id of ourIds) if (!g.members.includes(id)) g.members.push(id);
+    refreshGroups();
+  }
+  // 把若干节点从某分组【移除】；空组自动消失。
+  function removeNodesFromGroup(ourIds, gi) {
+    const g = groupDefs[gi]; if (!g) return;
+    const rm = new Set(ourIds);
+    g.members = (g.members || []).filter((m) => !rm.has(m));
+    groupDefs = groupDefs.filter((x) => (x.members || []).length);
+    refreshGroups();
   }
   function subgPortLabel(node, slot, isInput) {
     const title = (node.title || "").trim();
@@ -676,11 +709,11 @@ const ED = (function () {
   function foldInfo() {
     const ctx = _measCtx(), boxes = [], portPos = new Map(), memberGroup = new Map();
     if (!ctx) return { boxes, portPos, memberGroup };
-    for (const { g, i } of collapsedGroupList()) {
+    for (const { g, i } of topCollapsedGroups()) {
       const box = subgBox(g, ctx); if (!box) continue;
       box.ports.ins.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "in", idx)));
       box.ports.outs.forEach((p, idx) => portPos.set(p.key, subgPortPos(box, "out", idx)));
-      for (const m of (g.members || [])) memberGroup.set(m, i);   // ourId → 折叠组下标（用于判断两端是否“同一折叠组”）
+      for (const m of (g.members || [])) if (!memberGroup.has(m)) memberGroup.set(m, i);   // ourId → 所属【顶层】折叠箱体下标（嵌套时取最外层）
       boxes.push({ g, i, box });
     }
     return { boxes, portPos, memberGroup };
@@ -776,7 +809,7 @@ const ED = (function () {
   function drawFoldedTimePills(ctx) {
     if (!runSession) return;
     const mctx = _measCtx(); if (!mctx) return;
-    for (const { g } of collapsedGroupList()) {
+    for (const { g } of topCollapsedGroups()) {
       let sumSelf = 0, maxCum = 0, any = false;
       for (const m of (g.members || [])) {
         const tm = runTimes[m]; if (!tm) continue;
@@ -795,7 +828,7 @@ const ED = (function () {
   function foldWidgetSig() {
     const ctx = _measCtx(); if (!ctx) return "";
     const parts = [];
-    for (const { g } of collapsedGroupList()) {
+    for (const { g } of topCollapsedGroups()) {
       const box = subgBox(g, ctx); if (!box || !box.fparams.length) continue;
       parts.push(Math.round(box.x) + "," + Math.round(box.y) + "," + Math.round(box.w) + ":" +
                  box.fparams.map((f) => f.nid + "|" + f.key).join(","));
@@ -812,7 +845,7 @@ const ED = (function () {
     const host = document.getElementById("foldwidgets"); if (!host || !canvas) return;
     host.innerHTML = "";
     const ctx = _measCtx();
-    if (ctx) for (const { g } of collapsedGroupList()) {
+    if (ctx) for (const { g } of topCollapsedGroups()) {
       const box = subgBox(g, ctx); if (!box || !box.fparams.length) continue;
       const y0 = box.y + box.paramsTop;   // 与 subgBox.paramsTop / 分隔线保持一致
       box.fparams.forEach((f, k) => {
@@ -892,14 +925,20 @@ const ED = (function () {
     syncFoldWidgets();           // 折叠节点的可编辑参数 DOM 浮层：跟随平移/缩放，几何变则重建
     if (!groupDefs.length) return;
     ctx.save();
-    groupDefs.forEach((g, i) => {
-      if (g.collapsed) {         // 折叠态：画紧凑“子图节点”箱体（替代成员包裹框）
+    // 嵌套渲染顺序：成员多的（外层）先画、成员少的（内层）后画压在上面，保证嵌套子组/子箱体可见。
+    const order = groupDefs.map((g, i) => i).sort((a, b) => (groupDefs[b].members || []).length - (groupDefs[a].members || []).length);
+    for (const i of order) {
+      const g = groupDefs[i];
+      if (g.collapsed) {         // 折叠态：画紧凑“子图节点”箱体（仅顶层折叠组；嵌套在折叠父组里的子组不单独画）
+        if (isInsideCollapsed(g)) continue;
         const sbox = subgBox(g, ctx);
         if (sbox) drawSubgBox(ctx, g, i, sbox);
-        return;
+        continue;
       }
-      const box = groupBox(g, ctx);
-      if (!box) return;
+      // 展开态：成员若已全部被折叠父组隐藏，则不画其包裹框（否则框会落在父箱体之上）。
+      if ((g.members || []).every((m) => foldHidden.has(m))) continue;
+      const box = groupBox(g, ctx, true);    // 仅按【可见】成员包裹
+      if (!box) continue;
       const [x, y, w, h] = box, col = groupColor(g, i), name = groupTabText(g);
       roundRect(ctx, x, y, w, h, 10);
       ctx.fillStyle = col + "22"; ctx.fill();          // 半透明填充
@@ -913,7 +952,7 @@ const ED = (function () {
       ctx.fillStyle = contrastText(col); ctx.textAlign = "left";   // 显式置左：折叠箱体端口标签会把 textAlign 设成 right 且不复位，否则本组名被右对齐而整体左移错位
       ctx.fillText("⠿ " + (g.title || "分组"), x + 9, y - 4);   // 文字不含 ⊟（⊟ 改用右端明显按钮）
       const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
-    });
+    }
     ctx.restore();
   }
 
@@ -942,22 +981,19 @@ const ED = (function () {
     });
   }
 
-  // 一个节点最多属于一个分组（便于在节点上用单一颜色标记）。返回所属分组下标，无则 -1。
+  // 一个节点可属于多个分组（嵌套）。返回【最内层】分组下标（成员最少的那个包含它的组），无则 -1。
+  // 用途：节点标题染色 / “所属分组”标签——取最贴近节点的内层组最达意。
   function nodeGroupIndex(ourId) {
-    return groupDefs.findIndex((g) => (g.members || []).includes(ourId));
+    let best = -1, bestN = Infinity;
+    groupDefs.forEach((g, i) => {
+      const m = g.members || [];
+      if (m.includes(ourId) && m.length < bestN) { best = i; bestN = m.length; }
+    });
+    return best;
   }
   function groupColorOf(ourId) {
     const i = nodeGroupIndex(ourId);
     return i >= 0 ? groupColor(groupDefs[i], i) : null;
-  }
-  // 把若干节点设为某分组（gi=null 表示移出所有分组）：先从所有组移除，再加入目标；清掉空组。
-  function setNodesGroup(ourIds, gi) {
-    for (const g of groupDefs) g.members = (g.members || []).filter((m) => !ourIds.includes(m));
-    if (gi != null && groupDefs[gi]) {
-      for (const id of ourIds) if (!groupDefs[gi].members.includes(id)) groupDefs[gi].members.push(id);
-    }
-    groupDefs = groupDefs.filter((g) => (g.members || []).length);
-    refreshGroups();
   }
   // 分组变化后：把每个节点的标题栏染成所属分组色 + 重绘 + 计脏。
   function refreshFold() {   // 重算“被折叠隐藏的成员”集合；任何改动分组的地方都应调用
@@ -989,18 +1025,18 @@ const ED = (function () {
       "padding:14px 16px;z-index:150;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
     document.body.appendChild(box);
     const render = () => {
-      // 每次重绘都重算“当前所属分组”，使单选框跟着实时变化（多选不一致则不预选）
-      const curIdx = ids.map(nodeGroupIndex);
-      const same = curIdx.every((x) => x === curIdx[0]) ? curIdx[0] : -2;
+      // 嵌套（重叠成员）模型：一个节点可属于多个分组；勾选=把选中节点【加入】该组（不动其它组），
+      // 取消勾选=移出。成员是另一组子集的分组会自动嵌套显示。
+      const inCount = (i) => ids.filter((id) => (groupDefs[i].members || []).includes(id)).length;
       let h = `<b style='color:#e6c07b'>分组</b>（已选 ${ids.length} 个节点）` +
-              "<div style='color:#7f8895;margin:2px 0 8px'>一个节点只属于一个分组；选择即生效。</div>";
-      h += `<label style="display:block;cursor:pointer;padding:4px 0"><input type="radio" name="grp" value="-1" ${same === -1 ? "checked" : ""}> 不分组</label>`;
+              "<div style='color:#7f8895;margin:2px 0 8px'>一个节点可属于多个分组；勾选=加入、取消=移出。成员是另一组子集时自动嵌套。</div>";
       groupDefs.forEach((g, i) => {
         const col = groupColor(g, i);
+        const cnt = inCount(i), full = cnt === ids.length, part = cnt > 0 && !full;
         h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0">` +
-             `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` +
+             `<input type="checkbox" data-grp="${i}" ${full ? "checked" : ""}>` +
              `<span data-swatch="${i}" style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
-             `<span style="flex:1">${esc(g.title || "分组")}</span>` +
+             `<span style="flex:1">${esc(g.title || "分组")}${part ? " <span style='color:#7f8895'>(部分)</span>" : ""}</span>` +
              `<span style="color:#7f8895">${(g.members || []).length}个</span>` +
              `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
              `<button data-fold="${i}" title="折叠成一个紧凑子图节点 / 展开还原" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
@@ -1010,8 +1046,16 @@ const ED = (function () {
       h += "<div style='margin-top:10px'><button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ 新建分组（含选中节点）</button>" +
         "<span style='float:right;color:#6b727d;font-size:12px;padding-top:5px'>点窗口外关闭</span></div>";
       box.innerHTML = h;
-      box.querySelectorAll("input[name='grp']").forEach((r) =>
-        r.onchange = () => { const v = +r.value; setNodesGroup(ids, v < 0 ? null : v); render(); });
+      // 勾选框：全部已在该组→取消勾选=移出；否则勾选=把选中节点加入该组（保留其它组归属，实现嵌套/重叠）
+      box.querySelectorAll("[data-grp]").forEach((c) => {
+        const i = +c.getAttribute("data-grp");
+        const cnt = inCount(i);
+        if (cnt > 0 && cnt < ids.length) c.indeterminate = true;   // 部分选中→半勾态
+        c.onchange = () => {
+          if (inCount(i) === ids.length) removeNodesFromGroup(ids, i); else addNodesToGroup(ids, i);
+          render();
+        };
+      });
       box.querySelectorAll("[data-color]").forEach((c) =>
         c.oninput = () => {
           const i = +c.getAttribute("data-color");
@@ -1036,7 +1080,7 @@ const ED = (function () {
         const name = await askText("新建分组", "分组" + (groupDefs.length + 1));
         if (name == null) return;
         groupDefs.push({ title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], members: [] });
-        setNodesGroup(ids, groupDefs.length - 1); render();
+        addNodesToGroup(ids, groupDefs.length - 1); render();   // 加入而不移出其它组：选中若为某组子集则自动成为其嵌套子组
       };
     };
     groupDlgRender = render;   // 撤销/重做后若弹窗仍开着，据此刷新
@@ -2984,10 +3028,12 @@ const ED = (function () {
   function groupTabRect(g) {
     const ctx = _measCtx(); if (!ctx) return null;
     if (g.collapsed) {                            // 折叠态：箱体标题栏即拖动手柄（拖它移动整组）
+      if (isInsideCollapsed(g)) return null;      // 嵌套在折叠父组里：不画箱体也就没有手柄
       const sb = subgBox(g, ctx); if (!sb) return null;
       return [sb.x, sb.y, sb.w, SUBG.TITLE_H];
     }
-    const box = groupBox(g, ctx); if (!box) return null;
+    if ((g.members || []).every((m) => foldHidden.has(m))) return null;   // 整体被折叠父组隐藏：无可见框
+    const box = groupBox(g, ctx, true); if (!box) return null;
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     const tw = ctx.measureText(groupTabText(g)).width;
     return [box[0], box[1] - 18, tw + 18, 20];   // 与 drawGroups 标签页几何一致
@@ -2995,7 +3041,7 @@ const ED = (function () {
   // 命中测试：返回坐标落在哪个【折叠箱体】内的组下标（用于双击展开）；无则 -1。
   function foldedBoxAt(gx, gy) {
     const ctx = _measCtx(); if (!ctx) return -1;
-    for (const { g, i } of collapsedGroupList()) {
+    for (const { g, i } of topCollapsedGroups()) {
       const b = subgBox(g, ctx); if (!b) continue;
       if (gx >= b.x && gx <= b.x + b.w && gy >= b.y && gy <= b.y + b.h) return i;
     }
