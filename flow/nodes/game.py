@@ -21,20 +21,32 @@ class Occlusion(DataNode):
     title = "三态遮挡检测"
     inputs = [data_in("image", DataType.IMAGE, label="图像")]
     outputs = [
-        data_out("blocked", DataType.BOOL, label="遮挡"),
-        data_out("in_transition", DataType.BOOL, label="渐变中"),
-        data_out("clear", DataType.BOOL, label="未遮挡"),
-        data_out("confidence", DataType.NUMBER, label="置信度"),
-        data_out("state", DataType.STRING, label="状态"),
+        data_out("blocked", DataType.BOOL, label="遮挡",
+                 help="那块区域被完全盖住（如打开了某个面板）。此时识别不可靠，流程应跳过本帧。"),
+        data_out("in_transition", DataType.BOOL, label="渐变中",
+                 help="UI 正在渐入/渐出动画、或读数还没稳定。此时识别会误判，流程应跳过本帧。"),
+        data_out("clear", DataType.BOOL, label="未遮挡",
+                 help="区域干净、可放心识别（= 既非遮挡也非渐变）。三态里的“正常”态。"),
+        data_out("confidence", DataType.NUMBER, label="置信度",
+                 help="与“遮挡模板”的匹配分(0~1)：越高越像被遮挡。用于判定 遮挡/渐变/未遮挡 三态的分界。"),
+        data_out("state", DataType.STRING, label="状态",
+                 help="给人看的状态文字：完全遮挡 / 未遮挡 / 渐变中，可能带“(不稳定)”或“误判修正->未遮挡”。仅展示、不参与判断。"),
     ]
     params = [
-        ParamSpec("region", "检测区域", "region", default=[265, 950, 280, 970]),
-        ParamSpec("template", "遮挡模板", "template", default=""),
-        ParamSpec("match_threshold", "完全遮挡阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01),
-        ParamSpec("transition_threshold", "渐变下限阈值", "float", default=0.1, minimum=0.0, maximum=1.0, step=0.01),
-        ParamSpec("stable_threshold", "稳定所需次数", "int", default=2, minimum=1, maximum=10),
-        ParamSpec("transition_repeat", "渐变误判次数", "int", default=3, minimum=1, maximum=10),
-        ParamSpec("change_threshold", "渐变误判变化阈", "float", default=0.05, minimum=0.0, maximum=1.0, step=0.01),
+        ParamSpec("region", "检测区域", "region", default=[265, 950, 280, 970],
+                  help="要监测是否被遮挡的小块区域（一般取生产队列那一块）。"),
+        ParamSpec("template", "遮挡模板", "template", default="",
+                  help="该区域“被遮挡时”长什么样的模板图，用来比对。"),
+        ParamSpec("match_threshold", "完全遮挡阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01,
+                  help="匹配分 ≥ 它 → 判为“完全遮挡”。"),
+        ParamSpec("transition_threshold", "渐变下限阈值", "float", default=0.1, minimum=0.0, maximum=1.0, step=0.01,
+                  help="匹配分 < 它 → 判为“未遮挡”；介于本阈值与“完全遮挡阈值”之间 → “渐变中”。"),
+        ParamSpec("stable_threshold", "稳定所需次数", "int", default=2, minimum=1, maximum=10,
+                  help="同一状态要连续出现这么多次才算“稳定”，否则先当“渐变中”——防 UI 抖动误判。"),
+        ParamSpec("transition_repeat", "渐变误判次数", "int", default=3, minimum=1, maximum=10, advanced=True,
+                  help="落在渐变区但连续这么多次几乎不变 → 判定为“场景色误判”、当作未遮挡。调试用。"),
+        ParamSpec("change_threshold", "渐变误判变化阈", "float", default=0.05, minimum=0.0, maximum=1.0, step=0.01, advanced=True,
+                  help="配合上一项：相邻帧匹配分变化 < 它才算“几乎不变”。调试用。"),
     ]
 
     def __init__(self):
@@ -106,11 +118,20 @@ class TcCount(DataNode):
     type_id = "game.tc_count"
     category = "游戏"
     title = "多TC计数"
-    outputs = [data_out("count", DataType.NUMBER, label="数量"), data_out("ok", DataType.BOOL, label="成功")]
+    outputs = [
+        data_out("count", DataType.NUMBER, label="数量",
+                 help="当前选中的城镇中心个数。⚠靠识别“TC 面板”得到——必须先按键选中所有 TC、面板出来后才数得到，"
+                      "否则数到 0。所以读它之前要先选 TC 并留一点 UI 刷新等待。"),
+        data_out("ok", DataType.BOOL, label="成功",
+                 help="是否成功识别到 TC（还没建 TC / 没选中 / 被遮挡时为否）。"),
+    ]
     params = [
-        ParamSpec("icon_region", "多TC检测区域", "region", default=[444, 1212, 492, 1259]),
-        ParamSpec("single_region", "单TC预检测区域", "region", default=[300, 1140, 354, 1194]),
-        ParamSpec("single_template", "单TC模板", "template", default=""),
+        ParamSpec("icon_region", "多TC检测区域", "region", default=[444, 1212, 492, 1259],
+                  help="TC 面板上显示数量的小图标区域（≥2 个 TC 时这里会有数字）。"),
+        ParamSpec("single_region", "单TC预检测区域", "region", default=[300, 1140, 354, 1194],
+                  help="先快速判断“是不是只有 1 个 TC”的区域，命中就直接返回 1、省去数字匹配。"),
+        ParamSpec("single_template", "单TC模板", "template", default="",
+                  help="单个 TC 时该区域的模板图。"),
         ParamSpec("numbered_templates", "数字模板(按序)", "templates", default=[],
                   help="tc_number_1.png, tc_number_2.png ... 顺序排列；序号N对应 1+N 个TC"),
         ParamSpec("threshold", "匹配阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01),
@@ -182,15 +203,21 @@ class ProduceCount(DataNode):
     category = "游戏"
     title = "产能计算"
     inputs = [
-        data_in("planned", DataType.NUMBER, label="计划数"),
-        data_in("available_slots", DataType.NUMBER, label="空位"),
-        data_in("resource", DataType.NUMBER, label="资源"),
-        data_in("current_count", DataType.NUMBER, label="当前数量"),
+        data_in("planned", DataType.NUMBER, label="计划数",
+                help="本来想造多少（如 每TC数×TC个数）。最终产量不会超过它。"),
+        data_in("available_slots", DataType.NUMBER, label="空位",
+                help="人口空位（上限−当前）。不接=不受人口限制。"),
+        data_in("resource", DataType.NUMBER, label="资源",
+                help="可用资源量（食物/黄金…）。产量再受 资源÷单位成本 限制。不接=不受资源限制。"),
+        data_in("current_count", DataType.NUMBER, label="当前数量", advanced=True,
+                help="已有数量，配合“数量上限”用（产量不超过 上限−当前）。一般不接。"),
     ]
-    outputs = [data_out("count", DataType.NUMBER, label="数量")]
+    outputs = [data_out("count", DataType.NUMBER, label="数量",
+                        help="实际可生产数 = min(计划, 空位, 资源÷成本, 上限−当前)，取整且 ≥0。接到“按键”的“数量”即排这么多次。")]
     params = [
-        ParamSpec("cost_per_unit", "单位资源成本", "float", default=50.0, minimum=0.0),
-        ParamSpec("cap", "数量上限", "int", default=-1, help="-1 表示不启用上限"),
+        ParamSpec("cost_per_unit", "单位资源成本", "float", default=50.0, minimum=0.0,
+                  help="造 1 个要花多少资源（村民≈50 食物）。用于“资源÷成本”这条限制。"),
+        ParamSpec("cap", "数量上限", "int", default=-1, help="-1 表示不启用上限（需配合“当前数量”输入）。", advanced=True),
     ]
 
     def evaluate(self, ctx, inputs):
