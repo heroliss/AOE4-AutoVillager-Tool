@@ -116,7 +116,11 @@ const ED = (function () {
     // 画布空白右键：只留"添加节点"（分组操作改到“节点右键”里，更符合直觉）
     LGraphCanvas.prototype.getCanvasMenuOptions = function () {
       if (simpleMode) return [{ content: "使用模式（画布只读）· 切到编辑模式可改图", disabled: true }];
-      return [{ content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd }];
+      return [
+        { content: "添加节点", has_submenu: true, callback: LGraphCanvas.onMenuAdd },
+        null,
+        { content: "编辑分组…", callback: () => assignGroupDialog(Object.values((canvas && canvas.selected_nodes) || {})) },   // 任意空白处都能管理分组（有选中节点则一并可指派）
+      ];
     };
     // 节点右键：精简到 克隆 / 删除 + 节点自定义项（去掉 Inputs/Outputs/Properties/Title/Mode/Resize/
     // Collapse/Pin/Colors/Shapes 等堆叠项）。务必调用 node.getExtraMenuOptions，否则“添加/编辑描述”不出现。
@@ -168,12 +172,13 @@ const ED = (function () {
           const node = this.graph && this.graph.getNodeOnPos(x, y, this.visible_nodes);
           if (node) {
             if (simpleMode) { cv.style.cursor = "default"; return ret; }   // 使用模式：节点只读（不可拖/连/改）
+            if (e.altKey) { cv.style.cursor = "copy"; return ret; }        // 按住 Alt：拖动将把它放进/移出分组
             if (node.getSlotInPosition && node.getSlotInPosition(x, y)) { cv.style.cursor = "pointer"; return ret; }   // 端口=可点(连线)
             if (_hitWidget(node, x - node.pos[0], y - node.pos[1])) { cv.style.cursor = "pointer"; return ret; }       // 控件=可点
             cv.style.cursor = "crosshair"; return ret;                // 标题/节点体：可拖动 → 十字
           }
           if (foldIconAt(x, y) >= 0) { cv.style.cursor = "pointer"; return ret; }                     // 折叠/展开按钮 → 小手
-          if (!simpleMode && overGroupHandle(x, y)) { cv.style.cursor = "crosshair"; return ret; }    // 分组标签/箱体标题：可拖整组 → 十字(同节点)
+          if (!simpleMode && overGroupHandle(x, y)) { cv.style.cursor = e.altKey ? "copy" : "crosshair"; return ret; }   // 分组手柄：Alt=拖进/出组(copy)，否则拖动整组(十字)
           if (foldedBoxAt(x, y) >= 0) { cv.style.cursor = "pointer"; return ret; }                    // 折叠箱体：可双击展开 → 小手
           cv.style.cursor = "grab";                                   // 空白处：可平移 → 抓手
         } catch (_) { }
@@ -565,7 +570,7 @@ const ED = (function () {
   const GROUP_PAD = 16, GROUP_TOP = 14;   // 四周留白（顶部留少许，组名做成“标签页”放在框上沿之上，不挤占内部）
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
   // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。
-  function groupTabText(g) { return "⠿ " + (g.title || "分组") + "  ⊟"; }
+  function groupTabText(g) { return "⠿ " + groupPathTitle(g) + "  ⊟"; }
   const GROUP_ICON_W = 24;   // 标签/标题栏最右侧用于“折叠/展开”单击的小图标命中宽度（图坐标）
   // 依据背景色亮度选黑/白文字，保证标题在分组色上清晰可读。
   function contrastText(hex) {
@@ -610,6 +615,10 @@ const ED = (function () {
   }
   function isDescendantGroup(a, b) { return groupAncestors(a).includes(b); }   // a 在 b 的子树内
   function groupDepth(g) { return groupAncestors(g).length; }                  // 嵌套深度（顶层=0）
+  function groupPathTitle(g) {        // 显示用「路径名」：祖先→自身的标题以 / 连接（如 A/B），直观看出嵌套层级
+    const chain = groupAncestors(g).reverse(); chain.push(g);
+    return chain.map((x) => x.title || "分组").join("/");
+  }
   function groupAllMembers(g, _seen, _vg) {   // 子树全体节点 ourId（去重）
     const set = _seen || new Set(), vg = _vg || new Set();
     if (vg.has(g.id)) return _seen ? set : [...set];   // 防环（万一文件被手改出父子环）
@@ -797,7 +806,7 @@ const ED = (function () {
     const ports = subgPorts(g), fparams = subgFoldParams(g);
     const rows = Math.max(ports.ins.length, ports.outs.length, 1);
     ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
-    const titleW = ctx.measureText("◳ " + (g.title || "子图")).width + GROUP_ICON_W + 14;   // 标题 + 右端展开按钮留位
+    const titleW = ctx.measureText("◳ " + groupPathTitle(g)).width + GROUP_ICON_W + 14;   // 路径名 + 右端展开按钮留位
     ctx.font = "12px 'Microsoft YaHei',sans-serif";
     let li = 0, lo = 0;
     for (const p of ports.ins) li = Math.max(li, ctx.measureText(p.label).width);
@@ -876,7 +885,7 @@ const ED = (function () {
     ctx.fillStyle = col; ctx.fill();
     ctx.fillStyle = tcol; ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    ctx.fillText("◳ " + (g.title || "子图"), box.x + 10, box.y + SUBG.TITLE_H / 2);
+    ctx.fillText("◳ " + groupPathTitle(g), box.x + 10, box.y + SUBG.TITLE_H / 2);
     drawFoldChip(ctx, [box.x + box.w - GROUP_ICON_W, box.y, GROUP_ICON_W, SUBG.TITLE_H], "⊞");  // 右端：单击展开按钮
     // 端口：exec=三角、data=圆点；标签在内侧
     const drawPort = (p, pos, side) => {
@@ -1058,7 +1067,7 @@ const ED = (function () {
       roundRect(ctx, x, y - 18, tw + 18, 20, 5);
       ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = contrastText(col); ctx.textAlign = "left";   // 显式置左：折叠箱体端口标签会把 textAlign 设成 right 且不复位，否则本组名被右对齐而整体左移错位
-      ctx.fillText("⠿ " + (g.title || "分组"), x + 9, y - 4);   // 文字不含 ⊟（⊟ 改用右端明显按钮）
+      ctx.fillText("⠿ " + groupPathTitle(g), x + 9, y - 4);   // 路径名（A/B）显示嵌套；文字不含 ⊟（⊟ 改用右端明显按钮）
       const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
     }
     ctx.restore();
@@ -1130,25 +1139,30 @@ const ED = (function () {
       // 容器树模型：一个节点只属于一个分组（直接成员）。这里用单选指定节点归属；嵌套请把一个组拖进另一个组。
       const curIdx = ids.map(nodeGroupIndex);
       const same = curIdx.every((x) => x === curIdx[0]) ? curIdx[0] : -2;   // 多选不一致 → 不预选
-      let h = `<b style='color:#e6c07b'>分组</b>（已选 ${ids.length} 个节点）` +
-              "<div style='color:#7f8895;margin:2px 0 8px'>一个节点只属于一个分组；嵌套请把一个组拖进另一个组。</div>";
-      h += `<label style="display:block;cursor:pointer;padding:4px 0"><input type="radio" name="grp" value="-1" ${same === -1 ? "checked" : ""}> 不分组</label>`;
+      const hasSel = ids.length > 0;
+      let h = `<b style='color:#e6c07b'>分组</b>` + (hasSel ? `（已选 ${ids.length} 个节点）` : "（管理）") +
+              "<div style='color:#7f8895;margin:2px 0 8px'>" +
+              (hasSel ? "选一个组＝把选中节点放进去（一个节点只属于一个组）；" : "右键节点可把它指派到组；") +
+              "嵌套请把一个组拖进另一个组。</div>";
+      if (hasSel) h += `<label style="display:block;cursor:pointer;padding:4px 0"><input type="radio" name="grp" value="-1" ${same === -1 ? "checked" : ""}> 不分组</label>`;
       groupDefs.forEach((g, i) => {
         const col = groupColor(g, i), nc = childGroupsOf(g).length;
         h += `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0">` +
-             `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` +
+             (hasSel ? `<input type="radio" name="grp" value="${i}" ${same === i ? "checked" : ""}>` : "") +
              `<span data-swatch="${i}" style="width:12px;height:12px;border-radius:3px;background:${col};flex:none"></span>` +
-             `<span style="flex:1">${esc(g.title || "分组")}${groupDepth(g) ? " <span style='color:#7f8895'>(子组)</span>" : ""}</span>` +
+             `<span style="flex:1">${esc(groupPathTitle(g))}</span>` +
              `<span style="color:#7f8895">${(g.members || []).length}个${nc ? "+" + nc + "组" : ""}</span>` +
              `<input type="color" data-color="${i}" value="${col}" title="自定义颜色" style="width:24px;height:20px;padding:0;border:1px solid #444;background:#15171c;cursor:pointer">` +
              `<button data-fold="${i}" title="折叠成一个紧凑子图节点 / 展开还原" style="background:${g.collapsed ? "#314a6b" : "#2f343d"};color:${g.collapsed ? "#cfe3ff" : "#cfd3da"};border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">${g.collapsed ? "展开" : "折叠"}</button>` +
              `<button data-ren="${i}" style="background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:1px 7px;cursor:pointer">改名</button>` +
              `<button data-del="${i}" title="解散此组（子组与成员上提到父组）" style="background:#3a2222;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:1px 7px;cursor:pointer">解散</button></label>`;
       });
-      h += "<div style='margin-top:10px'><button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ 新建分组（含选中节点）</button>" +
+      // 新建分组只在“有选中节点”时提供——空组没有包裹框、也无法作为拖放落点，无实际意义。
+      h += "<div style='margin-top:10px'>" +
+        (hasSel ? "<button id='grp_new' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:3px 10px;cursor:pointer'>＋ 新建分组（含选中节点）</button>" : "") +
         "<span style='float:right;color:#6b727d;font-size:12px;padding-top:5px'>点窗口外关闭</span></div>";
       box.innerHTML = h;
-      box.querySelectorAll("input[name='grp']").forEach((r) =>
+      if (hasSel) box.querySelectorAll("input[name='grp']").forEach((r) =>
         r.onchange = () => { const v = +r.value; setNodesDirectGroup(ids, v < 0 ? null : v); render(); });
       box.querySelectorAll("[data-color]").forEach((c) =>
         c.oninput = () => {
@@ -1170,7 +1184,8 @@ const ED = (function () {
       box.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
         dissolveGroup(groupDefs[+b.getAttribute("data-del")]); render();
       });
-      box.querySelector("#grp_new").onclick = async () => {
+      const newBtn = box.querySelector("#grp_new");
+      if (newBtn) newBtn.onclick = async () => {
         const name = await askText("新建分组", "分组" + (groupDefs.length + 1));
         if (name == null) return;
         groupDefs.push({ id: newGroupId(), title: name.trim() || "分组", color: GROUP_COLORS[groupDefs.length % GROUP_COLORS.length], parent: null, members: [] });
@@ -3114,6 +3129,7 @@ const ED = (function () {
 
   // —— 拖动“分组标签页”整体移动组内节点（可拖区域只有那个小标签，避免误触画布/节点）——
   let _groupDrag = null;
+  let altKeyDown = false;   // 按住 Alt 才把「拖动」当作「拖进/拖出分组」；否则只是普通移动（见 onNodeMoved / onGroupDragUp）
   function _measCtx() { return (canvas && canvas.canvas) ? canvas.canvas.getContext("2d") : null; }
   function groupTabRect(g) {
     const ctx = _measCtx(); if (!ctx) return null;
@@ -3219,8 +3235,8 @@ const ED = (function () {
     const gd = _groupDrag; _groupDrag = null;
     if (!gd || !gd.moved) return;
     const g = groupDefs[gd.gi];
-    if (g) {
-      // 放下时按落点决定父组：落在某个组内 → 设为其子组（最内层那个）；落在空白 → 设为顶层。
+    if (g && altKeyDown) {
+      // 【按住 Alt】放下才改父组：落在某个组内 → 设为其子组（最内层那个）；落在空白 → 设为顶层。否则只是移动。
       const ti = innermostGroupAt(gd.last[0], gd.last[1], g);
       const tTitle = ti >= 0 ? (groupDefs[ti].title || "分组") : null;
       setGroupParent(g, ti >= 0 ? groupDefs[ti].id : null);
@@ -3271,9 +3287,9 @@ const ED = (function () {
         scheduleSnap(); selectedNode = null; if (helpEl) helpEl.style.display = "none";
       };
       canvas.onNodeMoved = (node) => {
-        // 拖动节点到某【展开】组框内 → 该节点（及一起拖动的选中节点）成为那个组的直接成员；拖到空白→移出。
-        // 与“拖组进组”一致：落点决定归属。仅在归属确实变化时改，避免组内微调误触发。
-        if (node && !simpleMode) {
+        // 仅【按住 Alt】拖放才改归属：拖到某展开组框内 → 成为其直接成员；拖到空白→移出。否则只是移动位置。
+        // 与“拖组进组”一致：落点决定归属。多选则随主拖动节点一起归到同一组。
+        if (node && !simpleMode && altKeyDown) {
           const sel = Object.values((canvas && canvas.selected_nodes) || {});
           const moved = (sel.length > 1 && sel.includes(node)) ? sel : [node];
           const ti = nodeDropGroupIndex(node);   // 以主拖动节点落点为准
@@ -3290,6 +3306,10 @@ const ED = (function () {
       canvas.canvas.addEventListener("dblclick", onCanvasDblClick, true);     // 双击折叠箱体 = 展开该子图
       // 兜底：任何鼠标交互结束后尝试快照（snapshotNow 用 JSON 比对去重，无变化不入栈）
       canvas.canvas.addEventListener("pointerup", scheduleSnap);
+      // 跟踪 Alt 键：按住 Alt 拖动才算“拖进/拖出分组”，否则只是移动位置（光标也会变）
+      window.addEventListener("keydown", (e) => { if (e.key === "Alt") { altKeyDown = true; if (canvas) canvas.setDirty(true, true); } }, true);
+      window.addEventListener("keyup", (e) => { if (e.key === "Alt") { altKeyDown = false; if (canvas) canvas.setDirty(true, true); } }, true);
+      window.addEventListener("blur", () => { altKeyDown = false; });
       // Ctrl+Z 撤销 / Ctrl+Y 或 Ctrl+Shift+Z 重做（编辑输入框内已 stopPropagation，不会误触）
       document.addEventListener("keydown", (e) => {
         if (!(e.ctrlKey || e.metaKey)) return;
