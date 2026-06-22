@@ -126,11 +126,22 @@ class TraceExecutor(Executor):
         super().__init__(graph)
         self.trace_path: list[str] = []        # 本帧按顺序经过的执行节点 id
         self.trace_ports: dict[str, str] = {}  # node_id -> 选择的出口名
+        self.trace_data: set[str] = set()      # 本帧被求值过的【纯数据节点】id（供数据节点也能命中断点）
 
     def run_tick(self, ctx: ExecutionContext, dt: float = 0.0) -> None:
         self.trace_path = []
         self.trace_ports = {}
+        self.trace_data = set()
         super().run_tick(ctx, dt)
+
+    def _resolve(self, ctx: ExecutionContext, node_id: str, port: str):
+        # 纯数据节点（算式/匹配/OCR…）不走执行流、不进 trace_path，原来断点永远命中不到。
+        # 这里把本帧实际被拉取求值过的数据节点记下来，断点检查时与 trace_path 合并即可命中。
+        val = super()._resolve(ctx, node_id, port)
+        node = self.graph.nodes.get(node_id)
+        if node is not None and not node.has_exec():
+            self.trace_data.add(node_id)
+        return val
 
     def _walk(self, ctx: ExecutionContext) -> None:
         node_id: Optional[str] = self.graph.entry_id()

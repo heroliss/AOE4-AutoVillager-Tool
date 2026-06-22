@@ -575,12 +575,15 @@ class Api:
                         if self._run_ctx.param_writes else None
                     path = list(self._run_exec.trace_path)
                     ports = dict(self._run_exec.trace_ports)
-                    # 断点 / 运行到此节点：本帧路径命中即自停
+                    # 断点 / 运行到此节点：本帧路径命中即自停。
+                    # visited = 执行节点(有序) + 本帧求值过的纯数据节点(算式/匹配/OCR…)，让数据节点也能命中断点。
                     hit = None
-                    if self._run_until and self._run_until in path:
+                    data_hit = getattr(self._run_exec, "trace_data", None) or set()
+                    visited = path + [d for d in data_hit if d not in path]
+                    if self._run_until and self._run_until in visited:
                         hit, self._run_until = self._run_until, None
                     elif self._run_bps:
-                        for nid in path:
+                        for nid in visited:
                             if nid in self._run_bps:
                                 hit = nid
                                 break
