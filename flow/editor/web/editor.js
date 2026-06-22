@@ -1705,9 +1705,9 @@ const ED = (function () {
     };
     // 值的友好显示：布尔 → 开/关（switch 的 false→true 直接看不懂）。
     const fmtVal = (v) => (v === true || v === "true") ? "开" : (v === false || v === "false") ? "关" : String(v);
-    for (const n of cur.nodes) if (!baseN[n.id]) push(`＋ 新增节点：${titleOf(n)}`);
-    for (const n of savedBaseline.nodes) if (!curN[n.id]) push(`－ 删除节点：${titleOf(n)}`);
-    let moved = 0;
+    for (const n of cur.nodes) if (!baseN[n.id]) push(`＋ 新增节点：${titleOf(n)}`, () => removeNodeById(n.id));
+    for (const n of savedBaseline.nodes) if (!curN[n.id]) push(`－ 删除节点：${titleOf(n)}`, () => recreateNodeFrom(n));
+    const moves = [];
     for (const n of cur.nodes) {
       const b = baseN[n.id]; if (!b) continue;
       for (const k in (n.params || {}))
@@ -1717,15 +1717,16 @@ const ED = (function () {
         }
       if ((n.note || "") !== (b.note || "")) push(`◇ ${titleOf(n)}：描述已修改`, () => restoreNote(n.id, b.note || ""));
       const bp = b.pos || [0, 0], np = n.pos || [0, 0];
-      if (Math.round(bp[0]) !== Math.round(np[0]) || Math.round(bp[1]) !== Math.round(np[1])) moved++;
+      if (Math.round(bp[0]) !== Math.round(np[0]) || Math.round(bp[1]) !== Math.round(np[1])) moves.push([n, bp]);
     }
-    if (moved) push(`◇ ${moved} 个节点位置移动`);
+    // 位置移动：少量逐个可恢复；大量(如自动排版动了全图)聚合一行，避免淹没其它改动(用 Ctrl+Z 撤销排版更快)。
+    if (moves.length > 6) push(`◇ ${moves.length} 个节点位置移动（量大；撤销排版用 Ctrl+Z 更快）`);
+    else for (const [n, bp] of moves) push(`◇ 位置移动：${titleOf(n)}`, () => restorePos(n.id, bp[0], bp[1]));
     const ek = (e) => e.src + "|" + e.src_port + "|" + e.dst + "|" + e.dst_port;
     const baseE = new Set(savedBaseline.edges.map(ek)), curE = new Set(cur.edges.map(ek));
-    const ea = cur.edges.filter((e) => !baseE.has(ek(e))).length;
-    const er = savedBaseline.edges.filter((e) => !curE.has(ek(e))).length;
-    if (ea) push(`＋ 新增连线 ${ea} 条`);
-    if (er) push(`－ 删除连线 ${er} 条`);
+    const edgeName = (e) => { const s = nodeOf(e.src), d = nodeOf(e.dst); return (s ? titleOf(s) : e.src) + "·" + e.src_port + " → " + (d ? titleOf(d) : e.dst) + "·" + e.dst_port; };
+    for (const e of cur.edges) if (!baseE.has(ek(e))) push(`＋ 新增连线：${edgeName(e)}`, () => removeEdgeByPorts(e.src, e.src_port, e.dst, e.dst_port));
+    for (const e of savedBaseline.edges) if (!curE.has(ek(e))) push(`－ 删除连线：${edgeName(e)}`, () => addEdgeByPorts(e.src, e.src_port, e.dst, e.dst_port));
     // —— 以下把“笼统一句话”改成逐项列出，便于核对本次到底改了什么 ——
     const pkName = structName;   // 结构名（节点·参数），用于“改名/暴露”等需要点出是哪个参数的地方
     const splitK = (k) => { const i = k.indexOf("|"); return [k.slice(0, i), k.slice(i + 1)]; };
@@ -2216,6 +2217,28 @@ const ED = (function () {
     scheduleSnap(); refreshDirty();
   }
   function restoreLabel(id, key, name) { setPinLabel(id, key, name); }   // 空=清除显示名（回落默认）
+  // —— 结构性改动的单条恢复（位置移动 / 节点增删 / 连线增删）——
+  function _afterEdit() { if (canvas) canvas.setDirty(true, true); scheduleSnap(); refreshDirty(); }
+  function restorePos(id, x, y) { const n = nodeByOurId(id); if (n) n.pos = [x, y]; _afterEdit(); }
+  function removeNodeById(id) { const n = nodeByOurId(id); if (n) { try { graph.remove(n); } catch (e) {} } _afterEdit(); }
+  function recreateNodeFrom(b) {   // b = 基线节点数据 {id,type,pos,params,note}（连线作为单独条目各自恢复）
+    if (nodeByOurId(b.id)) return;
+    const key = typeKeyByType[b.type]; if (!key) return;
+    const n = LiteGraph.createNode(key); if (!n) return;
+    n._id = b.id; n._typeId = b.type; n._note = b.note || "";
+    n.pos = [b.pos ? b.pos[0] : 0, b.pos ? b.pos[1] : 0];
+    for (const w of (n.widgets || [])) if (b.params && w._key in b.params) { w.value = (w.type === "combo") ? String(b.params[w._key]) : b.params[w._key]; n.properties[w._key] = w.value; }
+    try { graph.add(n); } catch (e) {}
+    _afterEdit();
+  }
+  function addEdgeByPorts(src, sp, dst, dp) {
+    const a = nodeByOurId(src), b = nodeByOurId(dst); if (a && b) { const so = a.findOutputSlot(sp), si = b.findInputSlot(dp); if (so >= 0 && si >= 0) { try { a.connect(so, b, si); } catch (e) {} } }
+    _afterEdit();
+  }
+  function removeEdgeByPorts(src, sp, dst, dp) {
+    const a = nodeByOurId(src), b = nodeByOurId(dst); if (a && b) { const so = a.findOutputSlot(sp); if (so >= 0) { try { a.disconnectOutput(so, b); } catch (e) {} } }
+    _afterEdit();
+  }
 
   // 默认显示名：「节点标题 · 参数标签」——自带节点上下文，多个节点置顶/暴露同名参数（区域/阈值/间隔(秒)…）也不混淆。
   // 控制面板与折叠箱体【共用这同一个默认】；填了自定义名则两处都用自定义名（随流程保存）。
