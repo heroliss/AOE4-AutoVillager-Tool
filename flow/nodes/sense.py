@@ -162,6 +162,7 @@ class TemplateMatch(DataNode):
                      "which": best_idx, "in_transition": in_transition}
         if ctx.preview_enabled:
             self.live["preview"] = _imaging.encode_preview(img)   # 节点上预览“它看到的区域”
+            self.live["preview_label"] = f"匹配 {best_conf:.2f}" + ("" if found else " (未命中)")
         return {"found": found, "confidence": best_conf,
                 "which": best_idx, "in_transition": in_transition}
 
@@ -235,6 +236,7 @@ class OcrText(DataNode):
         self.live = {"raw": raw}
         if ctx.preview_enabled:
             self.live["preview"] = _imaging.encode_preview(img)
+            self.live["preview_label"] = f"识别: {raw}" if raw else "识别: (空)"
         return {"text": raw, "ok": bool(raw)}
 
 
@@ -300,5 +302,7 @@ class OcrNumber(DataNode):
         self.live = {"raw": raw, "value": v1, "value2": v2, "numbers": numbers}
         if ctx.preview_enabled:
             self.live["preview"] = _imaging.encode_preview(img)
+            self.live["preview_label"] = ("识别: " + (str(v1) if v1 is not None else "?")
+                                          + (f"/{v2}" if v2 is not None else "") + f"  「{raw}」")
         return {"numbers": numbers, "value": v1, "value2": v2,
                 "ok": bool(numbers), "text": raw}

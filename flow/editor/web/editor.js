@@ -41,7 +41,7 @@ const ED = (function () {
   let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let profileOn = false, runTimes = {};         // 性能监控：开关 + 本帧各节点 [自身ms, 累计ms]
-  let previewOn = false, runPreviews = {};      // 截图预览：开关 + 各感知节点截到的区域图(base64 PNG)
+  let previewOn = false, runPreviews = {}, runPreviewLabels = {};   // 截图预览：开关 + 各感知节点截到的区域图(base64 PNG) + 一行标签(置信度/识别值)
   const _previewImgCache = {};                  // nodeId -> {b64, img}：解码后的 Image 缓存，避免每帧重建
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
   let bpHitId = null;                           // 当前“因命中断点而暂停”停在的节点 ourId（用于醒目高亮+居中；继续/停止后清空）
@@ -1443,8 +1443,10 @@ const ED = (function () {
         ctx.fillStyle = "#0b0d11"; ctx.fillRect(-2, y - 2, dw + 4, dh + 17);
         ctx.strokeStyle = "#5a93d4"; ctx.lineWidth = 1; ctx.strokeRect(-2, y - 2, dw + 4, dh + 4);
         try { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, 0, y, dw, dh); } catch (e) {}
+        // 标签：有置信度/识别值就显示它（清晰文字、不烤进图里→不会被裁切），否则显示“实时截图”
+        const plabel = runPreviewLabels[this._id];
         ctx.fillStyle = "#8fb6e0"; ctx.font = "10px 'Microsoft YaHei',sans-serif";
-        ctx.fillText("🖼 实时截图", 0, y + dh + 11);
+        ctx.fillText("🖼 " + (plabel || "实时截图"), 0, y + dh + 11);
         ctx.restore();
       }
     }
@@ -2121,7 +2123,7 @@ const ED = (function () {
     if (runSession && !(opts && opts.keepHistory)) {
       running = false; stopPoll(); stopRunAnim();
       try { api().run_end(); } catch (e) {}
-      runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; setRunUI();
+      runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; runPreviewLabels = {}; setRunUI();
     }
     const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
     const keepHistory = !!(opts && opts.keepHistory);   // 自动排版：保留撤销历史（这样排版可被 Ctrl+Z 撤销）
@@ -2274,20 +2276,31 @@ const ED = (function () {
   // 让界面也显示成新值、并记为一处可保存/可恢复的改动。按 (节点|参数) 去重，避免每帧重复套用。
   let _appliedPW = {};
   function applyRunParamWrites(pw) {
-    let any = false;
+    let any = false, lastMsg = "";
     for (const nid in pw) {
       const kv = pw[nid] || {};
       for (const key in kv) {
         const sig = nid + "|" + key, val = kv[key];
-        if (_appliedPW[sig] === val) continue;     // 已套用且未变 → 跳过(免每帧重复 scheduleSnap)
+        if (_appliedPW[sig] === val) continue;     // 已套用且未变 → 跳过(免每帧重复)
         const n = nodeByOurId(nid); if (!n) continue;
         _appliedPW[sig] = val;
-        restoreParam(nid, key, val);               // 复用：回写 widget+properties，记为改动(可在「查看修改」里恢复)
-        try { flashLocate(n, key); } catch (e) {}  // 高亮一下，提醒用户“这个开关被自动改了”
+        // 直接回写控件值 + properties（不经 restoreParam，避免其在运行中的副作用把这次回写吞掉）
+        const w = (n.widgets || []).find((x) => x._key === key);
+        if (w) w.value = (w.type === "combo") ? String(val) : (w.type === "toggle" ? !!val : val);
+        if (!n.properties) n.properties = {};
+        n.properties[key] = w ? w.value : val;
+        try { flashLocate(n, key); } catch (e) {}
+        const lab = (typeof panelLabel === "function" && panelLabel(n, key)) || n.title || key;
+        lastMsg = "⚙ 「设置开关」已把「" + lab + "」设为「" + (val ? "开" : "关") + "」";
         any = true;
       }
     }
-    if (any) renderPanel();                          // 同步刷新控制面板控件（restoreParam 不刷面板）——否则面板勾选不跟着变
+    if (any) {
+      if (canvas) canvas.setDirty(true, true);       // 强制【整屏】重绘（节点本体+背景），保证开关勾选立刻刷新
+      renderPanel();                                  // 同步刷新控制面板控件——否则面板勾选不跟着变
+      scheduleSnap();                                 // 记为可保存/可恢复的改动 + 运行中热更新引擎
+      try { setStatus(lastMsg); } catch (e) {}        // 状态栏给出可见确认（即使节点在折叠组里看不到，也知道生效了）
+    }
   }
   // —— 结构性改动的单条恢复（位置移动 / 节点增删 / 连线增删）——
   function _afterEdit() { if (canvas) canvas.setDirty(true, true); scheduleSnap(); refreshDirty(); }
@@ -3239,6 +3252,7 @@ const ED = (function () {
       runTimes = t.times || (profileOn ? runTimes : {});   // 仅在“性能监控”开启时引擎才附带耗时
       if (t.previews) runPreviews = t.previews;             // 截图预览：各感知节点截到的区域图(base64)
       else if (!previewOn) runPreviews = {};
+      runPreviewLabels = t.preview_labels || (previewOn ? runPreviewLabels : {});   // 预览标签(置信度/识别值)，编辑器以清晰文字显示
       if (t.param_writes) applyRunParamWrites(t.param_writes);   // 把运行时自动改写(如设开关)落到编辑器控件+面板(试运行同样反映，便于调试；记为可恢复的改动)
       _lastTick = t.tick;
     }
@@ -3304,7 +3318,7 @@ const ED = (function () {
   async function stopRun() {
     running = false; stopPoll(); stopRunAnim(); bpHitId = null;
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
-    runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {};
+    runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; runPreviewLabels = {};
     setRunUI();
     if (canvas) canvas.setDirty(true, true);
     setStatus("已停止运行");

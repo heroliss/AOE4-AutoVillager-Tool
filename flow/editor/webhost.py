@@ -558,12 +558,18 @@ class Api:
                         times = {nid: [round(s, 2), round(c, 2)]
                                  for nid, (s, c) in self._run_ctx.profile_snapshot().items()}
                     previews = None
-                    if self._run_ctx.preview_enabled:   # 截图预览开启时附带各感知节点「截到的区域图」
+                    preview_labels = None
+                    if self._run_ctx.preview_enabled:   # 截图预览开启时附带各感知节点「截到的区域图」+ 一行清晰标签(置信度/识别值等)
                         previews = {}
+                        preview_labels = {}
                         for nid, node in self._run_graph.nodes.items():
-                            b64 = getattr(node, "live", None) and node.live.get("preview")
+                            live = getattr(node, "live", None) or {}
+                            b64 = live.get("preview")
                             if b64:
                                 previews[nid] = b64
+                            lbl = live.get("preview_label")
+                            if lbl:
+                                preview_labels[nid] = lbl
                     # 运行时被节点改写过的别人参数（如「关闭开关」自动关掉某开关）：推给前端，让界面控件也显示成新值
                     pwrites = {nid: dict(kv) for nid, kv in self._run_ctx.param_writes.items()} \
                         if self._run_ctx.param_writes else None
@@ -580,7 +586,8 @@ class Api:
                                 break
                 with self._snap_lock:        # 出 _run_lock 后再短暂占快照锁发布（轮询绝不阻塞跑帧）
                     self._latest = {"tick": tick, "path": path, "ports": ports, "data": data,
-                                    "times": times, "previews": previews, "param_writes": pwrites}
+                                    "times": times, "previews": previews, "preview_labels": preview_labels,
+                                    "param_writes": pwrites}
                     self._pending_logs.extend(new_logs)
                     if len(self._pending_logs) > _RUN_LOG_CAP:   # 前端长时间不取（窗口最小化时 rAF 暂停）也不无限堆积
                         del self._pending_logs[: len(self._pending_logs) - _RUN_LOG_CAP]

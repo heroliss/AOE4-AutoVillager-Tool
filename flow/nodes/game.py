@@ -110,6 +110,7 @@ class Occlusion(DataNode):
         self.live = {"confidence": conf, "state": status}
         if ctx.preview_enabled:
             self.live["preview"] = _imaging.encode_preview(img)
+            self.live["preview_label"] = f"{status} {conf:.2f}"
         return {"blocked": blocked, "in_transition": in_transition,
                 "clear": clear, "confidence": conf, "state": status}
 
@@ -149,9 +150,12 @@ class BuildingCount(DataNode):
                   help="只有 1 个该建筑时、上面那块区域的模板图。"),
         ParamSpec("numbered_templates", "数字模板(按序)", "templates", default=[],
                   help="number_1.png, number_2.png ... 顺序排列；序号N对应 1+N 个建筑（如 tc_number_1 / market_number_1 ...）"),
-        ParamSpec("threshold", "匹配阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01),
-        ParamSpec("crop_size", "数字裁剪尺寸", "int", default=20, minimum=4, maximum=64),
-        ParamSpec("early_exit", "提前退出阈值", "float", default=0.95, minimum=0.0, maximum=1.0, step=0.01),
+        ParamSpec("threshold", "匹配阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01,
+                  help="匹配分数≥它才算命中。没数到又看着挺像，就把它调低些；总误判就调高。开「🖼预览」看实时分数。"),
+        ParamSpec("slide_margin", "滑动余量(px)", "int", default=6, minimum=0, maximum=40,
+                  help="匹配时把检测区域【向四周各扩大】这么多像素，让模板能在里面小幅滑动找到最佳对齐位置——"
+                       "这能极大改善“截图几乎一样、分数却很低”的问题（同尺寸硬匹配对 1~2px 错位极敏感）。"
+                       "设 0=不留余量(旧行为)。一般 4~8 即可。"),
         ParamSpec("retry_max", "重试次数", "int", default=8, minimum=0, maximum=30,
                   help="按“选所有TC键”后若没立刻识别到 TC 面板（UI 还在刷新），最多再重截+重匹配这么多次；"
                        "一旦识别到就立即返回，UI 快时几乎零等待。设 0=不重试（回到一次性检测）。"),
@@ -160,71 +164,55 @@ class BuildingCount(DataNode):
                        "最坏耗时 ≈ 重试次数 × 本间隔，仅在迟迟没识别到时才会用满。"),
     ]
 
-    _crop_cache: dict = {}
-
-    def _load_crop(self, path: str, size: int):
-        key = (path, size)
-        if key in self._crop_cache:
-            return self._crop_cache[key]
-        g = _imaging.load_gray(path)
-        if g is None or g.shape[0] < size or g.shape[1] < size:
-            self._crop_cache[key] = None
-            return None
-        crop = g[0:size, 0:size]
-        self._crop_cache[key] = crop
-        return crop
-
     @staticmethod
     def _f(v):
         return "—" if v is None else f"{v:.2f}"
 
+    def _grab(self, ctx, region, margin, fresh):
+        """截取检测区域，并【向四周各扩大 margin 像素】——给模板留出滑动余量，
+        让 matchTemplate 能在区域内小幅平移、找到最佳对齐，从而对 1~2px 错位稳健（关键修复）。"""
+        l, t, r, b = region
+        return _imaging.to_gray(ctx.capture_region([l - margin, t - margin, r + margin, b + margin], fresh=fresh))
+
     def _detect_once(self, ctx, thr, fresh):
         """单次检测当前选中建筑数量。fresh=True 时绕过本帧截图缓存、重新截屏（供重试用）。
-        返回 (结果dict, 路径文字)。顺带把各阶段匹配置信度记到 self._dbg，供预览/调试显示。"""
+        返回 (结果dict, 路径文字)。顺带把各阶段匹配置信度记到 self._dbg，供预览/调试显示。
+
+        匹配策略：在【略放大的搜索区】里滑动整张模板取最高分（不再用“同尺寸硬匹配 + 左上角裁剪”那套对
+        错位极敏感的老办法）。数量识别 = 让每个数字模板各自滑动匹配、分最高者即当前数量。"""
         name = self.values.get("building_name") or "建筑"
-        dbg = {"single": None, "icon": None, "digit": None, "decided": 0.0, "thr": thr}
+        thr = float(thr)
+        margin = int(self.values.get("slide_margin", 6) or 0)
+        dbg = {"single": None, "icon": None, "decided": 0.0, "thr": thr}
         self._dbg = dbg
-        # 1) 单个预检测
+
+        # 1) 单个预检测：单建筑模板在(放大的)单建筑区域里滑动匹配
         single_tmpl = _imaging.load_gray(self.values["single_template"])
         if single_tmpl is not None:
-            sg = _imaging.to_gray(ctx.capture_region(self.values["single_region"], fresh=fresh))
-            ss = _imaging.best_match(sg, single_tmpl)
+            ss = _imaging.best_match(self._grab(ctx, self.values["single_region"], margin, fresh), single_tmpl)
             dbg["single"] = ss
             if ss >= thr:
                 dbg["decided"] = ss
                 return {"count": 1, "ok": True}, f"单{name}(single {ss:.2f}≥{thr:.2f})"
 
-        # 2) 多个：阶段1 判断是否有数量图标
+        # 2) 数量：每个数字模板在(放大的)数量区域里滑动匹配，取最高分者即当前数量
         numbered = self.values["numbered_templates"] or []
-        icon_gray = _imaging.to_gray(ctx.capture_region(self.values["icon_region"], fresh=fresh))
-        c0 = _imaging.best_match(icon_gray, _imaging.load_gray(numbered[0])) if numbered else 0.0
-        dbg["icon"] = c0
-        if not numbered or c0 < thr:
-            dbg["decided"] = max(dbg["single"] or 0.0, c0)
-            return ({"count": 0, "ok": False},
-                    f"未检测到{name}(single {self._f(dbg['single'])} / count {self._f(c0)} 均 < {thr:.2f})")
-
-        # 3) 阶段2：左上角精确匹配数字
-        size = self.values["crop_size"]
-        if icon_gray.shape[0] < size or icon_gray.shape[1] < size:
-            return {"count": 1, "ok": True}, "区域过小"
-        crop = icon_gray[0:size, 0:size]
-        best_n, best_c = 1, 0.0
+        if not numbered:
+            dbg["decided"] = dbg["single"] or 0.0
+            return {"count": 0, "ok": False}, f"未检测到{name}(无数字模板)"
+        search = self._grab(ctx, self.values["icon_region"], margin, fresh)
+        best_n, best_c = 0, 0.0
         for i, path in enumerate(numbered, start=1):
-            tmpl_crop = self._load_crop(path, size)
-            if tmpl_crop is None:
-                break
-            import cv2
-            res = cv2.matchTemplate(crop, tmpl_crop, cv2.TM_CCOEFF_NORMED)
-            _, mv, _, _ = cv2.minMaxLoc(res)
-            if mv > best_c:
-                best_c, best_n = mv, i
-                if mv >= self.values["early_exit"]:
-                    break
-        dbg["digit"] = best_c
-        dbg["decided"] = best_c
+            sc = _imaging.best_match(search, _imaging.load_gray(path))
+            if sc > best_c:
+                best_c, best_n = sc, i
+        dbg["icon"] = best_c
+        dbg["decided"] = max(dbg["single"] or 0.0, best_c)
+        if best_c < thr:
+            return ({"count": 0, "ok": False},
+                    f"未检测到{name}(single {self._f(dbg['single'])} / count {self._f(best_c)} 均 < {thr:.2f})")
         count = 1 + best_n
-        return {"count": count, "ok": True}, f"{name}×{count}(digit {best_c:.2f})"
+        return {"count": count, "ok": True}, f"{name}×{count}(count {best_c:.2f})"
 
     def evaluate(self, ctx, inputs):
         thr = self.values["threshold"]
@@ -245,16 +233,18 @@ class BuildingCount(DataNode):
         dbg = getattr(self, "_dbg", {}) or {}
         out["conf"] = round(float(dbg.get("decided") or 0.0), 3)   # 暴露“决定本次结果的那一档”置信度，便于调参/排查
         self.live = {"count": out["count"], "path": path, "tries": tries,
-                     "single": dbg.get("single"), "count_conf": dbg.get("icon"), "digit": dbg.get("digit")}
+                     "single": dbg.get("single"), "count_conf": dbg.get("icon")}
         if ctx.preview_enabled:
-            # 左右并排预览“单建筑预检测区域(single)”和“数量图标区域(count)”+各自置信度——这两块各自独立，
-            # 单建筑没数到时(如只有1个市场却 count=0)，多半是 single 这块没对准、或分数没过阈值，一眼可查。
+            # 左右并排预览“单建筑预检测区域(1x)”和“数量图标区域(Nx)”——这两块各自独立；
+            # 置信度走 preview_label(编辑器里以清晰文字显示，不再烤进图里被裁切)。单个没数到多半是 1x 那块没对准/分低。
             items = []
             sr = self.values.get("single_region")
             if sr:
-                items.append((f"single {self._f(dbg.get('single'))}", ctx.capture_region(sr)))
-            items.append((f"count {self._f(dbg.get('icon'))}", ctx.capture_region(self.values["icon_region"])))
+                items.append(("1x", ctx.capture_region(sr)))
+            items.append(("Nx", ctx.capture_region(self.values["icon_region"])))
             self.live["preview"] = _imaging.encode_preview_stack(items)
+            self.live["preview_label"] = (f"single {self._f(dbg.get('single'))} · "
+                                          f"count {self._f(dbg.get('icon'))} (阈值{self._f(thr)})")
         return out
 
 

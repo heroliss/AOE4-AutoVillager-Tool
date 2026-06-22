@@ -416,7 +416,7 @@
       "type": "sense.ocr_number",
       "pos": [
         6049.5,
-        1154.0
+        1130.0
       ],
       "params": {
         "region": [
@@ -462,8 +462,7 @@
           "templates/tc_number_6.png"
         ],
         "threshold": 0.7,
-        "crop_size": 20,
-        "early_exit": 0.95,
+        "slide_margin": 6,
         "retry_max": 8,
         "retry_interval": 0.02
       },
@@ -1104,8 +1103,7 @@
           "templates/market_num_9.png"
         ],
         "threshold": 0.7,
-        "crop_size": 20,
-        "early_exit": 0.95,
+        "slide_margin": 6,
         "retry_max": 8,
         "retry_interval": 0.02
       },
@@ -1140,7 +1138,7 @@
       "type": "data.const_number",
       "pos": [
         9706.0,
-        1070.0
+        1046.0
       ],
       "params": {
         "value": 2
