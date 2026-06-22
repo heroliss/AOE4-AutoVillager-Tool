@@ -1689,15 +1689,46 @@ const ED = (function () {
     const er = savedBaseline.edges.filter((e) => !curE.has(ek(e))).length;
     if (ea) out.push(`＋ 新增连线 ${ea} 条`);
     if (er) out.push(`－ 删除连线 ${er} 条`);
-    if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
-    const lblsig = (m) => JSON.stringify(Object.keys(m || {}).sort().map((k) => k + "=" + m[k]));
-    if (lblsig(cur.labels) !== lblsig(savedBaseline.labels)) out.push("◇ 参数显示名已修改");
-    const exsig = (a) => JSON.stringify([...(a || [])].map((x) => (Array.isArray(x) ? x.join("|") : x)).sort());
-    if (exsig(cur.foldparams) !== exsig(savedBaseline.foldparams) || exsig(cur.groupexpose) !== exsig(savedBaseline.groupexpose)) out.push("◇ 暴露参数已修改");
-    const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, p: g.parent || null, d: g.desc || "", m: (g.members || []).slice().sort(),
-        x: (!(g.members || []).length && g.pos) ? [Math.round(g.pos[0]), Math.round(g.pos[1])] : null }))   // 空组位置变化也算“分组已修改”
-      .sort((a, b) => (a.t < b.t ? -1 : 1)));
-    if (gsig(cur.groups) !== gsig(savedBaseline.groups)) out.push("◇ 分组已修改");
+    // —— 以下把“笼统一句话”改成逐项列出，便于核对本次到底改了什么 ——
+    const nodeOf = (id) => curN[id] || baseN[id];
+    const pkName = (id, key) => { const n = nodeOf(id); return (n ? titleOf(n) : id) + "·" + (n ? paramLabelByType(n.type, key) : key); };
+    const splitK = (k) => { const i = k.indexOf("|"); return [k.slice(0, i), k.slice(i + 1)]; };
+    // 控制面板置顶项：逐项列出增 / 删 / 改名 / 调序
+    const pKey = (p) => p[0] + "|" + p[1];
+    const baseP = {}, curP = {};
+    for (const p of (savedBaseline.panel || [])) baseP[pKey(p)] = p;
+    for (const p of (cur.panel || [])) curP[pKey(p)] = p;
+    for (const k in curP) if (!(k in baseP)) out.push(`＋ 面板置顶：${pkName(curP[k][0], curP[k][1])}`);
+    for (const k in baseP) if (!(k in curP)) out.push(`－ 取消面板置顶：${pkName(baseP[k][0], baseP[k][1])}`);
+    for (const k in curP) if ((k in baseP) && (curP[k][2] || "") !== (baseP[k][2] || "")) out.push(`◇ 面板显示名：${pkName(curP[k][0], curP[k][1])} → ${curP[k][2] || "(默认)"}`);
+    {
+      const co = (cur.panel || []).map(pKey).join(","), bo = (savedBaseline.panel || []).map(pKey).join(",");
+      if (co !== bo && co.split(",").sort().join() === bo.split(",").sort().join()) out.push("◇ 面板项顺序已调整");
+    }
+    // 参数显示名（面板 / 折叠箱体共用）
+    const cl = cur.labels || {}, bl = savedBaseline.labels || {};
+    for (const k in cl) if (cl[k] !== bl[k]) { const [id, key] = splitK(k); out.push(`◇ 显示名：${pkName(id, key)} → ${cl[k]}`); }
+    for (const k in bl) if (!(k in cl)) { const [id, key] = splitK(k); out.push(`◇ 清除显示名：${pkName(id, key)}`); }
+    // 暴露给所在组的参数
+    const fKey = (p) => p[0] + "|" + p[1];
+    const baseF = new Set((savedBaseline.foldparams || []).map(fKey)), curF = new Set((cur.foldparams || []).map(fKey));
+    for (const k of curF) if (!baseF.has(k)) { const [id, key] = splitK(k); out.push(`＋ 暴露给组：${pkName(id, key)}`); }
+    for (const k of baseF) if (!curF.has(k)) { const [id, key] = splitK(k); out.push(`－ 取消暴露：${pkName(id, key)}`); }
+    const geSig = (a) => JSON.stringify([...(a || [])].map((x) => x.join("|")).sort());
+    if (geSig(cur.groupexpose) !== geSig(savedBaseline.groupexpose)) out.push("◇ 组的“向上暴露”设置已修改");
+    // 分组：逐个列出改了什么
+    const gById = (gs) => { const m = {}; for (const g of (gs || [])) m[g.id] = g; return m; };
+    const bg = gById(savedBaseline.groups), cg = gById(cur.groups);
+    for (const id in cg) {
+      const c = cg[id], b = bg[id];
+      if (!b) { out.push(`＋ 新增分组：${c.title || "分组"}`); continue; }
+      if ((c.title || "") !== (b.title || "")) out.push(`◇ 分组改名：${b.title} → ${c.title}`);
+      if ((c.desc || "") !== (b.desc || "")) out.push(`◇ 分组「${c.title}」描述已修改`);
+      const cm = (c.members || []).slice().sort().join(","), bm = (b.members || []).slice().sort().join(",");
+      if (cm !== bm) out.push(`◇ 分组「${c.title}」成员变化`);
+      if (!!c.collapsed !== !!b.collapsed) out.push(`◇ 分组「${c.title}」${c.collapsed ? "已折叠" : "已展开"}`);
+    }
+    for (const id in bg) if (!(id in cg)) out.push(`－ 删除分组：${bg[id].title || "分组"}`);
     return out;
   }
 
@@ -2278,22 +2309,13 @@ const ED = (function () {
     const sel = document.getElementById("builtin");
     if (!sel) return;
     const key = String(flowMeta.path || "").replace(/\\/g, "/");
-    const base = key.split("/").pop();
     let idx = -1;
-    // 先按【完整路径】精确匹配——否则“同名不同目录”会冲突：内置 flows/combined.flow.json 与
-    // 自定义 user_flows/combined.flow.json 文件名相同时，按文件名兜底会误选到排在前面的内置项，
-    // 导致下拉显示的“当前流程”其实是内置——再点内置就“没变化”、onchange 不触发、于是切不过去。
-    for (let i = 0; i < sel.options.length; i++) {
-      if (sel.options[i].value && sel.options[i].value.replace(/\\/g, "/") === key) { idx = i; break; }
-    }
-    // 没有精确匹配时，才按文件名兜底，且仅当全列表中该文件名唯一（避免再次误选到同名项）。
-    if (idx < 0 && base) {
-      const hits = [];
-      for (let i = 0; i < sel.options.length; i++) {
-        const v = sel.options[i].value;
-        if (v && v.replace(/\\/g, "/").split("/").pop() === base) hits.push(i);
-      }
-      if (hits.length === 1) idx = hits[0];
+    // 下拉项的值是【相对路径】"flows/xxx" / "user_flows/xxx"；而 flowMeta.path 可能是相对(下拉打开的)
+    // 也可能是绝对(刚“另存为”的)。按【相对尾路径】匹配：v===key 或 key 以 "/"+v 结尾——
+    // 这样既区分“同名不同目录”(内置 vs 我的流程)，又兼容绝对路径(另存为后下拉能正确选中，不再空白)。
+    if (key) for (let i = 0; i < sel.options.length; i++) {
+      const v = String(sel.options[i].value || "").replace(/\\/g, "/");
+      if (v && (v === key || key.endsWith("/" + v))) { idx = i; break; }
     }
     sel.selectedIndex = idx;
   }
