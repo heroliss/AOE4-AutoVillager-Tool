@@ -2876,6 +2876,55 @@ const ED = (function () {
     ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.fillText(label, px + 7, py + 11);
     ctx.restore();
   }
+  // 悬停/选中某节点时：点亮它的所有连线（按类型上色、加粗、发光 + 方向箭头），其余连线压暗——
+  // 密集线团里一眼看清“这个节点连了哪些、流向哪”。静止时零额外动画、不打扰；试运行时让位给运行可视化。
+  function _linkColor(A, l) {
+    const os = A.outputs && A.outputs[l.origin_slot];
+    return (os && LGraphCanvas.link_type_colors[os.type]) || "#9aa3af";
+  }
+  function _bezAt(p0, c0, c1, p1, t) {
+    const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+    return [a * p0[0] + b * c0[0] + c * c1[0] + d * p1[0], a * p0[1] + b * c0[1] + c * c1[1] + d * p1[1]];
+  }
+  function _drawDirArrow(ctx, pa, pb, color) {
+    const cc = linkCtrlPts(pa, pb);
+    const m = _bezAt(pa, cc[0], cc[1], pb, 0.5);
+    const a0 = _bezAt(pa, cc[0], cc[1], pb, 0.44), a1 = _bezAt(pa, cc[0], cc[1], pb, 0.56);
+    ctx.save(); ctx.translate(m[0], m[1]); ctx.rotate(Math.atan2(a1[1] - a0[1], a1[0] - a0[0]));
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function drawLinkFocus(ctx) {
+    if (!graph || runSession || foldHidden.size) return;   // 试运行交给运行可视化；折叠态连线走箱体端口，先不掺和
+    const ids = new Set();
+    if (canvas && canvas.node_over) ids.add(canvas.node_over._id);   // 悬停
+    for (const s of Object.values((canvas && canvas.selected_nodes) || {})) ids.add(s._id);   // 选中(可多选)，与悬停并集
+    if (!ids.size) return;
+    const links = graph.links || {}, hot = [], cold = [];
+    for (const k in links) {
+      const l = links[k]; if (!l) continue;
+      const A = graph.getNodeById(l.origin_id), B = graph.getNodeById(l.target_id);
+      if (!A || !B || foldHidden.has(A._id) || foldHidden.has(B._id)) continue;
+      const pa = A.getConnectionPos(false, l.origin_slot, _t0), pb = B.getConnectionPos(true, l.target_slot, _t1);
+      const rec = { pa: [pa[0], pa[1]], pb: [pb[0], pb[1]], col: _linkColor(A, l) };
+      (ids.has(A._id) || ids.has(B._id) ? hot : cold).push(rec);
+    }
+    if (!hot.length) return;          // 焦点节点没连线就别打扰（也别凭空压暗整图）
+    ctx.save(); ctx.lineCap = "round";
+    ctx.strokeStyle = "rgba(11,13,18,0.62)"; ctx.lineWidth = 6;   // ① 压暗其余连线（半透明深色覆盖在原线上）
+    for (const r of cold) {
+      const cc = linkCtrlPts(r.pa, r.pb);
+      ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], r.pb[0], r.pb[1]); ctx.stroke();
+    }
+    for (const r of hot) {            // ② 点亮焦点连线（类型色、加粗、发光）+ 方向箭头
+      const cc = linkCtrlPts(r.pa, r.pb);
+      ctx.strokeStyle = r.col; ctx.lineWidth = 3.5; ctx.shadowColor = r.col; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], r.pb[0], r.pb[1]); ctx.stroke();
+      ctx.shadowBlur = 0; _drawDirArrow(ctx, r.pa, r.pb, r.col);
+    }
+    ctx.restore();
+  }
+
   function drawRunOverlay(ctx) {
     drawBreakpoints(ctx);                 // 断点红点：与是否试运行无关，始终显示
     if (!runSession || !graph) return;
@@ -4318,7 +4367,13 @@ const ED = (function () {
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）/ 折叠态画“子图箱体”
-      canvas.onDrawForeground = drawRunOverlay;   // 在所有节点之上画“试运行”高亮/数据/连线流动
+      canvas.onDrawForeground = (ctx) => { drawLinkFocus(ctx); drawRunOverlay(ctx); };   // 节点之上：悬停聚焦连线 + “试运行”高亮/数据/流动
+      // 悬停的节点变化时强制重绘前景，让“聚焦关联连线”实时跟手（选中变化 LiteGraph 本就会重绘）
+      let _lastHoverId = null;
+      canvas.canvas.addEventListener("mousemove", () => {
+        const id = (canvas && canvas.node_over) ? canvas.node_over._id : null;
+        if (id !== _lastHoverId) { _lastHoverId = id; if (!runSession && canvas) canvas.setDirty(true, true); }
+      });
       // 折叠子图：用自定义连线绘制——跳过组内连线、把跨边界连线改接到箱体端口；无折叠时走原版。
       const _origDrawConn = canvas.drawConnections;
       canvas.drawConnections = function (ctx) {
