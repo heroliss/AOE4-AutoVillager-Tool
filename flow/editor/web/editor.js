@@ -2900,10 +2900,11 @@ const ED = (function () {
     ctx.shadowColor = "#ff2d2d"; ctx.shadowBlur = 14 + 16 * pulse;
     roundRect(ctx, x - 3, y - 3, w + 6, h + 6, 10); ctx.stroke();
     ctx.restore();
-    const label = "⏸ 已暂停（命中断点）";    // 右上角外侧的醒目标牌
+    const label = "⏸ 已暂停（命中断点）";    // 正上方居中的醒目标牌
     ctx.save();
     ctx.font = "bold 12px 'Microsoft YaHei',sans-serif"; ctx.textBaseline = "middle";
-    const tw = ctx.measureText(label).width, px = x + w - tw - 14, py = y - 25;
+    // 居中 + 抬高：让开节点左右上角的耗时药丸（自身在左角、Σ累计在右角，都贴节点顶边）。
+    const tw = ctx.measureText(label).width, px = x + (w - (tw + 14)) / 2, py = y - 48;
     roundRect(ctx, px, py, tw + 14, 20, 6); ctx.fillStyle = "#ff5b5b"; ctx.fill();
     ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.fillText(label, px + 7, py + 11);
     ctx.restore();

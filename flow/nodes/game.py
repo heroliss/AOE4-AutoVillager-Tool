@@ -222,14 +222,18 @@ class BuildingCount(DataNode):
         # 就小步重试：等一小会、强制重截(fresh)、重匹配，直到识别到或用尽重试次数。识别到立即返回。
         out, path = self._detect_once(ctx, thr, fresh=False)
         tries = 1
-        if not ctx.dry_run:   # 干跑(无游戏)不重试，避免 selfcheck 空等
+        if not out["ok"] and not ctx.dry_run:   # 干跑(无游戏)不重试，避免 selfcheck 空等
             retry_max = int(self.values.get("retry_max", 0) or 0)
             interval = float(self.values.get("retry_interval", 0.0) or 0.0)
             while not out["ok"] and tries <= retry_max:
-                if interval > 0:
-                    time.sleep(interval)
+                # 先【立刻】重截一张重匹配：按键后面板通常已经刷新，省掉之前“先睡 interval 再截”那段白等；
+                # 只有这张仍没识别到、且还有重试次数时，才睡一小会儿等下一帧 UI。
                 out, path = self._detect_once(ctx, thr, fresh=True)
                 tries += 1
+                if out["ok"] or tries > retry_max:
+                    break
+                if interval > 0:
+                    time.sleep(interval)
 
         dbg = getattr(self, "_dbg", {}) or {}
         out["conf"] = round(float(dbg.get("decided") or 0.0), 3)   # 暴露“决定本次结果的那一档”置信度，便于调参/排查

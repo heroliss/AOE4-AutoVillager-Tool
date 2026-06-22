@@ -155,13 +155,16 @@ def main() -> None:
 
     print("== 统一生产：三段全开 -> 村民+乡骑+商人都出 ==")
     logs, _ = run_with_stubs(build_combined_graph,
-                             {**COMBINED, "sw_xq": {"value": True}, "sw_cart": {"value": True}})
-    # 注：三段共享人口池(空位)，村民+乡骑共用食物池，乡骑+商人共用黄金池，逐段扣减后结转。
-    #   空位150、食物300、黄金800都够，各段按计划数排：村民3、乡骑2、商人2（c_per_cart 默认=2）。
-    #   空位链 150→村民用3剩147→乡骑用2剩145→商人；食物链 300→村民用150剩150→乡骑(65×2)剩20；黄金链 800→乡骑(50×2)剩700→商人。
-    ok &= check("出乡骑 e x2 = min(2*1, 剩余空位147, 剩余食物150//65=2, 黄金800//50=16)", any("按键 e x2" in m for m in logs))
+                             {**COMBINED, "sw_xq": {"value": True}, "sw_cart": {"value": True},
+                              "food": {"value": 500, "value2": None, "ok": True}})  # 三段都吃食物，给足
+    # 注：三段共享人口池(空位)，村民+乡骑+商人共用食物池，乡骑+商人共用黄金池，逐段扣减后结转。
+    #   各段按计划数排：村民3、乡骑2、商人2（c_per_cart 默认=2）。
+    #   空位链 150→村民用3剩147→乡骑用2剩145→商人；
+    #   食物链 500→村民用150剩350→乡骑(65×2)剩220→商人(60×2)剩100（220//60=3≥计划2）；
+    #   黄金链 800→乡骑(50×2)剩700→商人(60×2)（700//60=11≥计划2）。
+    ok &= check("出乡骑 e x2 = min(2*1, 剩余空位147, 剩余食物350//65=5, 黄金800//50=16)", any("按键 e x2" in m for m in logs))
     ok &= check("选市场 J 键(商人段开启)", any("按键 j" in m for m in logs))
-    ok &= check("出商人 q x2 = min(2*1, 剩余空位145, 剩余黄金700//60=11)", any("按键 q x2" in m for m in logs))
+    ok &= check("出商人 q x2 = min(2*1, 剩余空位145, 剩余食物220//60=3, 剩余黄金700//60=11)", any("按键 q x2" in m for m in logs))
     ok &= check("出村民 q x3", any("按键 q x3" in m for m in logs))
 
     print("== 统一生产：乡骑受食物限制（乡骑吃食物65+黄金50；食物只够1个）==")
@@ -182,6 +185,14 @@ def main() -> None:
                               "sw_cart": {"value": True}})
     ok &= check("队列已有村民则不再出村民", not any("按键 q x3" in m for m in logs))
     ok &= check("但商人段仍正常(选市场J)", any("按键 j" in m for m in logs))
+
+    print("== 统一生产：商人受食物限制（商人吃60肉60金；食物只够1个）==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "sw_vill": {"value": False}, "sw_xq": {"value": False},
+                              "sw_cart": {"value": True},
+                              "food": {"value": 80, "value2": None, "ok": True}})  # 80//60=1
+    ok &= check("商人食物只够1个 q x1 = min(计划2, 食物80//60=1, 黄金800//60=13)", any("按键 q x1" in m for m in logs))
+    ok &= check("食物只够1个则不出2个商人", not any("按键 q x2" in m for m in logs))
 
     print("== 统一生产：只开商人但没有市场 -> 自动把出商人开关设为关并提示 ==")
     logs, _ = run_with_stubs(build_combined_graph,
