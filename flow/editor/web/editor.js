@@ -22,7 +22,8 @@ const ED = (function () {
   // 一个参数要出现在第 N 层组的折叠箱体里，必须从拥有它的节点起、沿途每一层组都勾选了向上暴露（见 interfaceParams）。
   let foldPins = [];
   let groupExpose = [];
-  // 记住每个参数填过的“面板显示名”（键= nodeId|key）：取消勾选不丢，重新勾选自动回填；清空文本即“手动删除”。
+  // 参数自定义显示名的【唯一权威存储】（键= nodeId|key）：控制面板置顶 与 “暴露给所在组”折叠箱体 共用同一个名字。
+  // 与是否置顶无关——只要填了两处都用；随流程保存(labels 字段)、撤销/重做、取消勾选都不丢；清空文本即删除、回落默认名。
   let pinLabels = {};
   let _panelDrag = null;                        // 控制面板项拖动调序：正在拖的项 "nodeId|key"（仅编辑模式）
   // 可视化分组：[{title, color, collapsed?, members:[ourNodeId...]}]，框随成员节点自动包裹（仅展示，随流程保存）。
@@ -890,7 +891,8 @@ const ED = (function () {
         if (!isFoldPinned(nid, p.key)) continue;
         const sk = nid + "|" + p.key; if (seen.has(sk)) continue; seen.add(sk);
         const w = (node.widgets || []).find((x) => x._key === p.key); if (!w) continue;
-        out.push({ nid, key: p.key, node, label: p.label || p.key });
+        // 折叠箱体里的显示名与控制面板【同源】：自定义名优先，否则用同一个“节点标题 · 参数标签”默认。
+        out.push({ nid, key: p.key, node, label: customLabel(nid, p.key) || defaultPinLabel(node, p.key) });
       }
     }
     for (const c of childGroupsOf(g)) {
@@ -1570,7 +1572,8 @@ const ED = (function () {
       }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const foldparams = (c.foldparams || []).slice().sort((a, b) => ((a + "") < (b + "") ? -1 : 1));
       const groupexpose = (c.groupexpose || []).map((e) => e.join("|")).sort();
-      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, groups, foldparams, groupexpose, nodes, edges });
+      const labels = {}; Object.keys(c.labels || {}).sort().forEach((k) => { labels[k] = c.labels[k]; });   // 键排序，使签名稳定
+      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, labels, groups, foldparams, groupexpose, nodes, edges });
     } catch (e) { return null; }
   }
   function markSaved() {         // 保存/载入后：把“当前”设为基线，清除所有标记
@@ -1640,6 +1643,8 @@ const ED = (function () {
     if (ea) out.push(`＋ 新增连线 ${ea} 条`);
     if (er) out.push(`－ 删除连线 ${er} 条`);
     if (JSON.stringify(cur.panel) !== JSON.stringify(savedBaseline.panel)) out.push("◇ 控制面板项已修改");
+    const lblsig = (m) => JSON.stringify(Object.keys(m || {}).sort().map((k) => k + "=" + m[k]));
+    if (lblsig(cur.labels) !== lblsig(savedBaseline.labels)) out.push("◇ 参数显示名已修改");
     const exsig = (a) => JSON.stringify([...(a || [])].map((x) => (Array.isArray(x) ? x.join("|") : x)).sort());
     if (exsig(cur.foldparams) !== exsig(savedBaseline.foldparams) || exsig(cur.groupexpose) !== exsig(savedBaseline.groupexpose)) out.push("◇ 暴露参数已修改");
     const gsig = (gs) => JSON.stringify((gs || []).map((g) => ({ t: g.title, c: !!g.collapsed, p: g.parent || null, d: g.desc || "", m: (g.members || []).slice().sort(),
@@ -1822,10 +1827,16 @@ const ED = (function () {
     const foldparams = foldPins.filter(([nid]) => ids.has(nid)).map((p) => p.slice(0, 2));
     const gset = new Set(groupDefs.map((g) => g.id));
     const groupexpose = groupExpose.filter(([gid, nid]) => ids.has(nid) && gset.has(gid)).map((e) => e.slice(0, 3));
+    // 自定义显示名（权威存储，含未置顶但已暴露给组的）：随流程保存，面板/折叠箱体共用。
+    const labels = {};
+    for (const k in pinLabels) {
+      const nid = k.slice(0, k.indexOf("|"));
+      if (pinLabels[k] && ids.has(nid)) labels[k] = pinLabels[k];
+    }
     // 支持空组：保留所有组（含空组），随流程存盘；pos/size 用于空组兜底定位（有成员时由包围盒每帧刷新）。
     const groups = groupDefs
       .map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: (g.members || []).filter((m) => ids.has(m)), pos: g.pos || null, size: g.size || null, desc: g.desc || "" }));
-    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, groupexpose, nodes, edges };
+    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, groupexpose, labels, nodes, edges };
   }
 
   // 操作提示走底部居中的临时浮层（toast），与工具栏的“文件信息”分开、互不覆盖；几秒后淡出。
@@ -1881,7 +1892,9 @@ const ED = (function () {
     };
     if (!keepHistory) { undoStack = []; redoStack = []; breakpoints = new Set(); runUntil = null; }   // 新流程：清空撤销历史与断点（排版除外）
     panelPins = Array.isArray(flow.panel) ? flow.panel.map((x) => x.slice(0, 3)) : [];   // [nodeId, key, 自定义显示名?]
-    for (const p of panelPins) if (p[2]) pinLabels[p[0] + "|" + p[1]] = p[2];   // 把已保存的显示名种进记忆
+    pinLabels = {};   // 自定义显示名权威存储：优先从 labels 字段载入（含未置顶的），旧流程再从 panel[2] 兼容补齐
+    if (flow.labels && typeof flow.labels === "object") for (const k in flow.labels) if (flow.labels[k]) pinLabels[k] = String(flow.labels[k]);
+    for (const p of panelPins) if (p[2] && !pinLabels[p[0] + "|" + p[1]]) pinLabels[p[0] + "|" + p[1]] = p[2];
     foldPins = Array.isArray(flow.foldparams) ? flow.foldparams.map((x) => x.slice(0, 2)) : [];   // 节点暴露给所在组的参数
     groupExpose = Array.isArray(flow.groupexpose) ? flow.groupexpose.map((x) => x.slice(0, 3)) : [];   // 组再向上一级暴露的参数
     groupDefs = Array.isArray(flow.groups) ? normalizeGroups(flow.groups) : [];   // 补 id/parent，旧格式自动迁移成容器树
@@ -1949,12 +1962,8 @@ const ED = (function () {
   function togglePin(nid, key) {
     const lk = nid + "|" + key;
     const i = panelPins.findIndex((p) => p[0] === nid && p[1] === key);
-    if (i >= 0) {
-      if (panelPins[i][2]) pinLabels[lk] = panelPins[i][2];   // 取消勾选：记住已填的显示名，重新勾选时回填
-      panelPins.splice(i, 1);
-    } else {
-      panelPins.push([nid, key, pinLabels[lk] || ""]);        // 重新勾选：恢复上次填过的显示名
-    }
+    if (i >= 0) panelPins.splice(i, 1);                       // 自定义名独立存于 pinLabels，取消置顶不丢
+    else panelPins.push([nid, key, pinLabels[lk] || ""]);     // 置顶时镜像当前自定义名（保持 panel 字段兼容）
     renderPanel(); scheduleSnap(); refreshDirty();
     if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
   }
@@ -1981,16 +1990,23 @@ const ED = (function () {
     scheduleSnap(); refreshDirty();
     if (selectedGroupId) showGroupHelp(groupById(selectedGroupId));
   }
-  // 设置某置顶项“在面板上显示的名称”（空＝用默认名）。同步记进 pinLabels，取消勾选后仍保留。
-  function setPinLabel(nid, key, name) {
-    const e = pinEntry(nid, key);
-    if (!e) return;
-    e[2] = String(name || "").trim();
-    pinLabels[nid + "|" + key] = e[2];
-    renderPanel(); scheduleSnap(); refreshDirty();
+  // 自定义显示名：以 (nodeId|key) 为键的【唯一权威存储】(pinLabels)，控制面板置顶与“暴露给所在组”折叠箱体
+  // 【共用同一个名字】。与是否置顶无关——只要填了两处都用；随流程保存(labels 字段)、撤销/重做、取消勾选都不丢。
+  function customLabel(nid, key) {
+    const v = pinLabels[nid + "|" + key];
+    return v ? String(v).trim() : "";
   }
-  // 默认显示名：「节点标题 · 参数标签」——自带节点上下文，多个节点置顶同名参数（区域/阈值/间隔(秒)…）也不混淆，
-  // 用户无需逐个起名即可看懂。仍可在节点说明里给某项填更短的“自定义显示名”（随流程一起保存）。
+  // 设置某参数的自定义显示名（空＝清除、回落默认名）。面板与折叠箱体即时刷新。
+  function setPinLabel(nid, key, name) {
+    const lk = nid + "|" + key, v = String(name || "").trim();
+    if (v) pinLabels[lk] = v; else delete pinLabels[lk];
+    const e = pinEntry(nid, key); if (e) e[2] = v;   // 已置顶项的内联名同步，保持 panel 字段向后兼容
+    renderPanel(); rebuildFoldWidgets();
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty();
+  }
+  // 默认显示名：「节点标题 · 参数标签」——自带节点上下文，多个节点置顶/暴露同名参数（区域/阈值/间隔(秒)…）也不混淆。
+  // 控制面板与折叠箱体【共用这同一个默认】；填了自定义名则两处都用自定义名（随流程保存）。
   function defaultPinLabel(node, key) {
     const d = defByType[node._typeId];
     const p = d && (d.params || []).find((q) => q.key === key);
@@ -1998,8 +2014,7 @@ const ED = (function () {
     return ((d && d.title) || node._typeId) + " · " + plabel;
   }
   function panelLabel(node, key) {
-    const e = pinEntry(node._id, key);
-    return (e && e[2]) ? e[2] : defaultPinLabel(node, key);   // 自定义名优先
+    return customLabel(node._id, key) || defaultPinLabel(node, key);   // 自定义名优先（与折叠箱体同源）
   }
   // 在节点图里定位到某节点：选中并居中（取代“从面板移除”按钮，避免误点删除）。
   function locateNode(node) {
@@ -3024,7 +3039,7 @@ const ED = (function () {
     // 显示到 控制面板 / 折叠节点：两列勾选——左=置顶到顶部面板；右=折叠该参数所属分组后在折叠箱体里显示可编辑控件。
     const pinnable = (d.params || []);
     if (pinnable.length) {
-      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>左：置顶到顶部控制面板 ｜ 右：把该参数暴露给所在组（折叠该组后在组里可直接编辑；要再往上层显示需在组里继续勾选）</div>";
+      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>左：置顶到顶部控制面板 ｜ 右：把该参数暴露给所在组（折叠该组后在组里可直接编辑；要再往上层显示需在组里继续勾选）。勾选任一后可填“显示名”，面板与折叠箱体共用同一个名字。</div>";
       for (const p of pinnable) {
         const pinned = isPinned(node._id, p.key), fpinned = isFoldPinned(node._id, p.key);
         b += `<div style="margin-top:3px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">` +
@@ -3032,10 +3047,10 @@ const ED = (function () {
              `<input type="checkbox" data-pin="${esc(p.key)}" ${pinned ? "checked" : ""}> ${esc(p.label)}</label>` +
              `<label style="cursor:pointer;color:#8fb6e0;white-space:nowrap" title="把该参数暴露给它所在的分组：折叠该组后在组里显示这个可编辑控件（需先把节点加入分组）。逐级封装：要再往上一层显示，在那个组的详情里继续勾选。">` +
              `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 暴露给所在组</label>`;
-        if (pinned) {
-          const cur = (pinEntry(node._id, p.key) || [])[2] || "";
+        if (pinned || fpinned) {   // 置顶或暴露给组任一勾选都显示“显示名”输入——两处共用同一个名字
+          const cur = customLabel(node._id, p.key);
           b += `<input type="text" data-pinlabel="${esc(p.key)}" value="${esc(cur)}" ` +
-               `placeholder="${esc(defaultPinLabel(node, p.key))}" title="在控制面板上显示的名称（留空＝用默认）" ` +
+               `placeholder="${esc(defaultPinLabel(node, p.key))}" title="显示名：控制面板与“暴露给所在组”折叠箱体共用同一个名字（留空＝用默认）" ` +
                `style="flex-basis:100%;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;font-size:12px;padding:1px 4px">`;
         }
         b += `</div>`;
@@ -3573,6 +3588,9 @@ const ED = (function () {
     buildGraph(data);
     for (const n of graph._nodes) if (collapsed.has(n._id)) { n.flags = n.flags || {}; n.flags.collapsed = true; }
     panelPins = Array.isArray(data.panel) ? data.panel.map((x) => x.slice(0, 3)) : [];   // 置顶项(含自定义名)随撤销/重做恢复
+    pinLabels = {};   // 自定义显示名权威存储随撤销/重做恢复（含未置顶但暴露给组的）
+    if (data.labels && typeof data.labels === "object") for (const k in data.labels) if (data.labels[k]) pinLabels[k] = String(data.labels[k]);
+    for (const p of panelPins) if (p[2] && !pinLabels[p[0] + "|" + p[1]]) pinLabels[p[0] + "|" + p[1]] = p[2];
     foldPins = Array.isArray(data.foldparams) ? data.foldparams.map((x) => x.slice(0, 2)) : [];   // 暴露给所在组的参数随撤销/重做恢复
     groupExpose = Array.isArray(data.groupexpose) ? data.groupexpose.map((x) => x.slice(0, 3)) : [];   // 组向上暴露随撤销/重做恢复
     groupDefs = Array.isArray(data.groups) ? normalizeGroups(data.groups) : [];   // 分组（含 id/parent/折叠态）随撤销/重做恢复

@@ -216,6 +216,7 @@ def graph_to_payload(graph: Graph) -> dict:
             "groups": [dict(x) for x in graph.groups],
             "foldparams": [list(x) for x in getattr(graph, "foldparams", [])],
             "groupexpose": [list(x) for x in getattr(graph, "groupexpose", [])],
+            "labels": dict(getattr(graph, "labels", {}) or {}),
             "nodes": nodes, "edges": edges}
 
 
@@ -241,6 +242,9 @@ def payload_to_graph(payload: dict) -> Graph:
     g.foldparams = [list(p)[:2] for p in payload.get("foldparams", []) if len(p) >= 2 and p[0] in g.nodes]
     # 组“再向上一级暴露”的参数 [group_id, node_id, key]：仅保留指向现存节点的
     g.groupexpose = [list(p)[:3] for p in payload.get("groupexpose", []) if len(p) >= 3 and p[1] in g.nodes]
+    # 参数自定义显示名 {"node_id|key": "名"}：仅保留指向现存节点的（面板/折叠箱体共用）
+    g.labels = {k: str(v) for k, v in (payload.get("labels") or {}).items()
+                if isinstance(k, str) and v and k.split("|", 1)[0] in g.nodes}
     # 分组（容器树）：直接成员只保留现存节点。支持空组——保留所有组（含无成员的空组），存盘/重开后仍在。
     _grp_raw = payload.get("groups", [])
     for gr in _grp_raw:

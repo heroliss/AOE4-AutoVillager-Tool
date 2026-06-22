@@ -59,6 +59,8 @@ class Graph:
         self.foldparams: list = []
         # 组“再向上一级暴露”的参数：[ [group_id, node_id, param_key], ... ]。逐级封装、不冒泡。仅编辑器展示。
         self.groupexpose: list = []
+        # 参数自定义显示名：{ "node_id|param_key": "名" }。控制面板置顶与折叠箱体“暴露给所在组”共用同一名字。仅编辑器展示。
+        self.labels: dict = {}
 
     # ==================== 构建 ====================
     def add(self, node_id: str, node: Node, pos: tuple[float, float] = (0.0, 0.0)) -> Node:
@@ -110,6 +112,7 @@ class Graph:
             **({"groups": [dict(x) for x in self.groups]} if self.groups else {}),
             **({"foldparams": [list(x) for x in self.foldparams]} if self.foldparams else {}),
             **({"groupexpose": [list(x) for x in self.groupexpose]} if self.groupexpose else {}),
+            **({"labels": dict(self.labels)} if self.labels else {}),
             "nodes": [
                 {
                     "id": node_id,
@@ -132,6 +135,7 @@ class Graph:
         g.groups = [dict(x) for x in data.get("groups", [])]
         g.foldparams = [list(x) for x in data.get("foldparams", [])]
         g.groupexpose = [list(x) for x in data.get("groupexpose", [])]
+        g.labels = dict(data.get("labels", {}) or {})
         for nd in data.get("nodes", []):
             node = create_node(nd["type"])
             # 仅写入已声明的参数，忽略多余键，缺失键保留默认
