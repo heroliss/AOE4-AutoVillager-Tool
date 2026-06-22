@@ -1722,6 +1722,31 @@ const ED = (function () {
       defaultAct: "save",   // 主动保存：默认焦点在“保存”，回车即存
     });
   }
+  // 通用确认框（不带改动清单）：返回 Promise<bool>。danger=true 时“确定”按钮用红色。
+  function confirmAction(title, msg, okLabel, danger) {
+    return new Promise((resolve) => {
+      const old = document.getElementById("confirmdlg"); if (old) old.remove();
+      const box = document.createElement("div");
+      box.id = "confirmdlg";
+      box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(440px,94vw);" +
+        "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:14px 16px;z-index:200;" +
+        "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+      box.innerHTML = "<b style='color:#e6c07b'>" + esc(title) + "</b>" +
+        "<div style='margin-top:8px;color:#cfd3da;white-space:pre-wrap'>" + esc(msg) + "</div>" +
+        "<div style='margin-top:12px;text-align:right'>" +
+        "<button data-act='ok' style='" + (danger ? _BTN_DISCARD : _BTN_SAVE) + "'>" + esc(okLabel || "确定") + "</button> " +
+        "<button data-act='cancel' style='" + _BTN_CANCEL + "'>取消</button></div>";
+      document.body.appendChild(box);
+      const done = (v) => { box.remove(); document.removeEventListener("keydown", onKey, true); resolve(v === "ok"); };
+      box.querySelectorAll("[data-act]").forEach((b) => { b.onclick = () => done(b.getAttribute("data-act")); });
+      const c = box.querySelector("[data-act='cancel']"); setTimeout(() => { if (c) c.focus(); }, 0);  // 默认焦点在取消
+      const onKey = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done("cancel"); }
+        else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (document.activeElement) document.activeElement.click(); }
+      };
+      document.addEventListener("keydown", onKey, true);
+    });
+  }
   function labelOf(node, key) {
     const d = defByType[node && node._typeId];
     const p = d && (d.params || []).find((q) => q.key === key);
@@ -1956,9 +1981,10 @@ const ED = (function () {
     el.innerHTML = "📄 " + esc(flowMeta.name) + tag;
     el.title = (flowMeta.readonly ? "内置流程（只读）：保存会另存到「我的流程」。\n\n" : "") +
                (flowMeta.desc || "（暂无流程说明，点顶部「流程信息…」添加）");
-    // 📁定位 仅对「我的流程」(真实独立文件) 有意义：内置流程打包后会被塞进 exe、没有独立文件可定位；未保存的也无文件。
-    const lb = document.getElementById("locatebtn");
-    if (lb) lb.style.display = (flowMeta.path && !flowMeta.readonly) ? "" : "none";
+    // 📁定位 / 🗑移除 仅对「我的流程」(真实独立用户文件) 有意义：内置打包后无独立文件、且只读不能删；未保存的也无文件。
+    const userFlow = !!(flowMeta.path && !flowMeta.readonly);
+    const lb = document.getElementById("locatebtn"); if (lb) lb.style.display = userFlow ? "" : "none";
+    const rb = document.getElementById("removebtn"); if (rb) rb.style.display = userFlow ? "" : "none";
     selectCurrentInList();   // 下拉同步显示当前流程
   }
 
@@ -2212,9 +2238,20 @@ const ED = (function () {
     const key = String(flowMeta.path || "").replace(/\\/g, "/");
     const base = key.split("/").pop();
     let idx = -1;
+    // 先按【完整路径】精确匹配——否则“同名不同目录”会冲突：内置 flows/combined.flow.json 与
+    // 自定义 user_flows/combined.flow.json 文件名相同时，按文件名兜底会误选到排在前面的内置项，
+    // 导致下拉显示的“当前流程”其实是内置——再点内置就“没变化”、onchange 不触发、于是切不过去。
     for (let i = 0; i < sel.options.length; i++) {
-      const v = sel.options[i].value;
-      if (v && (v === key || (base && v.split("/").pop() === base))) { idx = i; break; }
+      if (sel.options[i].value && sel.options[i].value.replace(/\\/g, "/") === key) { idx = i; break; }
+    }
+    // 没有精确匹配时，才按文件名兜底，且仅当全列表中该文件名唯一（避免再次误选到同名项）。
+    if (idx < 0 && base) {
+      const hits = [];
+      for (let i = 0; i < sel.options.length; i++) {
+        const v = sel.options[i].value;
+        if (v && v.replace(/\\/g, "/").split("/").pop() === base) hits.push(i);
+      }
+      if (hits.length === 1) idx = hits[0];
     }
     sel.selectedIndex = idx;
   }
@@ -2942,12 +2979,25 @@ const ED = (function () {
         setStatus(p ? `已保存 ${p}` : "已取消保存");
       } catch (err) { showError("保存失败：" + (err.stack || err)); }
     },
-    async revealCurrent() {   // 在系统文件浏览器中定位当前流程文件（我的流程/内置均可；新建未保存的则提示先另存）
+    async revealCurrent() {   // 在系统文件浏览器中定位当前流程文件（仅我的流程；未保存的则提示先另存）
       try {
         if (!flowMeta.path) { setStatus("当前流程尚未保存到文件——先「另存为」再定位"); return; }
         const r = await api().reveal_path(flowMeta.path);
         if (!(r && r.ok)) setStatus("定位失败：" + ((r && r.reason) || "未知"));
       } catch (e) { showError("定位失败：" + (e.stack || e)); }
+    },
+    async removeCurrent() {   // 从「我的流程」中删除当前流程文件（内置只读流程拒绝）
+      try {
+        if (!flowMeta.path || flowMeta.readonly) { setStatus("只能移除「我的流程」（内置流程为只读）"); return; }
+        const name = flowMeta.name || (flowMeta.path.split(/[\\/]/).pop());
+        if (!(await confirmAction("移除流程", "确定从「我的流程」中删除：\n" + name + "\n\n（删除的是磁盘上的流程文件，不可撤销）", "删除", true))) return;
+        const r = await api().delete_flow(flowMeta.path);
+        if (!(r && r.ok)) { setStatus("移除失败：" + ((r && r.reason) || "未知")); return; }
+        setStatus("已移除「" + name + "」");
+        try { fillFlowList(await api().list_builtin()); } catch (e) {}   // 刷新下拉
+        // 当前流程已删 → 打开内置「统一生产」兜底（删的若不是当前流程则保持不变）
+        try { const f = await api().open_path("flows/combined.flow.json"); if (f) load(f); } catch (e) {}
+      } catch (e) { showError("移除失败：" + (e.stack || e)); }
     },
     async saveAs() {
       try {

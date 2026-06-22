@@ -165,6 +165,7 @@
     <button onclick="ED.open()">打开</button>
     <select id="builtin" onchange="ED.openBuiltin(this.value)"><option value="" disabled selected>打开内置流程…</option></select>
     <button id="locatebtn" style="display:none" onclick="ED.revealCurrent()" title="在系统文件浏览器中定位当前流程文件（仅「我的流程」——内置流程打包后不是独立文件）">📁 定位</button>
+    <button id="removebtn" style="display:none" onclick="ED.removeCurrent()" title="从「我的流程」中删除当前流程文件（内置流程为只读，不能删）">🗑 移除</button>
     <span class="sep"></span>
     <button id="runbtn" class="accent" onclick="ED.toggleRun()" title="运行：执行当前流程（向游戏发送按键/鼠标）">▶ 运行</button>
     <button id="stopbtn" onclick="ED.stopRun()" disabled>停止</button>
