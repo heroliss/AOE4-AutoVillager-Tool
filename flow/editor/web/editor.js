@@ -1404,6 +1404,23 @@ const ED = (function () {
   // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板缩略图网格）。
   function nodeDrawForeground(ctx) {
     if (this.flags && this.flags.collapsed) return;
+    // ⓪ 搜索/面板「定位」高亮：被定位的节点画脉冲外框；若指定了参数，再在该参数控件行画高亮条。
+    if (this === _flashNode && performance.now() < _flashUntil) {
+      const a = 0.45 + 0.45 * Math.abs(Math.cos(performance.now() / 320));   // 脉冲透明度
+      const th = LiteGraph.NODE_TITLE_HEIGHT || 20;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,210,80," + a.toFixed(2) + ")";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(-4, -th - 4, this.size[0] + 8, this.size[1] + th + 8);
+      if (_flashKey) {
+        const w = (this.widgets || []).find((x) => x._key === _flashKey);
+        if (w && w.last_y != null) {
+          ctx.fillStyle = "rgba(255,210,80,0.18)";
+          ctx.fillRect(2, w.last_y - 1, this.size[0] - 4, (LiteGraph.NODE_WIDGET_HEIGHT || 20) + 2);
+        }
+      }
+      ctx.restore();
+    }
     // ① 已修改参数标记：在该参数控件行右侧画橙点（last_y 是 LiteGraph 画该控件时记下的 y）
     for (const w of (this.widgets || [])) {
       if (paramChanged(w) && w.last_y != null) {
@@ -2211,12 +2228,23 @@ const ED = (function () {
   function panelLabel(node, key) {
     return customLabel(node._id, key) || defaultPinLabel(node, key);   // 自定义名优先（与折叠箱体同源）
   }
-  // 在节点图里定位到某节点：选中并居中（取代“从面板移除”按钮，避免误点删除）。
-  function locateNode(node) {
+  // 定位高亮：被定位的节点（和可选的某个参数）在图里画脉冲外框一会儿，醒目又不需手动找。
+  let _flashNode = null, _flashKey = null, _flashUntil = 0, _flashTimer = null;
+  function flashLocate(node, key) {
+    _flashNode = node; _flashKey = key || null; _flashUntil = performance.now() + 1800;
+    if (_flashTimer) clearInterval(_flashTimer);
+    _flashTimer = setInterval(() => {                       // 脉冲期间持续重绘；到点收尾
+      if (canvas) canvas.setDirty(true, true);
+      if (performance.now() >= _flashUntil) { clearInterval(_flashTimer); _flashTimer = null; _flashNode = null; _flashKey = null; if (canvas) canvas.setDirty(true, true); }
+    }, 33);
+  }
+  // 在节点图里定位到某节点：选中并居中、并高亮（可选高亮某个参数行）。
+  function locateNode(node, key) {
     if (!node || !canvas) return;
     try { canvas.centerOnNode(node); } catch (e) {}
     try { canvas.selectNode(node, false); } catch (e) {}
     selectedNode = node; showNodeHelp(node);   // 顺带展开右下角说明（在那里可取消显示）
+    flashLocate(node, key);
     canvas.setDirty(true, true);
   }
 
@@ -2224,7 +2252,7 @@ const ED = (function () {
   // 在节点图里按文字找：节点的 类型/参数值/参数名/自定义显示名/说明/内部id，以及分组名/描述；
   // 点结果即调用 locateNode 选中并居中。图一大时不必肉眼翻找。
   function searchableFields(n) {
-    const out = [];
+    const out = [];   // 每项 [字段名, 文本, 可选参数key(用于定位时高亮该参数行)]
     const def = defByType[n._typeId] || {};
     out.push(["类型", def.title || n._typeId]);
     const doc = def.doc || def.help || "";
@@ -2234,10 +2262,10 @@ const ED = (function () {
     for (const key in (n.properties || {})) {
       const v = n.properties[key];
       const p = pmeta[key];
-      out.push(["参数·" + ((p && p.label) || key), String(v == null ? "" : v)]);
-      if (p && p.help) out.push(["参数说明·" + (p.label || key), p.help]);
+      out.push(["参数·" + ((p && p.label) || key), String(v == null ? "" : v), key]);
+      if (p && p.help) out.push(["参数说明·" + (p.label || key), p.help, key]);
       const cl = customLabel(n._id, key);
-      if (cl) out.push(["显示名", cl]);
+      if (cl) out.push(["显示名", cl, key]);
     }
     for (const io of [].concat(def.inputs || [], def.outputs || [])) {   // 端口名/端口说明也一并搜
       if (io && (io.label || io.name)) out.push(["端口", io.label || io.name]);
@@ -2251,8 +2279,8 @@ const ED = (function () {
     if (!q) return [];
     const res = [];
     for (const n of (graph && graph._nodes) || []) {
-      for (const [fl, tx] of searchableFields(n)) {
-        if (String(tx).toLowerCase().includes(q)) { res.push({ node: n, field: fl, text: String(tx) }); break; }
+      for (const [fl, tx, key] of searchableFields(n)) {
+        if (String(tx).toLowerCase().includes(q)) { res.push({ node: n, field: fl, text: String(tx), key: key || null }); break; }
       }
       if (res.length >= 300) break;
     }
@@ -2263,7 +2291,7 @@ const ED = (function () {
     return res;
   }
   function locateResult(r) {
-    if (r.node) locateNode(r.node);
+    if (r.node) locateNode(r.node, r.key);
     else if (r.group) { const m = nodeByOurId((r.group.members || [])[0]); if (m) locateNode(m); }
   }
   // 返回【已转义的 HTML】：以匹配处为中心截一段，并把段内所有匹配处套上 .gs-hit 高亮底色。
@@ -2295,7 +2323,8 @@ const ED = (function () {
     if (existing) { const i = existing.querySelector("input"); if (i) { i.focus(); i.select(); } return; }
     const box = document.createElement("div");
     box.id = "graphsearch";
-    box.style.cssText = "position:absolute;left:50%;top:8px;transform:translateX(-50%);width:min(520px,92vw);" +
+    // 放左上角（不放正中）：定位会把目标节点居中显示，搜索框若在正中会正好挡住它。
+    box.style.cssText = "position:absolute;left:10px;top:8px;width:min(440px,46vw);" +
       "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:10px 12px;z-index:210;" +
       "box-shadow:0 8px 30px #000a;font:13px/1.5 'Microsoft YaHei',sans-serif;";
     box.innerHTML =
@@ -2486,7 +2515,7 @@ const ED = (function () {
       const loc = document.createElement("span");
       loc.className = "ploc"; loc.textContent = "🎯";
       loc.title = "定位到此节点（在右下角说明里可取消显示 / 改显示名）";
-      loc.onclick = () => locateNode(node);
+      loc.onclick = () => locateNode(node, key);   // 同时高亮该参数行
       item.appendChild(loc);
       el.appendChild(item);
     }
