@@ -55,28 +55,30 @@ USER_FLOWS_DIR = os.path.abspath("user_flows")
 # 截模板的保存目录（与内置模板同目录，节点里按相对路径 templates/xxx.png 读取）。
 TEMPLATES_DIR = os.path.abspath("templates")
 # 记住上次打开的流程，下次启动自动载入（让编辑器更像“成品工具”：开机即用）。
-_STATE_FILE = os.path.abspath(".editor_state.json")
+# 会话状态存到 %APPDATA%（见 user_settings），不再放程序目录——避免污染仓库 / 重装丢失 / 权限问题。
+import user_settings
+
+_OLD_STATE_FILE = os.path.abspath(".editor_state.json")   # 旧版状态文件，仅用于一次性迁移
 
 
 def _save_last_flow(path):
-    try:
-        import json
-        if not path:
-            return
-        with open(_STATE_FILE, "w", encoding="utf-8") as fp:
-            json.dump({"last_flow": os.path.abspath(path)}, fp)
-    except Exception:
-        pass
+    if path:
+        user_settings.update_settings(last_flow=os.path.abspath(path))
 
 
 def _load_last_flow():
-    try:
-        import json
-        with open(_STATE_FILE, "r", encoding="utf-8") as fp:
-            p = json.load(fp).get("last_flow")
-        return p if p and os.path.exists(p) else None
-    except Exception:
-        return None
+    p = user_settings.get_setting("last_flow")
+    if not p:   # 迁移旧的程序目录状态文件（.editor_state.json）到 %APPDATA%
+        try:
+            if os.path.exists(_OLD_STATE_FILE):
+                import json
+                with open(_OLD_STATE_FILE, "r", encoding="utf-8") as fp:
+                    p = json.load(fp).get("last_flow")
+                if p:
+                    user_settings.update_settings(last_flow=os.path.abspath(p))
+        except Exception:
+            p = None
+    return p if p and os.path.exists(p) else None
 
 
 # ==================== 注册表 -> 前端类型定义 ====================
@@ -281,6 +283,7 @@ class Api:
         self._graph: Optional[Graph] = None
         self._path: Optional[str] = None
         self._dirty = False        # 前端镜像过来的“有未保存修改”，关闭窗口时据此弹确认
+        self._change_summary = ""  # 前端镜像过来的“本次改动清单”文本，关闭确认框里展示详情
         # —— 编辑器内“运行可视化” —— 引擎在【常驻后台线程】里自行全速跑（不被前端节奏拖慢），
         #    前端只轻量轮询 run_poll 取最近一帧轨迹 + 增量日志，UI 不影响底层执行速度。
         self._run_graph: Optional[Graph] = None
@@ -369,6 +372,12 @@ class Api:
     def set_dirty(self, flag):
         """前端在 ●未保存 状态变化时调用，使关闭窗口能弹保存确认。"""
         self._dirty = bool(flag)
+        return True
+
+    def set_change_summary(self, text):
+        """前端推来的“本次改动清单”文本（summarizeChanges 的内容），关闭窗口确认时展示，
+        让退出确认与编辑器内的「修改变化详情」窗口同源、一样详细。"""
+        self._change_summary = str(text or "")
         return True
 
     @staticmethod
@@ -722,11 +731,20 @@ class Api:
                 os.remove(ap)
             if self._path and os.path.abspath(self._path) == ap:
                 self._path = None
-                try:    # 当前流程被删 → 清掉“上次打开”记录，免得下次启动指向已删文件
-                    if os.path.exists(_STATE_FILE):
-                        os.remove(_STATE_FILE)
-                except Exception:
-                    pass
+                user_settings.update_settings(last_flow=None)   # 当前流程被删 → 清“上次打开”记录，免得下次启动指向已删文件
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "reason": str(e)}
+
+    def reveal_path(self, path):
+        """在系统文件浏览器中定位并选中该文件（Windows: explorer /select,<路径>）。返回 {ok, reason?}。"""
+        try:
+            ap = os.path.abspath(path) if path else ""
+            if not ap or not os.path.exists(ap):
+                return {"ok": False, "reason": "文件不存在（可能尚未保存）"}
+            import subprocess
+            # explorer 的 /select 用逗号紧跟路径；explorer 即便成功也常返回非 0，故用 Popen 不校验返回码。
+            subprocess.Popen(["explorer", "/select,", ap])
             return {"ok": True}
         except Exception as e:
             return {"ok": False, "reason": str(e)}
@@ -886,8 +904,13 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
         if not getattr(api, "_dirty", False):
             return True
         try:
-            return bool(api._window.create_confirmation_dialog(
-                "未保存的修改", "当前流程有未保存的修改，确定退出吗？\n（取消可返回编辑器再保存）"))
+            base = "当前流程有未保存的修改，确定退出吗？\n（取消可返回编辑器再保存）"
+            detail = (getattr(api, "_change_summary", "") or "").strip()
+            if detail:
+                if len(detail) > 1500:
+                    detail = detail[:1500] + "\n…（更多省略）"
+                base += "\n\n本次改动：\n" + detail
+            return bool(api._window.create_confirmation_dialog("未保存的修改", base))
         except Exception:
             return True   # 对话框不可用就不阻拦关闭
     try:

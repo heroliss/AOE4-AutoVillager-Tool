@@ -1605,7 +1605,12 @@ const ED = (function () {
     if (d !== _lastDirty) {
       _lastDirty = d;
       try { api().set_dirty(!!d); } catch (e) {}
+      pushChangeSummary(d);   // 切到“有改动”时立刻推一份清单，关闭确认框据此展示详情
     }
+  }
+  // 把“本次改动清单”文本推给 Python（与编辑器内「修改变化详情」窗口同源），供退出确认展示详情。
+  function pushChangeSummary(d) {
+    try { api().set_change_summary(d ? summarizeChanges().slice(0, 40).join("\n") : ""); } catch (e) {}
   }
   function isDirty() { return savedSig !== null && curSig() !== savedSig; }
 
@@ -1654,39 +1659,67 @@ const ED = (function () {
     return out;
   }
 
-  // 有未保存修改时弹确认框（列出修改内容），返回 Promise<"save"|"discard"|"cancel">。
-  function confirmUnsaved(actionLabel) {
+  // 统一的「修改变化详情」弹窗：未保存提示 / 退出确认 / 主动保存预览 共用这一个窗口。
+  // opts: { title, subtitle, buttons:[{act,label,style}], defaultAct }。返回 Promise<act>。
+  const _BTN_SAVE = "background:#3a5a3a;color:#dfe;border:1px solid #5a6;border-radius:4px;padding:4px 14px;cursor:pointer";
+  const _BTN_DISCARD = "background:#2f343d;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:4px 14px;cursor:pointer";
+  const _BTN_CANCEL = "background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:4px 14px;cursor:pointer";
+  function showChangeDialog(opts) {
     return new Promise((resolve) => {
-      if (!isDirty()) { resolve("discard"); return; }
-      document.getElementById("unsaveddlg")?.remove();
+      const old = document.getElementById("unsaveddlg"); if (old) old.remove();
       const changes = summarizeChanges();
       const box = document.createElement("div");
       box.id = "unsaveddlg";
-      box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(520px,94vw);" +
+      box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(560px,94vw);" +
         "max-height:80vh;overflow:auto;background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;" +
         "padding:14px 16px;z-index:200;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
-      let h = `<b style='color:#e6c07b'>有未保存的修改</b><div style='color:#9aa3af;margin-top:4px'>${esc(actionLabel || "继续操作")}前要保存吗？</div>`;
-      h += "<div style='margin-top:8px;max-height:40vh;overflow:auto;background:#1b1f27;border:1px solid #2c323c;border-radius:6px;padding:8px 10px;color:#bcd'>";
-      if (changes.length) h += changes.map((c) => `<div style="margin:2px 0;white-space:pre-wrap">${esc(c)}</div>`).join("");
-      else h += "<div style='color:#7f8895'>（有改动，但无法逐项列出）</div>";
-      h += "</div><div style='margin-top:12px;text-align:right'>" +
-        "<button id='us_save' style='background:#3a5a3a;color:#dfe;border:1px solid #5a6;border-radius:4px;padding:4px 14px;cursor:pointer'>保存并继续</button> " +
-        "<button id='us_discard' style='background:#2f343d;color:#ffb3b3;border:1px solid #a33;border-radius:4px;padding:4px 14px;cursor:pointer'>不保存</button> " +
-        "<button id='us_cancel' style='background:#2f343d;color:#cfd3da;border:1px solid #444;border-radius:4px;padding:4px 14px;cursor:pointer'>取消</button></div>";
+      let h = "<b style='color:#e6c07b'>" + esc(opts.title || "修改详情") + "</b>";
+      if (opts.subtitle) h += "<div style='color:#9aa3af;margin-top:4px'>" + esc(opts.subtitle) + "</div>";
+      h += "<div style='margin-top:8px;color:#8fb6e0'>" + (changes.length ? ("共 " + changes.length + " 处改动：") : "") + "</div>";
+      h += "<div style='margin-top:4px;max-height:46vh;overflow:auto;background:#1b1f27;border:1px solid #2c323c;border-radius:6px;padding:8px 10px;color:#bcd'>";
+      if (changes.length) h += changes.map((c) => "<div style=\"margin:2px 0;white-space:pre-wrap\">" + esc(c) + "</div>").join("");
+      else h += "<div style='color:#7f8895'>（无可逐项列出的改动）</div>";
+      h += "</div><div style='margin-top:12px;text-align:right'>";
+      h += (opts.buttons || []).map((b) => "<button data-act='" + esc(b.act) + "' style='" + b.style + "'>" + esc(b.label) + "</button>").join(" ");
+      h += "</div>";
       box.innerHTML = h;
       document.body.appendChild(box);
       const done = (v) => { box.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
-      box.querySelector("#us_save").onclick = () => done("save");
-      box.querySelector("#us_discard").onclick = () => done("discard");
-      box.querySelector("#us_cancel").onclick = () => done("cancel");
-      // 默认焦点放在“取消”（最安全）：直接回车不会误触发保存/丢弃；Esc 也等于取消
-      const cancelBtn = box.querySelector("#us_cancel");
-      setTimeout(() => cancelBtn.focus(), 0);
+      box.querySelectorAll("[data-act]").forEach((btn) => { btn.onclick = () => done(btn.getAttribute("data-act")); });
+      const def = box.querySelector("[data-act='" + opts.defaultAct + "']");
+      setTimeout(() => { if (def) def.focus(); }, 0);
       const onKey = (e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done("cancel"); }
-        else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); document.activeElement && document.activeElement.click(); }
+        else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (document.activeElement) document.activeElement.click(); }
       };
       document.addEventListener("keydown", onKey, true);
+    });
+  }
+  // 有未保存修改时弹确认框（列出修改内容），返回 Promise<"save"|"discard"|"cancel">。
+  function confirmUnsaved(actionLabel) {
+    if (!isDirty()) return Promise.resolve("discard");
+    return showChangeDialog({
+      title: "有未保存的修改",
+      subtitle: (actionLabel || "继续操作") + "前要保存吗？",
+      buttons: [
+        { act: "save", label: "保存并继续", style: _BTN_SAVE },
+        { act: "discard", label: "不保存", style: _BTN_DISCARD },
+        { act: "cancel", label: "取消", style: _BTN_CANCEL },
+      ],
+      defaultAct: "cancel",   // 默认焦点在“取消”最安全：回车不会误保存/丢弃
+    });
+  }
+  // 主动保存：先弹同一个详情窗口预览本次要保存的改动，返回 Promise<"save"|"cancel"|"nochange">。
+  function confirmSave() {
+    if (!isDirty()) return Promise.resolve("nochange");
+    return showChangeDialog({
+      title: "保存修改",
+      subtitle: "确认要把以下改动保存到流程文件吗？",
+      buttons: [
+        { act: "save", label: "保存", style: _BTN_SAVE },
+        { act: "cancel", label: "取消", style: _BTN_CANCEL },
+      ],
+      defaultAct: "save",   // 主动保存：默认焦点在“保存”，回车即存
     });
   }
   function labelOf(node, key) {
@@ -2895,10 +2928,23 @@ const ED = (function () {
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {
+        // 主动保存也弹「修改变化详情」预览（内置只读流程除外——它必走另存对话框）。
+        if (!flowMeta.readonly) {
+          const act = await confirmSave();
+          if (act === "nochange") { setStatus("没有改动，无需保存"); return; }
+          if (act !== "save") { setStatus("已取消保存"); return; }
+        }
         const p = await api().save(collect());
         if (p) await afterSaved(p);
         setStatus(p ? `已保存 ${p}` : "已取消保存");
       } catch (err) { showError("保存失败：" + (err.stack || err)); }
+    },
+    async revealCurrent() {   // 在系统文件浏览器中定位当前流程文件（我的流程/内置均可；新建未保存的则提示先另存）
+      try {
+        if (!flowMeta.path) { setStatus("当前流程尚未保存到文件——先「另存为」再定位"); return; }
+        const r = await api().reveal_path(flowMeta.path);
+        if (!(r && r.ok)) setStatus("定位失败：" + ((r && r.reason) || "未知"));
+      } catch (e) { showError("定位失败：" + (e.stack || e)); }
     },
     async saveAs() {
       try {
@@ -3522,10 +3568,10 @@ const ED = (function () {
       "· 拖动节点标题：移动　· Ctrl+拖动空白：框选多个　· 选中多个后可整体拖动<br>" +
       "· 单击参数输入框：直接编辑，<b>实时生效</b>（无需确认按钮）<br>" +
       "· 右键连线（线上任意处）：删除连线<br>" +
-      "· <b>快捷键</b>：<b>Ctrl+Z</b> 撤销　<b>Ctrl+Y</b> / <b>Ctrl+Shift+Z</b> 重做　<b>Ctrl+C</b> 复制　<b>Ctrl+V</b> 粘贴　" +
+      "· <b>快捷键</b>：<b>Ctrl+S</b> 保存（弹改动详情预览）　<b>Ctrl+Shift+S</b> 另存为　<b>Ctrl+Z</b> 撤销　<b>Ctrl+Y</b> / <b>Ctrl+Shift+Z</b> 重做　<b>Ctrl+C</b> 复制　<b>Ctrl+V</b> 粘贴　" +
       "<b>Ctrl+D</b> 再制（选中组则克隆整组）　<b>Ctrl+A</b> 全选节点　<b>Delete</b> 删除（选中组＝解散该组）<br>" +
       "<span style='color:#7f8895'>　复制/再制会连同选区内部连线、参数、说明、暴露设置一起带走；再制保留原分组归属，粘贴为自由节点。</span><br>" +
-      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存<br>" +
+      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存（都会先弹「修改变化详情」窗口预览要保存的改动）/ <b>📁 定位</b>（在文件浏览器中显示当前流程文件）<br>" +
       "· 选中节点→右下角说明里勾选「显示到控制面板」，把常用开关/数值置顶到顶部面板，" +
       "普通使用时不必进节点图也能调（🎯 定位到节点）<br>" +
       "· <b>分组＝把若干节点封装成一个“函数块”</b>：右键节点→「分组…」把它(或多选)归入一个彩色分组；" +
@@ -3572,6 +3618,7 @@ const ED = (function () {
     if (undoStack.length > 100) undoStack.shift();
     redoStack = [];
     refreshDirty();
+    pushChangeSummary(isDirty());   // 编辑过程中保持“改动清单”最新（debounce 后调），让退出确认详情不过时
     // 选中的节点参数有改动时，同步刷新右下角“已修改”列表（橙点本就实时随重绘更新）
     if (selectedNode && helpEl && helpEl.style.display !== "none") showNodeHelp(selectedNode);
     renderPanel();   // 面板控件值与节点保持同步
@@ -3899,6 +3946,7 @@ const ED = (function () {
         const take = () => { e.preventDefault(); e.stopImmediatePropagation(); };   // 接管本键，阻止 LiteGraph 自带处理重复触发
         if (k === "z" && !e.shiftKey) { take(); undo(); return; }
         if (k === "y" || (k === "z" && e.shiftKey)) { take(); redo(); return; }
+        if (k === "s") { take(); if (e.shiftKey) self.saveAs(); else self.save(); return; }   // Ctrl+S 保存 / Ctrl+Shift+S 另存为
         if (simpleMode) return;   // 以下均为“改图”操作：只读（使用）模式不接管
         if (k === "c") {   // 选中了文字（如日志）→ 让系统复制文字；否则复制选中的节点
           const hasTextSel = !!(window.getSelection && String(window.getSelection() || ""));

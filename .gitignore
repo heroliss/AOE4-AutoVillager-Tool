@@ -72,5 +72,8 @@ _fix_*.py
 shortcuts.json
 config_override.json
 
+# 编辑器会话状态（旧版放程序目录，现已迁到 %APPDATA%；保留忽略以防旧文件被提交）
+.editor_state.json
+
 # 用户在编辑器里另存的流程（内置 flows/ 只读，用户自定义存这里，不纳入版本库）
 user_flows/
