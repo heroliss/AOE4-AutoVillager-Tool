@@ -199,7 +199,8 @@ class DisableSwitch(ControlNode):
     outputs = [exec_out("out")]
     params = [
         ParamSpec("target", "目标开关", "str", default="",
-                  help="要关闭的【开关(布尔)节点】的 id（或它在控制面板里的显示名）。如 sw_cart 或 出商人(市场)。"),
+                  help="要关闭哪个开关。编辑器里这是个下拉框，直接从图中所有「开关(布尔)」里选即可"
+                       "（有面板显示名就显示名、否则显示节点 id），不必记节点 id。"),
         ParamSpec("reason", "原因(提示语)", "str", default="",
                   help="关闭时在日志里说明原因，如「未检测到市场」。"),
     ]

@@ -382,13 +382,25 @@ const ED = (function () {
     }
   }
 
+  // 「关闭开关」节点的“目标开关”：用户不知道节点 id，所以给个下拉，列出图里所有开关——
+  // 有面板显示名(如「出商人(市场)」)就显示名、否则显示 id；存的值这两种都能被引擎解析(按名或按id)。
+  function switchLabel(n) { return pinLabels[n._id + "|on"] || n._id; }
+  function switchTargetOptions() {
+    const opts = [];
+    for (const n of (graph && graph._nodes || [])) if (n._typeId === "data.switch") opts.push(switchLabel(n));
+    return opts.length ? opts : ["（图中暂无开关）"];
+  }
+
   function addParamWidget(node, p, def) {
     // 构造期（new base_class）createNode 尚未给 node.properties 赋初值，需自行兜底，
     // 否则末尾 node.properties[key]=... 会抛 TypeError，导致带参数的节点整体创建失败。
     if (!node.properties) node.properties = {};
     const cb = (v) => { if (!node.properties) node.properties = {}; node.properties[p.key] = v; scheduleSnap(); };
     let w;
-    if (p.ptype === "int")
+    if ((def && def.type) === "control.disable_switch" && p.key === "target")
+      // 目标开关：图感知的下拉（值随当前图里的开关动态生成），免去手填节点 id
+      w = node.addWidget("combo", p.label, p.default == null ? "" : String(p.default), cb, { values: switchTargetOptions });
+    else if (p.ptype === "int")
       w = node.addWidget("number", p.label, Number(p.default ?? 0), cb, { step: 10, precision: 0 });
     else if (p.ptype === "float")
       w = node.addWidget("number", p.label, Number(p.default ?? 0), cb, { step: (p.step || 0.1) * 10, precision: 2 });
@@ -2910,12 +2922,15 @@ const ED = (function () {
       (ids.has(A._id) || ids.has(B._id) ? hot : cold).push(rec);
     }
     if (!hot.length) return;          // 焦点节点没连线就别打扰（也别凭空压暗整图）
-    ctx.save(); ctx.lineCap = "round";
-    ctx.strokeStyle = "rgba(11,13,18,0.62)"; ctx.lineWidth = 6;   // ① 压暗其余连线（半透明深色覆盖在原线上）
+    ctx.save();
+    // ① 压暗其余连线：与底层连线【等宽】的半透明深色覆盖（融入深色背景）——不加宽、不发光、平头端，
+    //    所以不会在连线四周留出深色描边(halo)，看起来就是“整条线变淡/半透明”。
+    ctx.lineCap = "butt"; ctx.strokeStyle = "rgba(24,27,33,0.6)"; ctx.lineWidth = (canvas.connections_width || 3);
     for (const r of cold) {
       const cc = linkCtrlPts(r.pa, r.pb);
       ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], r.pb[0], r.pb[1]); ctx.stroke();
     }
+    ctx.lineCap = "round";
     for (const r of hot) {            // ② 点亮焦点连线（类型色、加粗、发光）+ 方向箭头
       const cc = linkCtrlPts(r.pa, r.pb);
       ctx.strokeStyle = r.col; ctx.lineWidth = 3.5; ctx.shadowColor = r.col; ctx.shadowBlur = 8;

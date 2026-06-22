@@ -225,8 +225,15 @@ class BuildingCount(DataNode):
                 tries += 1
 
         self.live = {"count": out["count"], "path": path, "tries": tries}
-        if ctx.preview_enabled:   # 预览数量图标区域（刚在 _detect_once 截过、走帧缓存，开销很小）
-            self.live["preview"] = _imaging.encode_preview(ctx.capture_region(self.values["icon_region"]))
+        if ctx.preview_enabled:
+            # 同时预览“单建筑预检测区域(single 1x)”和“数量图标区域(count Nx)”——这两块各自独立，
+            # 单建筑没数到时(如只有1个市场却 count=0)，多半是上面这块 single 区域没对准，一眼可查。
+            items = []
+            sr = self.values.get("single_region")
+            if sr:
+                items.append(("single 1x", ctx.capture_region(sr)))
+            items.append(("count Nx", ctx.capture_region(self.values["icon_region"])))
+            self.live["preview"] = _imaging.encode_preview_stack(items)
         return out
 
 
