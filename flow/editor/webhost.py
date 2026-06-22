@@ -322,8 +322,11 @@ class Api:
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
         self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
-        self._overlay_bg_alpha = 80          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透；以透明为主故默认偏淡）
-        self._overlay_rect = [0, 0, 200, 40] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
+        self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度）
+        self._overlay_bg_alpha = 55          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透；以透明为主故默认很淡）
+        self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
+        self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认只一点点
+        self._overlay_rect = [0, 0, 200, 26] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
         self._overlay_screen = [1920, 1080]  # 屏幕逻辑尺寸（拖拽钳制用）
 
     def get_defs(self):
@@ -532,14 +535,20 @@ class Api:
         except Exception:
             return False
 
-    def _overlay_glass(self):
-        """给覆盖层窗口上毛玻璃：tint=深色、alpha=背景不透明度。窗口 shown 后调用（句柄已就绪）。"""
-        w = self._overlay_window
-        if w is None:
+    _FROST_STATE = {0: 2, 1: 3, 2: 4}   # 毛度→AccentState: 0无=透明渐变 1轻=模糊 2重=亚克力
+
+    def _glass(self, win, frost, alpha):
+        """给任意覆盖窗上玻璃：frost 决定模糊档（轻=模糊/重=亚克力/无=只着色），alpha=背景着色不透明度。"""
+        if win is None:
             return
-        native = getattr(w, "native", None)
-        tint = ((int(self._overlay_bg_alpha) & 0xFF) << 24) | 0x35435C   # 中性蓝灰着色（偏淡，不发黑）
-        self._form_invoke(native, lambda: self._apply_acrylic(native, 4, tint))
+        native = getattr(win, "native", None)
+        state = self._FROST_STATE.get(int(frost), 3)
+        tint = ((int(alpha) & 0xFF) << 24) | 0x35435C   # 中性蓝灰着色（偏淡、不发黑）
+        self._form_invoke(native, lambda: self._apply_acrylic(native, state, tint))
+
+    def _overlay_glass(self):
+        """主窄条上玻璃。窗口 shown 后调用（句柄已就绪）。"""
+        self._glass(self._overlay_window, self._overlay_frost, self._overlay_bg_alpha)
 
     def toggle_overlay(self):
         """开/关游戏内覆盖层窗口；返回 {open: bool}。"""
@@ -560,8 +569,8 @@ class Api:
         except Exception:
             sw, sh = 1920, 1080
         self._overlay_screen = [sw, sh]
-        # 初始摆到左1/8处、贴顶；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)。
-        x0, y0, w0, h0 = sw // 8, 8, 360, 40
+        # 初始摆到左1/8处、贴顶；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)。高度做成和按钮一样窄。
+        x0, y0, w0, h0 = sw // 8, 8, 360, 26
         self._overlay_rect = [x0, y0, w0, h0]
         kw = dict(width=w0, height=h0, x=x0, y=y0, js_api=self,
                   on_top=True, frameless=True, easy_drag=False, transparent=True,
@@ -583,19 +592,81 @@ class Api:
 
     def _on_overlay_closed(self):
         self._overlay_window = None
+        if self._overlay_cfg_window is not None:   # 主窄条没了，孤儿设置窗也关掉
+            try:
+                self._overlay_cfg_window.destroy()
+            except Exception:
+                pass
+            self._overlay_cfg_window = None
 
     def overlay_set_on_top(self, flag):
         w = self._overlay_window
         return self._form_set(getattr(w, "native", None), "TopMost", bool(flag)) if w else False
 
     def overlay_set_bg(self, alpha):
-        """调背景（毛玻璃）不透明度 0~255；0=背景全透明、只剩内容。立即重上亚克力。"""
+        """调背景（毛玻璃）不透明度 0~255；0=背景全透明、只剩内容。立即重上玻璃。"""
         try:
             self._overlay_bg_alpha = max(0, min(255, int(alpha)))
         except Exception:
             return False
         self._overlay_glass()
         return True
+
+    def overlay_set_content(self, alpha):
+        """调内容不透明度 30~100（文字等）。仅存状态，窄条页面轮询读到后用 CSS 生效。"""
+        try:
+            self._overlay_content_alpha = max(30, min(100, int(alpha)))
+            return True
+        except Exception:
+            return False
+
+    def overlay_set_frost(self, level):
+        """调毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)。立即重上玻璃。"""
+        try:
+            self._overlay_frost = max(0, min(2, int(level)))
+        except Exception:
+            return False
+        self._overlay_glass()
+        return True
+
+    # ---------- 覆盖层【设置】小窗：同款玻璃，放调背景/内容透明度/毛度的滑杆（窄条太小放不下）----------
+    def toggle_overlay_cfg(self):
+        if self._overlay_cfg_window is not None:
+            try:
+                self._overlay_cfg_window.destroy()
+            except Exception:
+                pass
+            self._overlay_cfg_window = None
+            return {"open": False}
+        if self._overlay_window is None:
+            return {"open": False, "reason": "先打开覆盖层"}
+        import webview
+        page = os.path.join(WEB_DIR, "overlay_cfg.html")
+        x = max(0, min(self._overlay_rect[0], self._overlay_screen[0] - 230))
+        y = min(self._overlay_rect[1] + 34, self._overlay_screen[1] - 170)
+        kw = dict(width=224, height=158, x=x, y=y, js_api=self, on_top=True,
+                  frameless=True, easy_drag=True, transparent=True, background_color="#0B0E14")
+        try:
+            self._overlay_cfg_window = webview.create_window("AOE4 Overlay 设置", url=page, **kw)
+            try:
+                self._overlay_cfg_window.events.closed += self._on_overlay_cfg_closed
+            except Exception:
+                pass
+            try:    # 设置窗自身也上一层轻玻璃，风格统一
+                self._overlay_cfg_window.events.shown += (lambda: self._glass(self._overlay_cfg_window, 1, 130))
+            except Exception:
+                pass
+            return {"open": True}
+        except Exception as e:
+            self._overlay_cfg_window = None
+            return {"open": False, "reason": str(e)}
+
+    def _on_overlay_cfg_closed(self):
+        self._overlay_cfg_window = None
+
+    def overlay_cfg_state(self):
+        """设置窗读取当前值，初始化滑杆。"""
+        return {"bg": self._overlay_bg_alpha, "content": self._overlay_content_alpha, "frost": self._overlay_frost}
 
     def overlay_data(self):
         """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。
@@ -619,7 +690,8 @@ class Api:
             paused = alive and self._run_paused   # 没在跑时 _run_paused 恒为 True，别误报「已暂停」
             bp = self._bp_hit if alive else None
         return {"items": items, "running": alive and not paused, "paused": paused, "bp_hit": bp,
-                "bg_alpha": self._overlay_bg_alpha,
+                "bg_alpha": self._overlay_bg_alpha, "content_alpha": self._overlay_content_alpha,
+                "frost": self._overlay_frost,
                 "rect": list(self._overlay_rect), "screen": list(self._overlay_screen)}
 
     def overlay_resize(self, w, h):
@@ -1159,8 +1231,8 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     except Exception:
         pass
 
-    def _close_monitor():           # 主编辑器关掉时，连带关掉独立浮窗（资源监控 / 覆盖层），否则它们会让进程不退出
-        for attr in ("_mon_window", "_overlay_window"):
+    def _close_monitor():           # 主编辑器关掉时，连带关掉独立浮窗（资源监控 / 覆盖层 / 覆盖层设置），否则它们会让进程不退出
+        for attr in ("_mon_window", "_overlay_window", "_overlay_cfg_window"):
             w = getattr(api, attr, None)
             if w is not None:
                 try:

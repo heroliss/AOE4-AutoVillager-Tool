@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>覆盖层设置</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+    font-family: "Microsoft YaHei", system-ui, sans-serif; -webkit-user-select: none; user-select: none; color: #eaeff6; }
+  /* 同款很透的玻璃卡片：背景靠系统玻璃，自己只留细边框 */
+  #card { box-sizing: border-box; height: 100%; padding: 6px 10px; border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 8px; background: transparent; }
+  #hd { display: flex; align-items: center; font-size: 12px; font-weight: 700; height: 18px; cursor: move;
+    text-shadow: 0 1px 2px #0008; }
+  #hd .x { margin-left: auto; cursor: pointer; opacity: 0.8; padding: 0 3px; }
+  #hd .x:hover { opacity: 1; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; font-size: 12px; text-shadow: 0 1px 2px #0008; }
+  .row label { width: 30px; color: #c6cedb; }
+  .row input[type=range] { flex: 1; }
+  .seg { display: inline-flex; gap: 3px; }
+  .seg b { cursor: pointer; padding: 1px 8px; border-radius: 5px; font-weight: 600;
+    background: rgba(255,255,255,0.08); color: #dfe5ee; }
+  .seg b.on { background: rgba(80,160,255,0.32); color: #fff; }
+</style>
+</head>
+<body>
+  <div id="card">
+    <div id="hd" class="pywebview-drag-region">覆盖层设置<span class="x" onclick="closeWin()">✕</span></div>
+    <div class="row"><label>背景</label><input id="bg" type="range" min="0" max="255" oninput="setBg(this.value)"></div>
+    <div class="row"><label>内容</label><input id="ct" type="range" min="30" max="100" oninput="setCa(this.value)"></div>
+    <div class="row"><label>毛度</label>
+      <span class="seg">
+        <b data-f="0" onclick="setFrost(0)">无</b>
+        <b data-f="1" onclick="setFrost(1)">轻</b>
+        <b data-f="2" onclick="setFrost(2)">重</b>
+      </span>
+    </div>
+  </div>
+<script>
+  function api() { return (window.pywebview && window.pywebview.api) || null; }
+  function setBg(v) { try { api().overlay_set_bg(parseInt(v, 10)); } catch (e) {} }
+  function setCa(v) { try { api().overlay_set_content(parseInt(v, 10)); } catch (e) {} }
+  function setFrost(f) {
+    try { api().overlay_set_frost(f); } catch (e) {}
+    document.querySelectorAll(".seg b").forEach(b => b.classList.toggle("on", parseInt(b.dataset.f, 10) === f));
+  }
+  function closeWin() { try { api().toggle_overlay_cfg(); } catch (e) {} }
+
+  function init() {
+    const a = api();
+    if (!a) { setTimeout(init, 150); return; }
+    Promise.resolve(a.overlay_cfg_state()).then(s => {
+      if (!s) return;
+      document.getElementById("bg").value = s.bg;
+      document.getElementById("ct").value = s.content;
+      document.querySelectorAll(".seg b").forEach(b => b.classList.toggle("on", parseInt(b.dataset.f, 10) === s.frost));
+    }).catch(() => {});
+  }
+  init();
+</script>
+</body>
+</html>

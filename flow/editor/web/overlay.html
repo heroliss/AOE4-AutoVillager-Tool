@@ -4,47 +4,35 @@
 <meta charset="utf-8" />
 <title>AOE4 Overlay</title>
 <style>
-  /* 背景全透明：让出系统亚克力（毛玻璃）与游戏画面。内容透明度由 --ca 单独控制。
-     html/body 用 max-content + overflow:visible，使整条按内容自然撑开，便于测量真实宽度后把窗口收到贴合内容。 */
+  /* 背景全透明：让出系统玻璃与游戏画面。内容透明度由 --ca 单独控制。
+     html/body 用 max-content + overflow:visible，使整条按内容自然撑开，便于测量真实宽高后把窗口收到贴合内容。 */
   html, body { margin: 0; height: 100%; width: max-content; background: transparent; overflow: visible;
     font-family: "Microsoft YaHei", system-ui, sans-serif; -webkit-user-select: none; user-select: none; cursor: default; }
-  :root { --ca: 1; }                 /* 内容不透明度（0.3~1），与背景毛玻璃独立 */
+  :root { --ca: 1; }                 /* 内容不透明度（0.3~1），与背景玻璃独立 */
 
-  /* 玻璃窄条：本身近乎透明（靠系统亚克力提供模糊底）；留一层很淡的兜底色，亚克力失效时也有依托。 */
-  #bar { display: inline-flex; align-items: center; gap: 7px; width: max-content; height: 100%; box-sizing: border-box;
-    padding: 0 8px; background: rgba(60,72,92,0.14); border: 1px solid rgba(255,255,255,0.16);
-    border-radius: 9px; }
+  /* 很窄、很透的玻璃条：自身几乎不画背景（背景全靠系统玻璃），只留极细边框勾出轮廓。 */
+  #bar { display: inline-flex; align-items: center; gap: 6px; width: max-content; height: 100%; box-sizing: border-box;
+    padding: 0 6px; background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; }
 
-  #grip { cursor: move; color: rgba(255,255,255,calc(0.55 * var(--ca))); font-size: 13px; padding: 0 2px; line-height: 1; }
-  #chips { display: inline-flex; align-items: center; gap: 6px; }
-  .chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
-    padding: 3px 8px; border-radius: 7px; font-size: 12px; line-height: 1.1;
-    background: rgba(255,255,255,calc(0.07 * var(--ca))); opacity: var(--ca); }
-  .chip .k { color: #c2cad6; }
-  .chip .v { font-weight: 700; color: #eef2f8; }
-  .chip .v.on  { color: #6ff09a; }
-  .chip .v.off { color: #ff8a8a; }
+  /* 文字/按钮全透明：直接把玻璃背景露出来，只有文字本身（带描边增强可读性）。 */
+  #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 12px; padding: 0 1px; line-height: 1; }
+  #chips { display: inline-flex; align-items: center; gap: 5px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; line-height: 1.1;
+    opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
+  .chip .k { color: #dfe5ee; }
+  .chip .v { font-weight: 700; }
+  .chip .v.on  { color: #7bf0a2; }
+  .chip .v.off { color: #ff9a9a; }
 
-  /* 弹信息：命中断点/暂停等，醒目脉冲（仍在窄条内，不挡主视野） */
-  #alert { display: none; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 7px;
-    font-size: 12px; font-weight: 700; color: #fff; background: #d23b3b; box-shadow: 0 0 12px #ff3b3b88;
-    animation: pulse 1s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 8px #ff3b3b66; } 50% { box-shadow: 0 0 18px #ff5b5bcc; } }
+  #alert { display: none; align-items: center; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 700;
+    color: #fff; background: rgba(210,59,59,0.82); text-shadow: 0 1px 2px #0008; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 6px #ff3b3b55; } 50% { box-shadow: 0 0 16px #ff5b5bbb; } }
 
-  #tools { display: inline-flex; align-items: center; gap: 4px; opacity: var(--ca); }
-  .tbtn { cursor: pointer; color: #d6dce6; font-size: 13px; padding: 2px 5px; border-radius: 6px; background: rgba(255,255,255,0.06); }
-  .tbtn:hover { background: rgba(255,255,255,0.16); }
-  .tbtn.act { color: #7fd0ff; background: rgba(80,160,255,0.2); }
-
-  /* 设置浮层：调背景/内容透明度 + 置顶 */
-  #cfg { display: none; position: fixed; right: 6px; top: 44px; width: 190px; padding: 9px 11px;
-    background: rgba(20,24,32,0.96); border: 1px solid #3a4150; border-radius: 9px; color: #dfe4ec; font-size: 12px;
-    box-shadow: 0 6px 22px #000a; }
-  #cfg .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
-  #cfg .row label { width: 42px; color: #aeb6c4; }
-  #cfg input[type=range] { flex: 1; }
-  #cfg .pin { cursor: pointer; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.06); }
-  #cfg .pin.on { color: #7fd0ff; background: rgba(80,160,255,0.2); }
+  #tools { display: inline-flex; align-items: center; gap: 3px; opacity: var(--ca); }
+  .tbtn { cursor: pointer; color: #e6ebf3; font-size: 12px; padding: 1px 3px; border-radius: 5px;
+    background: transparent; text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
+  .tbtn:hover { background: rgba(255,255,255,0.14); }
+  .tbtn.act { color: #8fd6ff; }
 </style>
 </head>
 <body>
@@ -54,21 +42,14 @@
     <div id="alert"></div>
     <div id="tools">
       <span class="tbtn act" id="pinbtn" title="置顶" onclick="togglePin()">📌</span>
-      <span class="tbtn" id="cfgbtn" title="显示设置" onclick="toggleCfg()">⚙</span>
+      <span class="tbtn" id="cfgbtn" title="设置（背景/内容透明度·毛度）" onclick="toggleCfg()">⚙</span>
     </div>
-  </div>
-  <div id="cfg">
-    <div class="row"><label>背景</label><input id="bg" type="range" min="0" max="255" value="80" oninput="setBg(this.value)"></div>
-    <div class="row"><label>内容</label><input id="ct" type="range" min="30" max="100" value="100" oninput="setCa(this.value)"></div>
-    <div class="row"><label>置顶</label><span class="pin on" id="pinrow" onclick="togglePin()">已置顶</span></div>
   </div>
 
 <script>
   function api() { return (window.pywebview && window.pywebview.api) || null; }
   let pinned = true, ready = false;
-  // 几何（来自后端 overlay_data.rect/screen）：窗口位置/尺寸 + 屏幕尺寸，用于拖拽钳制
-  let winX = 0, winY = 0, winW = 200, winH = 40, screenW = 1920, screenH = 1080;
-  let lastFitW = 0;
+  let winX = 0, winY = 0, winW = 200, winH = 26, screenW = 1920, screenH = 1080, lastFitW = 0;
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
@@ -84,35 +65,25 @@
     const al = document.getElementById("alert");
     if (d.bp_hit || d.paused) { al.style.display = "inline-flex"; al.textContent = "⏸ " + (d.bp_hit ? ("命中断点：" + d.bp_hit) : "已暂停"); }
     else { al.style.display = "none"; }
+    if (d.content_alpha != null) document.documentElement.style.setProperty("--ca", (d.content_alpha / 100).toFixed(2));
     fitToContent();
   }
 
-  // 内容自适应：测量整条真实宽度，把窗口收成贴合内容（亚克力玻璃只覆盖内容大小，不再占半屏）
+  // 内容自适应：测量整条真实宽高，把窗口收成贴合内容（玻璃只覆盖内容大小，不再占半屏）
   function fitToContent() {
-    const bar = document.getElementById("bar");
-    const w = Math.ceil(bar.getBoundingClientRect().width) + 2;
-    if (Math.abs(w - lastFitW) >= 2) {
-      lastFitW = w;
-      try { api().overlay_resize(w, 38); } catch (e) {}
-    }
+    const r = document.getElementById("bar").getBoundingClientRect();
+    const w = Math.ceil(r.width) + 2, h = Math.max(22, Math.ceil(r.height));
+    if (Math.abs(w - lastFitW) >= 2) { lastFitW = w; try { api().overlay_resize(w, h); } catch (e) {} }
   }
 
-  function setBg(v) { try { api().overlay_set_bg(parseInt(v, 10)); } catch (e) {} }
-  function setCa(v) { document.documentElement.style.setProperty("--ca", (parseInt(v, 10) / 100).toFixed(2)); }
-  function toggleCfg() {
-    const c = document.getElementById("cfg");
-    c.style.display = c.style.display === "block" ? "none" : "block";
-    document.getElementById("cfgbtn").classList.toggle("act", c.style.display === "block");
-  }
+  function toggleCfg() { try { api().toggle_overlay_cfg(); } catch (e) {} }
   function togglePin() {
     pinned = !pinned;
     try { api().overlay_set_on_top(pinned); } catch (e) {}
     document.getElementById("pinbtn").classList.toggle("act", pinned);
-    const pr = document.getElementById("pinrow");
-    pr.classList.toggle("on", pinned); pr.textContent = pinned ? "已置顶" : "未置顶";
   }
 
-  // —— 拖拽：用屏幕坐标(screenX/Y)做位移基准（不受窗口移动影响），本地+后端双重钳制在屏内 ——
+  // —— 拖拽：用屏幕坐标(screenX/Y)做位移基准，本地+后端双重钳制在屏内 ——
   let dragging = false, sX = 0, sY = 0, aX = 0, aY = 0, pX = 0, pY = 0, raf = false;
   function flushMove() { raf = false; winX = pX; winY = pY; try { api().overlay_move(pX, pY); } catch (e) {} }
   function moveTo(nx, ny) {
@@ -128,12 +99,12 @@
 
   function poll() {
     const a = api();
-    if (!a) { setTimeout(poll, 200); return; }   // 等 pywebview 注入 api
+    if (!a) { setTimeout(poll, 200); return; }
     Promise.resolve(a.overlay_data()).then(d => {
       if (!d) return;
       if (d.screen) { screenW = d.screen[0]; screenH = d.screen[1]; }
       if (d.rect) { winW = d.rect[2]; winH = d.rect[3]; if (!dragging) { winX = d.rect[0]; winY = d.rect[1]; } }
-      if (!ready) { ready = true; if (d.bg_alpha != null) document.getElementById("bg").value = d.bg_alpha; }
+      ready = true;
       render(d);
     }).catch(() => {}).finally(() => setTimeout(poll, 500));
   }
