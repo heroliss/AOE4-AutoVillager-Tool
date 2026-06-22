@@ -145,7 +145,7 @@ def build_combined_graph() -> Graph:
     add("c_per_x", "data.const_number", {"value": 2})
     add("plan_x", "math.arith", {"op": "*"})
     add("prod_x", "game.produce_count", {"cost_per_unit": 80, "cap": -1})
-    add("queue_x", "action.press_key", {"key": "w"})
+    add("queue_x", "action.press_key", {"key": "e"})       # 乡骑(金朝)默认生产快捷键＝E
 
     # ==================== 商人段 ====================
     add("sw_cart", "data.switch", {"on": False})            # 开关：是否生产商人（市场）
@@ -285,7 +285,7 @@ def build_combined_graph() -> Graph:
         "c_per_x": "每个城镇中心一次排几个乡骑。",
         "plan_x": "计划数 = 每TC数量 × TC个数。",
         "prod_x": "实际产量 = min(计划, 剩余空位, 剩余食物÷食物单价, 黄金÷黄金单价)。乡骑同时吃食物+黄金：食物从村民段结转(共用食物池)、黄金为黄金链起点；再把用剩的空位/黄金结转给商人段。乡骑没真生产时产0、预算透传。",
-        "queue_x": "按 W 排队生产乡骑。",
+        "queue_x": "按 E 排队生产乡骑（金朝乡骑默认快捷键＝E；不同设置自行改键）。",
         "sw_cart": "【开关】是否生产商人（市场出商人）。默认关。",
         "if_sw_cart": "商人开关：开→进入商人段；关→进入收尾。",
         "q_cart": "检测队列里是否已有商人。",

@@ -150,8 +150,9 @@ class BuildingCount(DataNode):
                   help="只有 1 个该建筑时、上面那块区域的模板图。"),
         ParamSpec("numbered_templates", "数字模板(按序)", "templates", default=[],
                   help="number_1.png, number_2.png ... 顺序排列；序号N对应 1+N 个建筑（如 tc_number_1 / market_number_1 ...）"),
-        ParamSpec("threshold", "匹配阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01,
-                  help="匹配分数≥它才算命中。没数到又看着挺像，就把它调低些；总误判就调高。开「🖼预览」看实时分数。"),
+        ParamSpec("threshold", "匹配阈值", "float", default=0.8, minimum=0.0, maximum=1.0, step=0.01,
+                  help="匹配分数≥它才算命中。启用“滑动余量”后真匹配普遍 0.95+，故默认提到 0.8——能更稳地把“无此建筑”判成 0（少误判）。"
+                       "没数到又看着挺像就调低些；总误判就调高。开「🖼预览」看实时分数再定。"),
         ParamSpec("slide_margin", "滑动余量(px)", "int", default=6, minimum=0, maximum=40,
                   help="匹配时把检测区域【向四周各扩大】这么多像素，让模板能在里面小幅滑动找到最佳对齐位置——"
                        "这能极大改善“截图几乎一样、分数却很低”的问题（同尺寸硬匹配对 1~2px 错位极敏感）。"

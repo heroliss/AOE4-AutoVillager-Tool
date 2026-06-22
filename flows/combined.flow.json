@@ -461,7 +461,7 @@
           "templates/tc_number_5.png",
           "templates/tc_number_6.png"
         ],
-        "threshold": 0.7,
+        "threshold": 0.8,
         "slide_margin": 6,
         "retry_max": 8,
         "retry_interval": 0.02
@@ -996,11 +996,11 @@
         40.0
       ],
       "params": {
-        "key": "w",
+        "key": "e",
         "modifiers": "",
         "repeat": 1
       },
-      "note": "按 W 排队生产乡骑。"
+      "note": "按 E 排队生产乡骑（金朝乡骑默认快捷键＝E；不同设置自行改键）。"
     },
     {
       "id": "sw_cart",
@@ -1102,7 +1102,7 @@
           "templates/market_num_8.png",
           "templates/market_num_9.png"
         ],
-        "threshold": 0.7,
+        "threshold": 0.8,
         "slide_margin": 6,
         "retry_max": 8,
         "retry_interval": 0.02

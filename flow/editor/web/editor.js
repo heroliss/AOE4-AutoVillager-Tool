@@ -1100,7 +1100,7 @@ const ED = (function () {
       }
       if (!any) continue;
       const box = subgBox(g, mctx); if (!box) continue;
-      drawTimePill(ctx, box.x + box.w, box.y - 3, sumSelf, maxCum);
+      drawTimePill(ctx, box.x, box.x + box.w, box.y - 3, sumSelf, maxCum);
     }
   }
   // ============ 折叠节点里的“可编辑参数”DOM 浮层 ============
@@ -2768,23 +2768,27 @@ const ED = (function () {
     ctx.fillText(text, bx + 6, y + 0.5);
     ctx.restore();
   }
-  // 性能监控药丸：节点上方标「自身ms · Σ帧内累计ms」。rx=右边界（与节点右沿对齐），by=底边（节点顶部上方）。
-  // 自身耗时越大数字越偏红（>8ms≈一次截图量级），一眼看出本帧耗时大头落在哪个节点。
-  function drawTimePill(ctx, rx, by, selfMs, cumMs) {
+  // 性能监控药丸：拆成两个独立小药丸——自身ms 贴节点左沿（向右生长）、Σ累计ms 贴右沿（向左生长）。
+  // 各自只有一端固定、另一端随位数伸缩，所以数字变长变短时不会互相挤动、看起来不再左右晃。
+  // lx/rx = 节点左/右边界，by = 底边（节点顶部上方）。自身耗时越大数字越偏红（>8ms≈一次截图量级）。
+  function drawTimePill(ctx, lx, rx, by, selfMs, cumMs) {
     const fmt = (v) => (v >= 100 ? Math.round(v) + "" : v.toFixed(1));
-    const t1 = fmt(selfMs), t2 = "Σ" + fmt(cumMs) + "ms";
+    const pad = 6, h = 16, y = by - h, cy = y + h / 2 + 0.5;
     ctx.save();
     ctx.font = "bold 11px Consolas, monospace";
-    const w1 = ctx.measureText(t1).width, w2 = ctx.measureText(t2).width;
-    const pad = 6, gap = 8, w = pad + w1 + gap + w2 + pad, h = 16, x = rx - w, y = by - h;
-    roundRect(ctx, x, y, w, h, 5);
-    ctx.fillStyle = "rgba(20,26,36,0.92)"; ctx.shadowColor = "#000a"; ctx.shadowBlur = 5; ctx.fill();
-    ctx.shadowBlur = 0; ctx.strokeStyle = "#0008"; ctx.lineWidth = 1; ctx.stroke();
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    const cy = y + h / 2 + 0.5, hot = Math.min(1, selfMs / 16);
-    ctx.fillStyle = `rgb(${160 + hot * 95 | 0},${200 - hot * 120 | 0},${255 - hot * 200 | 0})`;  // 蓝→红
-    ctx.fillText(t1, x + pad, cy);                                   // 自身耗时
-    ctx.fillStyle = "#ffd23f"; ctx.fillText(t2, x + pad + w1 + gap, cy);   // Σ 帧内累计
+    const pill = (px, text, fill) => {       // px=左上角X；底/边框统一，只换文字与字色
+      const w = ctx.measureText(text).width + pad * 2;
+      roundRect(ctx, px, y, w, h, 5);
+      ctx.fillStyle = "rgba(20,26,36,0.92)"; ctx.shadowColor = "#000a"; ctx.shadowBlur = 5; ctx.fill();
+      ctx.shadowBlur = 0; ctx.strokeStyle = "#0008"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = fill; ctx.fillText(text, px + pad, cy);
+      return w;
+    };
+    const t1 = fmt(selfMs) + "ms", hot = Math.min(1, selfMs / 16);
+    pill(lx, t1, `rgb(${160 + hot * 95 | 0},${200 - hot * 120 | 0},${255 - hot * 200 | 0})`);  // 自身：左沿向右
+    const t2 = "Σ" + fmt(cumMs) + "ms";
+    pill(rx - (ctx.measureText(t2).width + pad * 2), t2, "#ffd23f");                            // 累计：右沿向左
     ctx.restore();
   }
   // 与 LiteGraph SPLINE_LINK 完全一致的贝塞尔控制点：输出在右、输入在左，
@@ -3079,7 +3083,7 @@ const ED = (function () {
       for (const n of nodes) {
         if (foldHidden.has(n._id)) continue;   // 折叠隐藏成员：耗时不在此画（汇总见下）
         const tm = runTimes[n._id]; if (!tm) continue;
-        drawTimePill(ctx, n.pos[0] + n.size[0], n.pos[1] - th - 3, tm[0], tm[1]);
+        drawTimePill(ctx, n.pos[0], n.pos[0] + n.size[0], n.pos[1] - th - 3, tm[0], tm[1]);
       }
       drawFoldedTimePills(ctx);   // 折叠组：在子图箱体上汇总「组内自身耗时 · 组终累计」
     }

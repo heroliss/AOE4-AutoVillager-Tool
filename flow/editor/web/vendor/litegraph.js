@@ -10281,6 +10281,12 @@ LGraphNode.prototype.executeAction = function(action)
         function inner_value_change(widget, value) {
             if(widget.type == "number"){
                 value = Number(value);
+                // 拖拽/点箭头是 value += 0.1*step 反复累加，会攒出 0.59999999 这类浮点尾巴；
+                // 在唯一提交出口按 precision 量化（量化后也回写 widget.value，下次累加从干净值起步）。
+                if (widget.options && widget.options.precision != null && isFinite(value)) {
+                    var _p = Math.pow(10, widget.options.precision);
+                    value = Math.round(value * _p) / _p;
+                }
             }
             widget.value = value;
             if ( widget.options && widget.options.property && node.properties[widget.options.property] !== undefined ) {

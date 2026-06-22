@@ -159,7 +159,7 @@ def main() -> None:
     # 注：三段共享人口池(空位)，村民+乡骑共用食物池，乡骑+商人共用黄金池，逐段扣减后结转。
     #   空位150、食物300、黄金800都够，各段按计划数排：村民3、乡骑2、商人2（c_per_cart 默认=2）。
     #   空位链 150→村民用3剩147→乡骑用2剩145→商人；食物链 300→村民用150剩150→乡骑(65×2)剩20；黄金链 800→乡骑(50×2)剩700→商人。
-    ok &= check("出乡骑 w x2 = min(2*1, 剩余空位147, 剩余食物150//65=2, 黄金800//50=16)", any("按键 w x2" in m for m in logs))
+    ok &= check("出乡骑 e x2 = min(2*1, 剩余空位147, 剩余食物150//65=2, 黄金800//50=16)", any("按键 e x2" in m for m in logs))
     ok &= check("选市场 J 键(商人段开启)", any("按键 j" in m for m in logs))
     ok &= check("出商人 q x2 = min(2*1, 剩余空位145, 剩余黄金700//60=11)", any("按键 q x2" in m for m in logs))
     ok &= check("出村民 q x3", any("按键 q x3" in m for m in logs))
@@ -168,8 +168,8 @@ def main() -> None:
     logs, _ = run_with_stubs(build_combined_graph,
                              {**COMBINED, "sw_vill": {"value": False}, "sw_xq": {"value": True},
                               "food": {"value": 70, "value2": None, "ok": True}})  # 70//65=1
-    ok &= check("乡骑食物只够1个 w x1 = min(计划2, 食物70//65=1, 黄金800//50=16)", any("按键 w x1" in m for m in logs))
-    ok &= check("食物只够1个则不出2个乡骑", not any("按键 w x2" in m for m in logs))
+    ok &= check("乡骑食物只够1个 e x1 = min(计划2, 食物70//65=1, 黄金800//50=16)", any("按键 e x1" in m for m in logs))
+    ok &= check("食物只够1个则不出2个乡骑", not any("按键 e x2" in m for m in logs))
 
     print("== 统一生产：关闭村民段 -> 该段被跳过 ==")
     logs, _ = run_with_stubs(build_combined_graph,
