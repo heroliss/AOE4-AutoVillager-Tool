@@ -171,6 +171,20 @@ def main() -> None:
     ok &= check("队列已有村民则不再出村民", not any("按键 q x3" in m for m in logs))
     ok &= check("但商队段仍正常(选市场G)", any("按键 g" in m for m in logs))
 
+    print("== 统一生产：食物不足(买不起1个) -> 跳过整个操作区(不抢锁/不按H/不排队) ==")
+    logs, ctx = run_with_stubs(build_combined_graph,
+                               {**COMBINED, "food": {"value": 30, "value2": None, "ok": True}})  # 30 < 村民单价50
+    ok &= check("食物不足不出村民", not any("按键 q" in m for m in logs))
+    ok &= check("食物不足时根本不进操作区(不按H选TC)", not any("按键 h" in m for m in logs))
+    ok &= check("食物不足时不存编组(无 Ctrl+0)", not any("ctrl+0" in m for m in logs))
+    ok &= check("食物不足后未持有操作锁/屏蔽", ctx._lock_held is False and ctx._block_active is False)
+
+    print("== 统一生产：人口已满 -> 同样跳过整个操作区 ==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "pop": {"value": 200, "value2": 200, "ok": True}})  # 空位=0
+    ok &= check("人口满时不进操作区(无 Ctrl+0)", not any("ctrl+0" in m for m in logs))
+    ok &= check("人口满时不出村民", not any("按键 q" in m for m in logs))
+
     print("== 自动排版：主线横向铺开、支线左上汇入、无重叠 ==")
     from flow.layout import mainline_layout, no_overlaps, estimate_size
     for name, build in (("出农", build_villager_graph), ("出商队", build_trade_cart_graph),

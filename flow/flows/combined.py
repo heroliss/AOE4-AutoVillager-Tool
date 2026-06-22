@@ -63,19 +63,19 @@ def build_combined_graph() -> Graph:
     add("tc", "game.tc_count", TC)
     add("c_one", "data.const_number", {"value": 1})
 
-    # ============ 生产门控（前置短路，已简化）============
+    # ============ 生产门控（前置短路）============
     # 操作区（抢锁/屏蔽输入/Ctrl+0 存编组/0 恢复/Ctrl+Alt+0 解散）对整批只做一次，
     # 但必须先确认「真的有东西要生产」才进——否则队列里已有单位在造（最常见的稳态）时，
     # 每帧仍抢锁、屏蔽输入、折腾编组 0，等于不停骚扰玩家键鼠/选择。
     #
-    # ⚠ 早期版本的门控按「开关 -> 队列空 -> 产能>0」判定，而「产能 = 每TC数 × TC数量」依赖 tc_count；
-    #   但 TC 数量要靠识别 TC 面板得到，面板只有【选中 TC 后】才出现——而“按 H 选 TC”是进操作区【之后】才做的。
-    #   于是门控在选 TC 前读到 TC=0 → 产能=0 → 误判“无活”而永不生产（需手动先选 TC 才动）。这是个顺序死结。
+    # 判定原则：产量 = min(每TC数×TC数量, 人口空位, 资源÷单价)。其中【人口空位】和【资源够不够买1个】
+    #   都不依赖按 H 选 TC，可以在进操作区【之前】就判——任一为0则产量必为0，直接跳过本段/结束本帧。
+    #   只有【TC 数量】依赖按 H（面板选中后才数得到），所以 TC 不在门控里读（否则会出现“选TC前读到TC=0→
+    #   永不生产”的顺序死结），真正乘 TC 数的产量仍在各段内、选完 TC 后才算。
     #
-    # 简化后：门控只看【开关开 + 队列空 + 人口有空位】，完全不读 TC、不读食物/黄金、不算产能——
-    #   彻底避开上面的顺序问题，节点也更少更直观。三段任一“开关开且队列空”就跳到共用的「人口空位>0?」，
-    #   有空位即进操作区，人口已满则本帧结束（三段都受人口限制）。真正的产量仍在各段内、选完 TC 后才计算。
-    # 代价：食物/黄金不足却恰好队列空时，会进操作区空跑一次（按 0 次排队、无害；村民几乎遇不到）。
+    # 于是门控逐段短路判：开关开? → 队列空? → 资源≥单价? → （共用）人口空位>0? → 进操作区。
+    #   任一不满足就看下一段；三段都无活 / 人口已满＝本帧结束。资源比较顺带把对应 OCR 提前算好缓存，
+    #   等于把资源识别耗时挪到了抢锁/屏蔽之前（屏蔽窗口更短）。队列占用的稳态下只跑一次廉价模板匹配、不读资源/人口。
     add("c_zero", "data.const_number", {"value": 0})   # 用于「人口空位 > 0」比较
     add("pre_sw_vill", "control.if")
     add("pre_q_vill", "control.if")
@@ -85,10 +85,18 @@ def build_combined_graph() -> Graph:
     add("pre_q_cart", "control.if")
     add("cmp_slots", "logic.compare", {"op": ">"})     # 人口空位 > 0 ?（三段共用一次）
     add("pre_slots", "control.if")
-    # 预读：决定要生产后、抢锁/屏蔽【之前】，先把本段会用到的资源 OCR 算好缓存——把它的耗时挪出屏蔽窗口。
-    # 只在各段“队列空=即将生产”的分支上预热对应资源（村民→食物、乡骑/商队→黄金），默认只出村民时不会白跑黄金。
-    add("warm_food", "control.prefetch_data")          # 村民段：预热食物
-    add("warm_gold", "control.prefetch_data")          # 乡骑/商队段：预热黄金（两段共用）
+    # 资源够不够再进操作区：产量 = min(每TC数×TC数, 人口空位, 资源÷单价)，只要资源连 1 个都买不起（资源<单价）产量必是0。
+    # 资源/人口都【不依赖按H选TC】，可在抢锁/屏蔽【之前】就判掉——避免“食物/黄金不足却照样进操作区、按H、排0个”白白骚扰键鼠。
+    # 这几个资源比较同时把对应 OCR 提前算好缓存（取代原 warm_food/warm_gold 预读节点：既当门控又当预热）。
+    add("c_cost_v", "data.const_number", {"value": 50})    # 村民单价(食物)：资源<它则产量必为0
+    add("cmp_food_v", "logic.compare", {"op": ">="})       # 食物 ≥ 村民单价 ?
+    add("pre_food_v", "control.if")
+    add("c_cost_x", "data.const_number", {"value": 80})    # 乡骑单价(黄金)
+    add("cmp_gold_x", "logic.compare", {"op": ">="})       # 黄金 ≥ 乡骑单价 ?
+    add("pre_gold_x", "control.if")
+    add("c_cost_cart", "data.const_number", {"value": 100})  # 商队单价(黄金)
+    add("cmp_gold_cart", "logic.compare", {"op": ">="})    # 黄金 ≥ 商队单价 ?
+    add("pre_gold_cart", "control.if")
 
     # 操作锁 / 输入屏蔽 / 存当前编组（整批生产共用一次）
     add("lock", "control.lock_acquire")
@@ -175,11 +183,14 @@ def build_combined_graph() -> Graph:
         {"title": "商队段（市场）", "color": "#a5793a",
          "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market",
                      "c_per_cart", "c_one", "plan_cart", "prod_cart", "queue_cart"]},
-        {"title": "生产门控（开关+队列空+人口空位）", "color": "#7a6a4a",
+        {"title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#7a6a4a",
          "members": ["c_zero", "pre_sw_vill", "pre_q_vill",
                      "pre_sw_xq", "pre_q_xq",
                      "pre_sw_cart", "pre_q_cart",
-                     "cmp_slots", "pre_slots", "warm_food", "warm_gold"]},
+                     "c_cost_v", "cmp_food_v", "pre_food_v",
+                     "c_cost_x", "cmp_gold_x", "pre_gold_x",
+                     "c_cost_cart", "cmp_gold_cart", "pre_gold_cart",
+                     "cmp_slots", "pre_slots"]},
         {"title": "收尾（整批一次）", "color": "#5a9367",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
     ]
@@ -212,10 +223,17 @@ def build_combined_graph() -> Graph:
         "pre_q_xq": "门控·乡骑队列空吗？空→去看“人口有空位吗”；已在造→看商队段。",
         "pre_sw_cart": "门控·商队开关开着吗？关→本帧结束（无活）。",
         "pre_q_cart": "门控·商队队列空吗？空→去看“人口有空位吗”；已在造→本帧结束。",
+        "c_cost_v": "常量·村民单价(食物 50)：食物不到这个数，连 1 个都买不起，产量必为 0。",
+        "cmp_food_v": "门控·食物 ≥ 村民单价？顺带把食物OCR提前算好（挪出屏蔽窗口）。",
+        "pre_food_v": "门控·食物够→看人口空位；不够（产量必为0）→跳过村民段，看乡骑（不进操作区、不按H、不排0个）。",
+        "c_cost_x": "常量·乡骑单价(黄金 80)。",
+        "cmp_gold_x": "门控·黄金 ≥ 乡骑单价？顺带预热黄金OCR。",
+        "pre_gold_x": "门控·黄金够→看人口空位；不够→跳过乡骑段，看商队。",
+        "c_cost_cart": "常量·商队单价(黄金 100)。",
+        "cmp_gold_cart": "门控·黄金 ≥ 商队单价？",
+        "pre_gold_cart": "门控·黄金够→看人口空位；不够→本帧结束。",
         "cmp_slots": "门控·人口空位 > 0？（三段共用：人口已满时谁都产不了，直接结束本帧）。",
         "pre_slots": "门控·有空位→开操作区(lock) 开始生产；人口已满→本帧到此结束（不抢锁/不屏蔽/不动编组）。",
-        "warm_food": "预读·确定要出村民后、抢锁屏蔽前，先把食物OCR算好缓存——把它的耗时挪出输入屏蔽窗口，屏蔽更短。",
-        "warm_gold": "预读·确定要出乡骑/商队后，先把黄金OCR算好缓存（两段共用）——把耗时挪出输入屏蔽窗口。",
         "sw_vill": "【开关】是否生产村民。关掉则整段跳过。",
         "if_sw_vill": "村民开关：开→进入村民段；关→直接跳到乡骑段。",
         "q_vill": "检测生产队列里是否已经有村民（避免重复排队）。",
@@ -248,7 +266,8 @@ def build_combined_graph() -> Graph:
         "disband": "Ctrl+Alt+0：解散临时编组，避免污染玩家的编组。",
         "relmod2": "再次松开修饰键，确保收尾干净。",
         "block_end": "结束输入屏蔽，把鼠标键盘还给玩家。",
-        "delay": "等待若干秒再进入下一轮，避免空转太频繁。",
+        "delay": "本轮操作后等待若干秒再进下一轮——【关键：防重复生产】。网络卡顿时按键要零点几到1~2秒甚至更久才真正生效，"
+                 "等待太短会以为“还没造”而重复按、重复生产。也给玩家留出手动临时取消生产的窗口（想多留就把秒数调大，如几十秒）。",
         "unlock": "释放操作锁。",
     })
 
@@ -261,20 +280,24 @@ def build_combined_graph() -> Graph:
     # 非渐变才继续 -> 直接进入生产门控（区域截图按需进行、逐帧自动缓存，无需整屏预取）
     g.connect_exec("if_trans", "false", "pre_sw_vill", "in")
 
-    # 生产门控（简化）：逐段「开关→队列空」短路；任一段“开关开且队列空”→跳到共用的「人口空位>0?」。
-    # 有空位→进操作区(lock)；人口已满 / 各段都无活＝本帧结束（出口不接即结束）。不读 TC、不读食物/黄金。
+    # 生产门控：逐段「开关→队列空→资源够」短路；任一段全部满足→跳到共用的「人口空位>0?」→进操作区。
+    # 资源/人口都不依赖按H选TC，所以能在抢锁/屏蔽【之前】判掉：产量必为0（资源不足/人口已满）时根本不进操作区。
+    # 每段任一条件不满足→看下一段；三段都没活 / 人口已满＝本帧结束（出口不接即结束）。不在门控里读 TC。
     g.connect_exec("pre_sw_vill", "true", "pre_q_vill", "in")
     g.connect_exec("pre_sw_vill", "false", "pre_sw_xq", "in")
     g.connect_exec("pre_q_vill", "true", "pre_sw_xq", "in")     # 已在造 → 跳过本段，看乡骑
-    g.connect_exec("pre_q_vill", "false", "warm_food", "in")    # 队列空 → 先预热食物OCR(挪出屏蔽窗口) → 看人口空位
-    g.connect_exec("warm_food", "out", "pre_slots", "in")
+    g.connect_exec("pre_q_vill", "false", "pre_food_v", "in")   # 队列空 → 看食物够不够买1个村民
+    g.connect_exec("pre_food_v", "true", "pre_slots", "in")     # 食物够 → 看人口空位
+    g.connect_exec("pre_food_v", "false", "pre_sw_xq", "in")    # 食物不足（产量必为0）→ 跳过村民段，看乡骑
     g.connect_exec("pre_sw_xq", "true", "pre_q_xq", "in")
     g.connect_exec("pre_sw_xq", "false", "pre_sw_cart", "in")
     g.connect_exec("pre_q_xq", "true", "pre_sw_cart", "in")
-    g.connect_exec("pre_q_xq", "false", "warm_gold", "in")      # 队列空 → 先预热黄金OCR → 看人口空位
+    g.connect_exec("pre_q_xq", "false", "pre_gold_x", "in")     # 队列空 → 看黄金够不够买1个乡骑
+    g.connect_exec("pre_gold_x", "true", "pre_slots", "in")
+    g.connect_exec("pre_gold_x", "false", "pre_sw_cart", "in")  # 黄金不足 → 跳过乡骑段，看商队
     g.connect_exec("pre_sw_cart", "true", "pre_q_cart", "in")   # false 不接 = 本帧结束
-    g.connect_exec("pre_q_cart", "false", "warm_gold", "in")    # 队列空 → 预热黄金OCR(与乡骑段共用) → 看人口空位
-    g.connect_exec("warm_gold", "out", "pre_slots", "in")
+    g.connect_exec("pre_q_cart", "false", "pre_gold_cart", "in")  # 队列空 → 看黄金够不够买1个商队
+    g.connect_exec("pre_gold_cart", "true", "pre_slots", "in")  # false 不接 = 黄金不足，本帧结束
     g.connect_exec("pre_slots", "true", "lock", "in")           # 有空位 → 开操作区开始生产；false 不接 = 人口已满，本帧结束
 
     g.connect_exec("lock", "ok", "block_begin", "in")       # 占用中(busy)则结束本帧
@@ -367,8 +390,16 @@ def build_combined_graph() -> Graph:
     g.connect_data("c_zero", "value", "cmp_slots", "b")
     g.connect_data("cmp_slots", "result", "pre_slots", "cond")
 
-    # 预读：把要在屏蔽内用到的资源 OCR 提前算好缓存（仅"提前求值"，值仍在各段内正式使用）。
-    g.connect_data("food", "value", "warm_food", "v1")
-    g.connect_data("gold", "value", "warm_gold", "v1")
+    # 门控·资源够不够买1个：资源 ≥ 单价。这几个比较同时把对应 OCR 提前算好缓存（值仍在各段内正式使用），
+    # 等于把资源识别的耗时挪到了抢锁/屏蔽之前——既当门控又当预热。
+    g.connect_data("food", "value", "cmp_food_v", "a")
+    g.connect_data("c_cost_v", "value", "cmp_food_v", "b")
+    g.connect_data("cmp_food_v", "result", "pre_food_v", "cond")
+    g.connect_data("gold", "value", "cmp_gold_x", "a")
+    g.connect_data("c_cost_x", "value", "cmp_gold_x", "b")
+    g.connect_data("cmp_gold_x", "result", "pre_gold_x", "cond")
+    g.connect_data("gold", "value", "cmp_gold_cart", "a")
+    g.connect_data("c_cost_cart", "value", "cmp_gold_cart", "b")
+    g.connect_data("cmp_gold_cart", "result", "pre_gold_cart", "cond")
 
     return g

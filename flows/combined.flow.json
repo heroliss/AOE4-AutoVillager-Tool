@@ -141,7 +141,7 @@
       ]
     },
     {
-      "title": "生产门控（开关+队列空+人口空位）",
+      "title": "生产门控（开关+队列空+资源够+人口空位）",
       "color": "#7a6a4a",
       "members": [
         "c_zero",
@@ -151,10 +151,17 @@
         "pre_q_xq",
         "pre_sw_cart",
         "pre_q_cart",
+        "c_cost_v",
+        "cmp_food_v",
+        "pre_food_v",
+        "c_cost_x",
+        "cmp_gold_x",
+        "pre_gold_x",
+        "c_cost_cart",
+        "cmp_gold_cart",
+        "pre_gold_cart",
         "cmp_slots",
-        "pre_slots",
-        "warm_food",
-        "warm_gold"
+        "pre_slots"
       ]
     },
     {
@@ -304,8 +311,8 @@
       "id": "pop",
       "type": "sense.ocr_number",
       "pos": [
-        2659.0,
-        232.0
+        3434.0,
+        412.0
       ],
       "params": {
         "region": [
@@ -324,8 +331,8 @@
       "id": "slots",
       "type": "math.arith",
       "pos": [
-        3037.0,
-        784.0
+        3795.0,
+        612.0
       ],
       "params": {
         "op": "-"
@@ -336,8 +343,8 @@
       "id": "food",
       "type": "sense.ocr_number",
       "pos": [
-        1818.0,
-        264.0
+        1578.0,
+        444.0
       ],
       "params": {
         "region": [
@@ -356,8 +363,8 @@
       "id": "gold",
       "type": "sense.ocr_number",
       "pos": [
-        3020.0,
-        248.0
+        2506.0,
+        428.0
       ],
       "params": {
         "region": [
@@ -376,7 +383,7 @@
       "id": "tc",
       "type": "game.tc_count",
       "pos": [
-        4911.0,
+        5652.0,
         228.0
       ],
       "params": {
@@ -413,7 +420,7 @@
       "id": "c_one",
       "type": "data.const_number",
       "pos": [
-        8197.5,
+        8938.5,
         1016.0
       ],
       "params": {
@@ -425,8 +432,8 @@
       "id": "c_zero",
       "type": "data.const_number",
       "pos": [
-        3045.5,
-        604.0
+        3803.5,
+        432.0
       ],
       "params": {
         "value": 0
@@ -437,7 +444,7 @@
       "id": "pre_sw_vill",
       "type": "control.if",
       "pos": [
-        1578.0,
+        1638.5,
         40.0
       ],
       "params": {},
@@ -447,7 +454,7 @@
       "id": "pre_q_vill",
       "type": "control.if",
       "pos": [
-        1878.5,
+        1982.5,
         40.0
       ],
       "params": {},
@@ -457,7 +464,7 @@
       "id": "pre_sw_xq",
       "type": "control.if",
       "pos": [
-        2179.0,
+        2566.5,
         40.0
       ],
       "params": {},
@@ -467,7 +474,7 @@
       "id": "pre_q_xq",
       "type": "control.if",
       "pos": [
-        2419.0,
+        2910.5,
         40.0
       ],
       "params": {},
@@ -477,7 +484,7 @@
       "id": "pre_sw_cart",
       "type": "control.if",
       "pos": [
-        2719.5,
+        3494.5,
         40.0
       ],
       "params": {},
@@ -487,7 +494,7 @@
       "id": "pre_q_cart",
       "type": "control.if",
       "pos": [
-        3080.5,
+        3838.5,
         40.0
       ],
       "params": {},
@@ -497,8 +504,8 @@
       "id": "cmp_slots",
       "type": "logic.compare",
       "pos": [
-        3381.0,
-        320.0
+        4122.0,
+        232.0
       ],
       "params": {
         "op": ">"
@@ -509,37 +516,119 @@
       "id": "pre_slots",
       "type": "control.if",
       "pos": [
-        3708.0,
+        4449.0,
         40.0
       ],
       "params": {},
       "note": "门控·有空位→开操作区(lock) 开始生产；人口已满→本帧到此结束（不抢锁/不屏蔽/不动编组）。"
     },
     {
-      "id": "warm_food",
-      "type": "control.prefetch_data",
+      "id": "c_cost_v",
+      "type": "data.const_number",
       "pos": [
-        2179.0,
-        240.0
+        1603.5,
+        248.0
       ],
-      "params": {},
-      "note": "预读·确定要出村民后、抢锁屏蔽前，先把食物OCR算好缓存——把它的耗时挪出输入屏蔽窗口，屏蔽更短。"
+      "params": {
+        "value": 50
+      },
+      "note": "常量·村民单价(食物 50)：食物不到这个数，连 1 个都买不起，产量必为 0。"
     },
     {
-      "id": "warm_gold",
-      "type": "control.prefetch_data",
+      "id": "cmp_food_v",
+      "type": "logic.compare",
       "pos": [
-        3424.5,
+        1939.0,
+        264.0
+      ],
+      "params": {
+        "op": ">="
+      },
+      "note": "门控·食物 ≥ 村民单价？顺带把食物OCR提前算好（挪出屏蔽窗口）。"
+    },
+    {
+      "id": "pre_food_v",
+      "type": "control.if",
+      "pos": [
+        2266.0,
         40.0
       ],
       "params": {},
-      "note": "预读·确定要出乡骑/商队后，先把黄金OCR算好缓存（两段共用）——把耗时挪出输入屏蔽窗口。"
+      "note": "门控·食物够→看人口空位；不够（产量必为0）→跳过村民段，看乡骑（不进操作区、不按H、不排0个）。"
+    },
+    {
+      "id": "c_cost_x",
+      "type": "data.const_number",
+      "pos": [
+        2531.5,
+        248.0
+      ],
+      "params": {
+        "value": 80
+      },
+      "note": "常量·乡骑单价(黄金 80)。"
+    },
+    {
+      "id": "cmp_gold_x",
+      "type": "logic.compare",
+      "pos": [
+        2867.0,
+        248.0
+      ],
+      "params": {
+        "op": ">="
+      },
+      "note": "门控·黄金 ≥ 乡骑单价？顺带预热黄金OCR。"
+    },
+    {
+      "id": "pre_gold_x",
+      "type": "control.if",
+      "pos": [
+        3194.0,
+        40.0
+      ],
+      "params": {},
+      "note": "门控·黄金够→看人口空位；不够→跳过乡骑段，看商队。"
+    },
+    {
+      "id": "c_cost_cart",
+      "type": "data.const_number",
+      "pos": [
+        3459.5,
+        232.0
+      ],
+      "params": {
+        "value": 100
+      },
+      "note": "常量·商队单价(黄金 100)。"
+    },
+    {
+      "id": "cmp_gold_cart",
+      "type": "logic.compare",
+      "pos": [
+        3795.0,
+        248.0
+      ],
+      "params": {
+        "op": ">="
+      },
+      "note": "门控·黄金 ≥ 商队单价？"
+    },
+    {
+      "id": "pre_gold_cart",
+      "type": "control.if",
+      "pos": [
+        4165.5,
+        40.0
+      ],
+      "params": {},
+      "note": "门控·黄金够→看人口空位；不够→本帧结束。"
     },
     {
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        3948.0,
+        4689.0,
         40.0
       ],
       "params": {},
@@ -549,7 +638,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        4188.0,
+        4929.0,
         40.0
       ],
       "params": {
@@ -561,7 +650,7 @@
       "id": "save_sel",
       "type": "action.press_key",
       "pos": [
-        4567.0,
+        5308.0,
         40.0
       ],
       "params": {
@@ -575,7 +664,7 @@
       "id": "relmod1",
       "type": "action.release_modifiers",
       "pos": [
-        4989.0,
+        5730.0,
         40.0
       ],
       "params": {},
@@ -585,7 +674,7 @@
       "id": "sw_vill",
       "type": "data.switch",
       "pos": [
-        5341.5,
+        6082.5,
         232.0
       ],
       "params": {
@@ -597,7 +686,7 @@
       "id": "if_sw_vill",
       "type": "control.if",
       "pos": [
-        5376.5,
+        6117.5,
         40.0
       ],
       "params": {},
@@ -607,7 +696,7 @@
       "id": "q_vill",
       "type": "sense.template_match",
       "pos": [
-        5307.0,
+        6048.0,
         412.0
       ],
       "params": {
@@ -629,7 +718,7 @@
       "id": "if_qvill",
       "type": "control.if",
       "pos": [
-        5729.5,
+        6470.5,
         40.0
       ],
       "params": {},
@@ -639,7 +728,7 @@
       "id": "sel_tc_v",
       "type": "action.press_key",
       "pos": [
-        6030.0,
+        6771.0,
         40.0
       ],
       "params": {
@@ -653,7 +742,7 @@
       "id": "c_per_v",
       "type": "data.const_number",
       "pos": [
-        5341.5,
+        6082.5,
         852.0
       ],
       "params": {
@@ -665,7 +754,7 @@
       "id": "plan_v",
       "type": "math.arith",
       "pos": [
-        5686.0,
+        6427.0,
         216.0
       ],
       "params": {
@@ -677,7 +766,7 @@
       "id": "prod_v",
       "type": "game.produce_count",
       "pos": [
-        6013.0,
+        6754.0,
         392.0
       ],
       "params": {
@@ -690,7 +779,7 @@
       "id": "queue_v",
       "type": "action.press_key",
       "pos": [
-        6391.0,
+        7132.0,
         40.0
       ],
       "params": {
@@ -704,7 +793,7 @@
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
-        6769.5,
+        7510.5,
         232.0
       ],
       "params": {
@@ -716,7 +805,7 @@
       "id": "if_sw_xq",
       "type": "control.if",
       "pos": [
-        6804.5,
+        7545.5,
         40.0
       ],
       "params": {},
@@ -726,7 +815,7 @@
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
-        6735.0,
+        7476.0,
         412.0
       ],
       "params": {
@@ -748,7 +837,7 @@
       "id": "if_qxq",
       "type": "control.if",
       "pos": [
-        7157.5,
+        7898.5,
         40.0
       ],
       "params": {},
@@ -758,7 +847,7 @@
       "id": "sel_tc_x",
       "type": "action.press_key",
       "pos": [
-        7458.0,
+        8199.0,
         40.0
       ],
       "params": {
@@ -772,7 +861,7 @@
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
-        6769.5,
+        7510.5,
         836.0
       ],
       "params": {
@@ -784,7 +873,7 @@
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
-        7114.0,
+        7855.0,
         216.0
       ],
       "params": {
@@ -796,7 +885,7 @@
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
-        7441.0,
+        8182.0,
         360.0
       ],
       "params": {
@@ -809,7 +898,7 @@
       "id": "queue_x",
       "type": "action.press_key",
       "pos": [
-        7819.0,
+        8560.0,
         40.0
       ],
       "params": {
@@ -823,7 +912,7 @@
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
-        8197.5,
+        8938.5,
         232.0
       ],
       "params": {
@@ -835,7 +924,7 @@
       "id": "if_sw_cart",
       "type": "control.if",
       "pos": [
-        8232.5,
+        8973.5,
         40.0
       ],
       "params": {},
@@ -845,7 +934,7 @@
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
-        8163.0,
+        8904.0,
         412.0
       ],
       "params": {
@@ -867,7 +956,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        8585.5,
+        9326.5,
         40.0
       ],
       "params": {},
@@ -877,7 +966,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        8886.0,
+        9627.0,
         40.0
       ],
       "params": {
@@ -891,7 +980,7 @@
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        8197.5,
+        8938.5,
         836.0
       ],
       "params": {
@@ -903,7 +992,7 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        8542.0,
+        9283.0,
         216.0
       ],
       "params": {
@@ -915,7 +1004,7 @@
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        8869.0,
+        9610.0,
         328.0
       ],
       "params": {
@@ -928,7 +1017,7 @@
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        9247.0,
+        9988.0,
         40.0
       ],
       "params": {
@@ -942,7 +1031,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        9591.0,
+        10332.0,
         40.0
       ],
       "params": {
@@ -956,7 +1045,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        9935.0,
+        10676.0,
         40.0
       ],
       "params": {
@@ -970,7 +1059,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        10279.0,
+        11020.0,
         40.0
       ],
       "params": {},
@@ -980,7 +1069,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        10519.0,
+        11260.0,
         40.0
       ],
       "params": {},
@@ -990,19 +1079,19 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        10759.0,
+        11500.0,
         40.0
       ],
       "params": {
         "seconds": 3.0
       },
-      "note": "等待若干秒再进入下一轮，避免空转太频繁。"
+      "note": "本轮操作后等待若干秒再进下一轮——【关键：防重复生产】。网络卡顿时按键要零点几到1~2秒甚至更久才真正生效，等待太短会以为“还没造”而重复按、重复生产。也给玩家留出手动临时取消生产的窗口（想多留就把秒数调大，如几十秒）。"
     },
     {
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        11052.0,
+        11793.0,
         40.0
       ],
       "params": {},
@@ -1061,16 +1150,22 @@
     [
       "pre_q_vill",
       "false",
-      "warm_food",
+      "pre_food_v",
       "in"
     ],
     [
-      "warm_food",
-      "out",
+      "pre_food_v",
+      "true",
       "pre_slots",
       "in"
     ],
     [
+      "pre_food_v",
+      "false",
+      "pre_sw_xq",
+      "in"
+    ],
+    [
       "pre_sw_xq",
       "true",
       "pre_q_xq",
@@ -1091,7 +1186,19 @@
     [
       "pre_q_xq",
       "false",
-      "warm_gold",
+      "pre_gold_x",
+      "in"
+    ],
+    [
+      "pre_gold_x",
+      "true",
+      "pre_slots",
+      "in"
+    ],
+    [
+      "pre_gold_x",
+      "false",
+      "pre_sw_cart",
       "in"
     ],
     [
@@ -1103,12 +1210,12 @@
     [
       "pre_q_cart",
       "false",
-      "warm_gold",
+      "pre_gold_cart",
       "in"
     ],
     [
-      "warm_gold",
-      "out",
+      "pre_gold_cart",
+      "true",
       "pre_slots",
       "in"
     ],
@@ -1531,14 +1638,56 @@
     [
       "food",
       "value",
-      "warm_food",
-      "v1"
+      "cmp_food_v",
+      "a"
+    ],
+    [
+      "c_cost_v",
+      "value",
+      "cmp_food_v",
+      "b"
+    ],
+    [
+      "cmp_food_v",
+      "result",
+      "pre_food_v",
+      "cond"
     ],
     [
       "gold",
       "value",
-      "warm_gold",
-      "v1"
+      "cmp_gold_x",
+      "a"
+    ],
+    [
+      "c_cost_x",
+      "value",
+      "cmp_gold_x",
+      "b"
+    ],
+    [
+      "cmp_gold_x",
+      "result",
+      "pre_gold_x",
+      "cond"
+    ],
+    [
+      "gold",
+      "value",
+      "cmp_gold_cart",
+      "a"
+    ],
+    [
+      "c_cost_cart",
+      "value",
+      "cmp_gold_cart",
+      "b"
+    ],
+    [
+      "cmp_gold_cart",
+      "result",
+      "pre_gold_cart",
+      "cond"
     ]
   ]
 }
