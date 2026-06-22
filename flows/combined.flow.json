@@ -414,7 +414,7 @@
       "type": "sense.ocr_number",
       "pos": [
         6049.5,
-        1110.0
+        1134.0
       ],
       "params": {
         "region": [
@@ -431,12 +431,13 @@
     },
     {
       "id": "tc",
-      "type": "game.tc_count",
+      "type": "game.building_count",
       "pos": [
         6032.0,
         348.0
       ],
       "params": {
+        "building_name": "城镇中心",
         "icon_region": [
           444,
           1212,

@@ -24,6 +24,7 @@ FOOD_REGION = [50, 1222, 140, 1248]
 GOLD_REGION = [47, 1327, 137, 1353]
 WOOD_REGION = [47, 1300, 137, 1326]   # 占位：木头数字区域，请按你的界面调整（仅商人用木头时才需要）
 TC = {
+    "building_name": "城镇中心",
     "icon_region": [444, 1212, 492, 1259],
     "single_region": [300, 1140, 354, 1194],
     "single_template": "templates/tc_single.png",
@@ -62,7 +63,7 @@ def build_combined_graph() -> Graph:
     add("food", "sense.ocr_number", {"region": FOOD_REGION, "regex": r"(\d+)"})
     add("gold", "sense.ocr_number", {"region": GOLD_REGION, "regex": r"(\d+)"})
     add("wood", "sense.ocr_number", {"region": WOOD_REGION, "regex": r"(\d+)"})  # 木头：默认不参与限制（成本0），仅在某单位需要木头时启用
-    add("tc", "game.tc_count", TC)
+    add("tc", "game.building_count", TC)
     add("c_one", "data.const_number", {"value": 1})
 
     # ============ 生产门控（前置短路）============

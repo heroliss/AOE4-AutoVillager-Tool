@@ -21,6 +21,7 @@ class Node:
     """节点基类。子类用类属性声明端口与参数。"""
 
     type_id: str = ""          # 全局唯一标识，如 "sense.template_match"
+    aliases: tuple = ()        # 旧 type_id（改名后兼容老流程文件，见 register）
     category: str = "misc"     # 调色板分组，如 "感知" / "操作" / "逻辑"
     title: str = ""            # UI 显示标题（中文）
 
@@ -83,20 +84,31 @@ class ControlNode(Node):
 # ==================== 注册表 ====================
 
 _REGISTRY: dict[str, type[Node]] = {}
+# 旧 type_id → 现 type_id 的迁移别名。节点重命名后，老流程文件里的旧 id 仍能创建出新类；
+# 重新保存时会写成新 id（自动迁移）。别名不进调色板（registry() 只暴露规范 id）。
+_ALIASES: dict[str, str] = {}
 
 
 def register(cls: type[Node]) -> type[Node]:
-    """节点类装饰器：注册到全局表。"""
+    """节点类装饰器：注册到全局表。
+
+    类可声明 `aliases = ("old.type_id", ...)`：这些旧 id 会指向同一个类，
+    用于节点改名后兼容已保存的流程文件。
+    """
     if not cls.type_id:
         raise ValueError(f"节点 {cls.__name__} 缺少 type_id")
     if cls.type_id in _REGISTRY and _REGISTRY[cls.type_id] is not cls:
         raise ValueError(f"重复的节点 type_id: {cls.type_id}")
     _REGISTRY[cls.type_id] = cls
+    for old in getattr(cls, "aliases", ()) or ():
+        _ALIASES[old] = cls.type_id
     return cls
 
 
 def create_node(type_id: str) -> Node:
     if type_id not in _REGISTRY:
+        if type_id in _ALIASES:
+            return _REGISTRY[_ALIASES[type_id]]()
         raise KeyError(f"未注册的节点类型: {type_id}")
     return _REGISTRY[type_id]()
 

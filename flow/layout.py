@@ -124,7 +124,7 @@ def _card_h(node, note: str, width: float) -> float:
 # 感知节点的【上方】预留这点高度，开预览时预览图就不会压住上一行节点。
 PREVIEW_RESERVE = 120.0
 _PREVIEW_TYPES = {"sense.template_match", "sense.ocr_number", "sense.ocr_text",
-                  "game.occlusion", "game.tc_count"}
+                  "game.occlusion", "game.building_count", "game.tc_count"}
 
 
 def _preview_reserve(node) -> float:

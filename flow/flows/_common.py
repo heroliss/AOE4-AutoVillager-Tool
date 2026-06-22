@@ -95,10 +95,11 @@ def build_single_type(cfg: dict) -> Graph:
     use_count = cfg.get("building") is not None
     if use_count:
         b = cfg["building"]
-        # 不再放固定延时：「多TC计数」节点已内置“按键后自动重试重截”——按 H 后 TC 面板还没刷新出来时
+        # 不再放固定延时：「选中建筑计数」节点已内置“按键后自动重试重截”——按全选键后面板还没刷新出来时
         # 它会小步重截+重匹配、一识别到就立即返回（自适应，比固定 0.05 秒更快也更稳）。
-        add("tc", "game.tc_count",
-            {"icon_region": b["icon_region"], "single_region": b["single_region"],
+        add("tc", "game.building_count",
+            {"building_name": b.get("building_name", "城镇中心"),
+             "icon_region": b["icon_region"], "single_region": b["single_region"],
              "single_template": b["single_template"], "numbered_templates": b["numbered_templates"]})
         add("if_tcok", "control.if")
 

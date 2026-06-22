@@ -23,6 +23,7 @@ POP_REGION = [50, 1140, 150, 1170]
 FOOD_REGION = [50, 1222, 140, 1248]
 GOLD_REGION = [50, 1180, 140, 1206]
 TC = {
+    "building_name": "城镇中心",
     "icon_region": [444, 1212, 492, 1259],
     "single_region": [300, 1140, 354, 1194],
     "single_template": "templates/tc_single.png",
@@ -87,7 +88,7 @@ def build_jin_graph() -> Graph:
     add("save_sel", "action.press_key", {"key": "0", "modifiers": "ctrl"})
     add("relmod1", "action.release_modifiers")
     add("select_tc", "action.press_key", {"key": "h"})
-    add("tc", "game.tc_count", TC)
+    add("tc", "game.building_count", TC)
     add("if_tcok", "control.if")
 
     # —— 两种单位的产能 ——

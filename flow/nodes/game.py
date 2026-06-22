@@ -1,5 +1,5 @@
 """
-游戏专用的"重逻辑"节点：三态遮挡检测、多TC计数、产能计算。
+游戏专用的"重逻辑"节点：三态遮挡检测、选中建筑计数（原“多TC计数”，已通用化）、产能计算。
 
 这三者算法内聚（尤其遮挡检测自带跨帧状态机），拆成连线反而更难懂，
 因此各自封装为单个节点，内部沿用既有 villager_training_detector / tc_counter 的算法，
@@ -114,31 +114,38 @@ class Occlusion(DataNode):
                 "clear": clear, "confidence": conf, "state": status}
 
 
-# ==================== 多TC计数（单次检测）====================
+# ==================== 选中建筑计数（单次检测）====================
 @register
-class TcCount(DataNode):
-    """一次性检测当前 TC 数量。重试/缓存/冷却交由流程图用变量与条件表达。"""
+class BuildingCount(DataNode):
+    """一次性检测当前【选中的某类建筑】数量（城镇中心 / 市场 / …）。
+    算法与建筑无关：单个建筑预检测 + 多个时数字模板匹配，按键后自动重试重截。
+    重试/缓存/冷却交由流程图用变量与条件表达。"""
 
-    type_id = "game.tc_count"
+    type_id = "game.building_count"
+    aliases = ("game.tc_count",)   # 旧名「多TC计数」，兼容已保存的流程
     category = "游戏"
-    title = "多TC计数"
+    title = "选中建筑计数"
     outputs = [
         data_out("count", DataType.NUMBER, label="数量",
-                 help="当前选中的城镇中心个数。⚠靠识别“TC 面板”得到——必须先按键选中所有 TC、面板出来后才数得到。"
-                      "本节点已【内置“按键后自动重试重截”】（见参数 重试次数/重试间隔）：按 H 后面板还没刷新出来时，"
+                 help="当前选中的该类建筑个数（城镇中心/市场/…，由“建筑名称”指明）。"
+                      "⚠靠识别“数量面板”得到——必须先按“全选该建筑”的键、面板出来后才数得到。"
+                      "本节点已【内置“按键后自动重试重截”】（见参数 重试次数/重试间隔）：按键后面板还没刷新出来时，"
                       "它会小步重截+重匹配，一识别到立即返回——所以【不需要】在它前面再放固定延时节点。"),
         data_out("ok", DataType.BOOL, label="成功",
-                 help="是否成功识别到 TC（重试若干次仍没识别到 / 还没建 TC / 被遮挡 时为否）。"),
+                 help="是否成功识别到该建筑（重试若干次仍没识别到 / 还没建该建筑 / 被遮挡 时为否）。"
+                      "可直接接到“出兵段”的开关上：识别不到（如没有市场）就不进该段。"),
     ]
     params = [
-        ParamSpec("icon_region", "多TC检测区域", "region", default=[444, 1212, 492, 1259],
-                  help="TC 面板上显示数量的小图标区域（≥2 个 TC 时这里会有数字）。"),
-        ParamSpec("single_region", "单TC预检测区域", "region", default=[300, 1140, 354, 1194],
-                  help="先快速判断“是不是只有 1 个 TC”的区域，命中就直接返回 1、省去数字匹配。"),
-        ParamSpec("single_template", "单TC模板", "template", default="",
-                  help="单个 TC 时该区域的模板图。"),
+        ParamSpec("building_name", "建筑名称", "str", default="城镇中心",
+                  help="仅用于日志/预览显示，便于区分这是数哪种建筑（如 城镇中心 / 市场）。不影响识别。"),
+        ParamSpec("icon_region", "数量图标区域", "region", default=[444, 1212, 492, 1259],
+                  help="面板上显示数量的小图标区域（选中 ≥2 个该建筑时这里会有数字）。"),
+        ParamSpec("single_region", "单个预检测区域", "region", default=[300, 1140, 354, 1194],
+                  help="先快速判断“是不是只有 1 个”的区域，命中就直接返回 1、省去数字匹配。"),
+        ParamSpec("single_template", "单个模板", "template", default="",
+                  help="只有 1 个该建筑时、上面那块区域的模板图。"),
         ParamSpec("numbered_templates", "数字模板(按序)", "templates", default=[],
-                  help="tc_number_1.png, tc_number_2.png ... 顺序排列；序号N对应 1+N 个TC"),
+                  help="number_1.png, number_2.png ... 顺序排列；序号N对应 1+N 个建筑（如 tc_number_1 / market_number_1 ...）"),
         ParamSpec("threshold", "匹配阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01),
         ParamSpec("crop_size", "数字裁剪尺寸", "int", default=20, minimum=4, maximum=64),
         ParamSpec("early_exit", "提前退出阈值", "float", default=0.95, minimum=0.0, maximum=1.0, step=0.01),
@@ -165,20 +172,21 @@ class TcCount(DataNode):
         return crop
 
     def _detect_once(self, ctx, thr, fresh):
-        """单次检测当前 TC 数量。fresh=True 时绕过本帧截图缓存、重新截屏（供重试用）。
+        """单次检测当前选中建筑数量。fresh=True 时绕过本帧截图缓存、重新截屏（供重试用）。
         返回 (结果dict, 路径文字)。"""
-        # 1) 单TC预检测
+        name = self.values.get("building_name") or "建筑"
+        # 1) 单个预检测
         single_tmpl = _imaging.load_gray(self.values["single_template"])
         if single_tmpl is not None:
             sg = _imaging.to_gray(ctx.capture_region(self.values["single_region"], fresh=fresh))
             if _imaging.best_match(sg, single_tmpl) >= thr:
-                return {"count": 1, "ok": True}, "单TC"
+                return {"count": 1, "ok": True}, f"单{name}"
 
-        # 2) 多TC：阶段1 判断是否有 TC 图标
+        # 2) 多个：阶段1 判断是否有数量图标
         numbered = self.values["numbered_templates"] or []
         icon_gray = _imaging.to_gray(ctx.capture_region(self.values["icon_region"], fresh=fresh))
         if not numbered or _imaging.best_match(icon_gray, _imaging.load_gray(numbered[0])) < thr:
-            return {"count": 0, "ok": False}, "未检测到TC"
+            return {"count": 0, "ok": False}, f"未检测到{name}"
 
         # 3) 阶段2：左上角精确匹配数字
         size = self.values["crop_size"]
@@ -198,12 +206,12 @@ class TcCount(DataNode):
                 if mv >= self.values["early_exit"]:
                     break
         count = 1 + best_n
-        return {"count": count, "ok": True}, f"多TC(n={best_n})"
+        return {"count": count, "ok": True}, f"{name}×{count}"
 
     def evaluate(self, ctx, inputs):
         thr = self.values["threshold"]
 
-        # 首次检测用本帧缓存（与同帧其它读取共享）；没识别到——多半是按 H 后 TC 面板还没刷新出来——
+        # 首次检测用本帧缓存（与同帧其它读取共享）；没识别到——多半是按全选键后面板还没刷新出来——
         # 就小步重试：等一小会、强制重截(fresh)、重匹配，直到识别到或用尽重试次数。识别到立即返回。
         out, path = self._detect_once(ctx, thr, fresh=False)
         tries = 1
@@ -217,7 +225,7 @@ class TcCount(DataNode):
                 tries += 1
 
         self.live = {"count": out["count"], "path": path, "tries": tries}
-        if ctx.preview_enabled:   # 预览 TC 图标区域（刚在 _detect_once 截过、走帧缓存，开销很小）
+        if ctx.preview_enabled:   # 预览数量图标区域（刚在 _detect_once 截过、走帧缓存，开销很小）
             self.live["preview"] = _imaging.encode_preview(ctx.capture_region(self.values["icon_region"]))
         return out
 
