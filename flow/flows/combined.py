@@ -110,15 +110,13 @@ def build_combined_graph() -> Graph:
     add("c_cost_x", "data.const_number", {"value": 50})    # 乡骑单价(黄金)
     add("cmp_gold_x", "logic.compare", {"op": ">="})       # 黄金 ≥ 乡骑黄金单价 ?
     add("pre_gold_x", "control.if")
-    add("c_cost_cart_food", "data.const_number", {"value": 60})  # 商人单价(食物)；商人同吃食物+黄金，默认 60肉60金，放控制面板可调
-    add("cmp_food_cart", "logic.compare", {"op": ">="})    # 食物 ≥ 商人食物单价 ?
-    add("pre_food_cart", "control.if")
     add("c_cost_cart", "data.const_number", {"value": 60})   # 商人单价(黄金)；不同国家不同，放到了控制面板可调
-    add("cmp_gold_cart", "logic.compare", {"op": ">="})    # 黄金 ≥ 商人单价 ?
+    add("cmp_gold_cart", "logic.compare", {"op": ">="})    # 黄金 ≥ 商人黄金单价 ?
     add("pre_gold_cart", "control.if")
-    # 商人木头成本：默认 0 = 不参与限制（安全：木头区域没配好也不会误把商人卡成0）。
-    # 需要时把它设为实际值(如60)并把上面的「木头数字区域」设对，商人产量就会再受 木头÷成本 限制。
-    add("c_cost_cart_wood", "data.const_number", {"value": 0})
+    # 商人同吃【木头60 + 黄金60】（默认；不吃食物）。木头与黄金都够才能出1个，门控两道都要过。
+    add("c_cost_cart_wood", "data.const_number", {"value": 60})  # 商人单价(木头)
+    add("cmp_wood_cart", "logic.compare", {"op": ">="})    # 木头 ≥ 商人木头单价 ?
+    add("pre_wood_cart", "control.if")
 
     # 操作锁 / 输入屏蔽 / 存当前编组（整批生产共用一次）
     add("lock", "control.lock_acquire")
@@ -186,9 +184,8 @@ def build_combined_graph() -> Graph:
         ["c_cost_v", "value", "村民成本(食物)"],
         ["c_cost_x_food", "value", "乡骑成本(食物)"],
         ["c_cost_x", "value", "乡骑成本(黄金)"],
-        ["c_cost_cart_food", "value", "商人成本(食物)"],
         ["c_cost_cart", "value", "商人成本(黄金)"],
-        ["c_cost_cart_wood", "value", "商人成本(木头·0=不限)"],
+        ["c_cost_cart_wood", "value", "商人成本(木头)"],
         ["win", "hdr", "HDR模式"],
         ["tick", "interval", "循环间隔(秒)"],
         ["delay", "seconds", "每轮等待(秒)"],
@@ -222,8 +219,8 @@ def build_combined_graph() -> Graph:
                      "c_cost_v", "cmp_food_v", "pre_food_v",
                      "c_cost_x_food", "cmp_food_x", "pre_food_x",
                      "c_cost_x", "cmp_gold_x", "pre_gold_x",
-                     "c_cost_cart_food", "cmp_food_cart", "pre_food_cart",
-                     "c_cost_cart", "cmp_gold_cart", "pre_gold_cart", "c_cost_cart_wood",
+                     "c_cost_cart", "cmp_gold_cart", "pre_gold_cart",
+                     "c_cost_cart_wood", "cmp_wood_cart", "pre_wood_cart",
                      "cmp_slots", "pre_slots"]},
         {"title": "收尾（整批一次）", "color": "#5a9367",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
@@ -244,7 +241,7 @@ def build_combined_graph() -> Graph:
         "slots": "人口空位 = 上限 - 当前，作为可生产数量的上限之一。",
         "food": "识别当前食物存量（约束村民产量）。",
         "gold": "识别当前黄金存量（约束乡骑/商人产量）。",
-        "wood": "识别当前木头存量。默认不参与限制（商人木头成本=0）；某单位需要木头时，把对应成本设为实际值并把本区域设对即可启用。",
+        "wood": "识别当前木头存量（约束商人产量：商人吃木头60）。务必把本区域对准游戏里的木头数字，否则商人会被卡成0。",
         "tc": "统计当前有几个城镇中心(TC)，用于“每个TC各排一批”。",
         "lock": "抢占操作锁：多开/多脚本时避免同时抢操作。占用中则本帧结束。",
         "block_begin": "开始屏蔽鼠标键盘：操作期间防止人为误触打断。",
@@ -256,10 +253,10 @@ def build_combined_graph() -> Graph:
         "pre_sw_xq": "门控·乡骑开关开着吗？开→看乡骑队列；关→看商人段。",
         "pre_q_xq": "门控·乡骑队列空吗？空→去看“人口有空位吗”；已在造→看商人段。",
         "pre_sw_cart": "门控·商人开关开着吗？关→本帧结束（无活）。",
-        "pre_q_cart": "门控·商人队列空吗？空→先看“食物够不够买1个”；已在造→本帧结束。",
-        "c_cost_cart_food": "常量·商人单价(食物，默认60)。商人同吃食物+黄金(默认60肉60金)——已放控制面板，可按国家调。同时供门控判断和产能计算。",
-        "cmp_food_cart": "门控·食物 ≥ 商人食物单价？",
-        "pre_food_cart": "门控·食物够→再看黄金；不够→本帧结束。",
+        "pre_q_cart": "门控·商人队列空吗？空→先看“木头够不够买1个”；已在造→本帧结束。",
+        "c_cost_cart_wood": "常量·商人单价(木头，默认60)。商人同吃木头+黄金(默认60木60金，不吃食物)——已放控制面板，可按国家调。同时供门控判断和产能计算。",
+        "cmp_wood_cart": "门控·木头 ≥ 商人木头单价？",
+        "pre_wood_cart": "门控·木头够→再看黄金；不够→本帧结束。",
         "c_cost_v": "常量·村民单价(食物，默认50)：食物不到这个数连1个都买不起、产量必为0。不同国家不同，已放到控制面板；同时供门控和产能计算。",
         "cmp_food_v": "门控·食物 ≥ 村民单价？顺带把食物OCR提前算好（挪出屏蔽窗口）。",
         "pre_food_v": "门控·食物够→看人口空位；不够（产量必为0）→跳过村民段，看乡骑（不进操作区、不按H、不排0个）。",
@@ -270,8 +267,7 @@ def build_combined_graph() -> Graph:
         "cmp_gold_x": "门控·黄金 ≥ 乡骑黄金单价？顺带预热黄金OCR。",
         "pre_gold_x": "门控·食物+黄金都够→看人口空位；黄金不够→跳过乡骑段，看商人。",
         "c_cost_cart": "常量·商人单价(黄金，默认60)。不同国家不同——已放到控制面板，可按你的国家调。同时供门控判断和产能计算。",
-        "c_cost_cart_wood": "常量·商人单价(木头，默认0=不限制)。安全起见默认不看木头；需要时设为实际值(如60)并把「木头数字区域」设对即可启用。已放到控制面板。",
-        "cmp_gold_cart": "门控·黄金 ≥ 商人单价？",
+        "cmp_gold_cart": "门控·黄金 ≥ 商人黄金单价？",
         "pre_gold_cart": "门控·黄金够→看人口空位；不够→本帧结束。",
         "cmp_slots": "门控·人口空位 > 0？（三段共用：人口已满时谁都产不了，直接结束本帧）。",
         "pre_slots": "门控·有空位→开操作区(lock) 开始生产；人口已满→本帧到此结束（不抢锁/不屏蔽/不动编组）。",
@@ -307,7 +303,7 @@ def build_combined_graph() -> Graph:
                     "（下一帧门控即跳过商人段、不再反复按 J）。开关在编辑器/面板里会真的跟着变成关，可保存。",
         "c_per_cart": "每个市场一次排几个商人。",
         "plan_cart": "计划数 = 每市场数量 × 市场个数（来自「数市场」；没市场则=0，自然不排）。",
-        "prod_cart": "实际产量 = min(计划, 剩余人口空位, 剩余食物÷食物单价, 剩余黄金÷黄金单价[, 木头÷木头单价])。商人同吃食物+黄金(默认60肉60金)；空位/食物/黄金均来自乡骑段结转——所以即使村民/乡骑同帧在产，商人仍按“真正剩下的”池子独立生产。木头默认不限制(成本0)。",
+        "prod_cart": "实际产量 = min(计划, 剩余人口空位, 木头÷木头单价, 剩余黄金÷黄金单价)。商人同吃木头+黄金(默认60木60金，不吃食物)；空位/黄金来自乡骑段结转——所以即使村民/乡骑同帧在产，商人仍按“真正剩下的”池子独立生产。木头为商人段起点(整池可用)。",
         "queue_cart": "按 Q 排队生产商人。",
         "restore": "按 0 恢复操作前暂存的编组选择。",
         "disband": "Ctrl+Alt+0：解散临时编组，避免污染玩家的编组。",
@@ -345,8 +341,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("pre_gold_x", "true", "pre_slots", "in")     # 食物+黄金都够 → 看人口空位
     g.connect_exec("pre_gold_x", "false", "pre_sw_cart", "in")  # 黄金不足 → 跳过乡骑段，看商人
     g.connect_exec("pre_sw_cart", "true", "pre_q_cart", "in")   # false 不接 = 本帧结束
-    g.connect_exec("pre_q_cart", "false", "pre_food_cart", "in")  # 队列空 → 先看食物够不够买1个商人（商人吃食物+黄金）
-    g.connect_exec("pre_food_cart", "true", "pre_gold_cart", "in")  # 食物够 → 再看黄金；false 不接 = 食物不足，本帧结束
+    g.connect_exec("pre_q_cart", "false", "pre_wood_cart", "in")  # 队列空 → 先看木头够不够买1个商人（商人吃木头+黄金）
+    g.connect_exec("pre_wood_cart", "true", "pre_gold_cart", "in")  # 木头够 → 再看黄金；false 不接 = 木头不足，本帧结束
     g.connect_exec("pre_gold_cart", "true", "pre_slots", "in")  # false 不接 = 黄金不足，本帧结束
     g.connect_exec("pre_slots", "true", "lock", "in")           # 有空位 → 开操作区开始生产；false 不接 = 人口已满，本帧结束
 
@@ -446,12 +442,10 @@ def build_combined_graph() -> Graph:
     g.connect_data("market", "count", "plan_cart", "b")          # 计划=每市场数×市场个数（没市场=0）
     g.connect_data("plan_cart", "value", "prod_cart", "planned")
     g.connect_data("prod_x", "slots_left", "prod_cart", "available_slots")   # 空位 = 乡骑用剩的（=村民也用剩的）
-    g.connect_data("prod_x", "food_left", "prod_cart", "food")               # 食物 = 乡骑用剩的（村民→乡骑→商人共用食物池）
-    g.connect_data("c_cost_cart_food", "value", "prod_cart", "food_cost")     # 商人食物单价
     g.connect_data("prod_x", "gold_left", "prod_cart", "gold")               # 黄金 = 乡骑用剩的
     g.connect_data("c_cost_cart", "value", "prod_cart", "gold_cost")         # 商人黄金单价
-    g.connect_data("wood", "value", "prod_cart", "wood")                     # 木头（默认成本0=不限制）
-    g.connect_data("c_cost_cart_wood", "value", "prod_cart", "wood_cost")    # 商人木头单价
+    g.connect_data("wood", "value", "prod_cart", "wood")                     # 木头存量
+    g.connect_data("c_cost_cart_wood", "value", "prod_cart", "wood_cost")    # 商人木头单价(默认60)
     g.connect_data("sw_cart", "value", "prod_cart", "switch")
     g.connect_data("q_cart", "found", "prod_cart", "busy")
     g.connect_data("prod_cart", "count", "queue_cart", "count")
@@ -479,11 +473,11 @@ def build_combined_graph() -> Graph:
     g.connect_data("gold", "value", "cmp_gold_x", "a")
     g.connect_data("c_cost_x", "value", "cmp_gold_x", "b")
     g.connect_data("cmp_gold_x", "result", "pre_gold_x", "cond")
-    g.connect_data("food", "value", "cmp_food_cart", "a")        # 商人食物门控
-    g.connect_data("c_cost_cart_food", "value", "cmp_food_cart", "b")
-    g.connect_data("cmp_food_cart", "result", "pre_food_cart", "cond")
     g.connect_data("gold", "value", "cmp_gold_cart", "a")
     g.connect_data("c_cost_cart", "value", "cmp_gold_cart", "b")
     g.connect_data("cmp_gold_cart", "result", "pre_gold_cart", "cond")
+    g.connect_data("wood", "value", "cmp_wood_cart", "a")        # 商人木头门控
+    g.connect_data("c_cost_cart_wood", "value", "cmp_wood_cart", "b")
+    g.connect_data("cmp_wood_cart", "result", "pre_wood_cart", "cond")
 
     return g
