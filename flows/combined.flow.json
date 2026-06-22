@@ -152,7 +152,9 @@
         "pre_sw_cart",
         "pre_q_cart",
         "cmp_slots",
-        "pre_slots"
+        "pre_slots",
+        "warm_food",
+        "warm_gold"
       ]
     },
     {
@@ -302,8 +304,8 @@
       "id": "pop",
       "type": "sense.ocr_number",
       "pos": [
-        2298.0,
-        248.0
+        2659.0,
+        232.0
       ],
       "params": {
         "region": [
@@ -322,8 +324,8 @@
       "id": "slots",
       "type": "math.arith",
       "pos": [
-        2659.0,
-        412.0
+        3037.0,
+        784.0
       ],
       "params": {
         "op": "-"
@@ -334,8 +336,8 @@
       "id": "food",
       "type": "sense.ocr_number",
       "pos": [
-        4533.5,
-        1226.0
+        1818.0,
+        264.0
       ],
       "params": {
         "region": [
@@ -354,8 +356,8 @@
       "id": "gold",
       "type": "sense.ocr_number",
       "pos": [
-        4533.5,
-        870.0
+        3020.0,
+        248.0
       ],
       "params": {
         "region": [
@@ -374,7 +376,7 @@
       "id": "tc",
       "type": "game.tc_count",
       "pos": [
-        4516.0,
+        4911.0,
         228.0
       ],
       "params": {
@@ -411,7 +413,7 @@
       "id": "c_one",
       "type": "data.const_number",
       "pos": [
-        7802.5,
+        8197.5,
         1016.0
       ],
       "params": {
@@ -423,8 +425,8 @@
       "id": "c_zero",
       "type": "data.const_number",
       "pos": [
-        2667.5,
-        232.0
+        3045.5,
+        604.0
       ],
       "params": {
         "value": 0
@@ -445,7 +447,7 @@
       "id": "pre_q_vill",
       "type": "control.if",
       "pos": [
-        1818.0,
+        1878.5,
         40.0
       ],
       "params": {},
@@ -455,7 +457,7 @@
       "id": "pre_sw_xq",
       "type": "control.if",
       "pos": [
-        2058.0,
+        2179.0,
         40.0
       ],
       "params": {},
@@ -465,7 +467,7 @@
       "id": "pre_q_xq",
       "type": "control.if",
       "pos": [
-        2358.5,
+        2419.0,
         40.0
       ],
       "params": {},
@@ -475,7 +477,7 @@
       "id": "pre_sw_cart",
       "type": "control.if",
       "pos": [
-        2702.5,
+        2719.5,
         40.0
       ],
       "params": {},
@@ -485,7 +487,7 @@
       "id": "pre_q_cart",
       "type": "control.if",
       "pos": [
-        3029.5,
+        3080.5,
         40.0
       ],
       "params": {},
@@ -495,8 +497,8 @@
       "id": "cmp_slots",
       "type": "logic.compare",
       "pos": [
-        2986.0,
-        248.0
+        3381.0,
+        320.0
       ],
       "params": {
         "op": ">"
@@ -507,17 +509,37 @@
       "id": "pre_slots",
       "type": "control.if",
       "pos": [
-        3313.0,
+        3708.0,
         40.0
       ],
       "params": {},
       "note": "门控·有空位→开操作区(lock) 开始生产；人口已满→本帧到此结束（不抢锁/不屏蔽/不动编组）。"
     },
     {
+      "id": "warm_food",
+      "type": "control.prefetch_data",
+      "pos": [
+        2179.0,
+        240.0
+      ],
+      "params": {},
+      "note": "预读·确定要出村民后、抢锁屏蔽前，先把食物OCR算好缓存——把它的耗时挪出输入屏蔽窗口，屏蔽更短。"
+    },
+    {
+      "id": "warm_gold",
+      "type": "control.prefetch_data",
+      "pos": [
+        3424.5,
+        40.0
+      ],
+      "params": {},
+      "note": "预读·确定要出乡骑/商队后，先把黄金OCR算好缓存（两段共用）——把耗时挪出输入屏蔽窗口。"
+    },
+    {
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        3553.0,
+        3948.0,
         40.0
       ],
       "params": {},
@@ -527,7 +549,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        3793.0,
+        4188.0,
         40.0
       ],
       "params": {
@@ -539,7 +561,7 @@
       "id": "save_sel",
       "type": "action.press_key",
       "pos": [
-        4172.0,
+        4567.0,
         40.0
       ],
       "params": {
@@ -553,7 +575,7 @@
       "id": "relmod1",
       "type": "action.release_modifiers",
       "pos": [
-        4594.0,
+        4989.0,
         40.0
       ],
       "params": {},
@@ -563,7 +585,7 @@
       "id": "sw_vill",
       "type": "data.switch",
       "pos": [
-        4946.5,
+        5341.5,
         232.0
       ],
       "params": {
@@ -575,7 +597,7 @@
       "id": "if_sw_vill",
       "type": "control.if",
       "pos": [
-        4981.5,
+        5376.5,
         40.0
       ],
       "params": {},
@@ -585,7 +607,7 @@
       "id": "q_vill",
       "type": "sense.template_match",
       "pos": [
-        4912.0,
+        5307.0,
         412.0
       ],
       "params": {
@@ -607,7 +629,7 @@
       "id": "if_qvill",
       "type": "control.if",
       "pos": [
-        5334.5,
+        5729.5,
         40.0
       ],
       "params": {},
@@ -617,7 +639,7 @@
       "id": "sel_tc_v",
       "type": "action.press_key",
       "pos": [
-        5635.0,
+        6030.0,
         40.0
       ],
       "params": {
@@ -631,7 +653,7 @@
       "id": "c_per_v",
       "type": "data.const_number",
       "pos": [
-        4946.5,
+        5341.5,
         852.0
       ],
       "params": {
@@ -643,7 +665,7 @@
       "id": "plan_v",
       "type": "math.arith",
       "pos": [
-        5291.0,
+        5686.0,
         216.0
       ],
       "params": {
@@ -655,7 +677,7 @@
       "id": "prod_v",
       "type": "game.produce_count",
       "pos": [
-        5618.0,
+        6013.0,
         392.0
       ],
       "params": {
@@ -668,7 +690,7 @@
       "id": "queue_v",
       "type": "action.press_key",
       "pos": [
-        5996.0,
+        6391.0,
         40.0
       ],
       "params": {
@@ -682,7 +704,7 @@
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
-        6374.5,
+        6769.5,
         232.0
       ],
       "params": {
@@ -694,7 +716,7 @@
       "id": "if_sw_xq",
       "type": "control.if",
       "pos": [
-        6409.5,
+        6804.5,
         40.0
       ],
       "params": {},
@@ -704,7 +726,7 @@
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
-        6340.0,
+        6735.0,
         412.0
       ],
       "params": {
@@ -726,7 +748,7 @@
       "id": "if_qxq",
       "type": "control.if",
       "pos": [
-        6762.5,
+        7157.5,
         40.0
       ],
       "params": {},
@@ -736,7 +758,7 @@
       "id": "sel_tc_x",
       "type": "action.press_key",
       "pos": [
-        7063.0,
+        7458.0,
         40.0
       ],
       "params": {
@@ -750,7 +772,7 @@
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
-        6374.5,
+        6769.5,
         836.0
       ],
       "params": {
@@ -762,7 +784,7 @@
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
-        6719.0,
+        7114.0,
         216.0
       ],
       "params": {
@@ -774,7 +796,7 @@
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
-        7046.0,
+        7441.0,
         360.0
       ],
       "params": {
@@ -787,7 +809,7 @@
       "id": "queue_x",
       "type": "action.press_key",
       "pos": [
-        7424.0,
+        7819.0,
         40.0
       ],
       "params": {
@@ -801,7 +823,7 @@
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
-        7802.5,
+        8197.5,
         232.0
       ],
       "params": {
@@ -813,7 +835,7 @@
       "id": "if_sw_cart",
       "type": "control.if",
       "pos": [
-        7837.5,
+        8232.5,
         40.0
       ],
       "params": {},
@@ -823,7 +845,7 @@
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
-        7768.0,
+        8163.0,
         412.0
       ],
       "params": {
@@ -845,7 +867,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        8190.5,
+        8585.5,
         40.0
       ],
       "params": {},
@@ -855,7 +877,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        8491.0,
+        8886.0,
         40.0
       ],
       "params": {
@@ -869,7 +891,7 @@
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        7802.5,
+        8197.5,
         836.0
       ],
       "params": {
@@ -881,7 +903,7 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        8147.0,
+        8542.0,
         216.0
       ],
       "params": {
@@ -893,7 +915,7 @@
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        8474.0,
+        8869.0,
         328.0
       ],
       "params": {
@@ -906,7 +928,7 @@
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        8852.0,
+        9247.0,
         40.0
       ],
       "params": {
@@ -920,7 +942,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        9196.0,
+        9591.0,
         40.0
       ],
       "params": {
@@ -934,7 +956,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        9540.0,
+        9935.0,
         40.0
       ],
       "params": {
@@ -948,7 +970,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        9884.0,
+        10279.0,
         40.0
       ],
       "params": {},
@@ -958,7 +980,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        10124.0,
+        10519.0,
         40.0
       ],
       "params": {},
@@ -968,7 +990,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        10364.0,
+        10759.0,
         40.0
       ],
       "params": {
@@ -980,7 +1002,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        10657.0,
+        11052.0,
         40.0
       ],
       "params": {},
@@ -1039,6 +1061,12 @@
     [
       "pre_q_vill",
       "false",
+      "warm_food",
+      "in"
+    ],
+    [
+      "warm_food",
+      "out",
       "pre_slots",
       "in"
     ],
@@ -1063,7 +1091,7 @@
     [
       "pre_q_xq",
       "false",
-      "pre_slots",
+      "warm_gold",
       "in"
     ],
     [
@@ -1075,6 +1103,12 @@
     [
       "pre_q_cart",
       "false",
+      "warm_gold",
+      "in"
+    ],
+    [
+      "warm_gold",
+      "out",
       "pre_slots",
       "in"
     ],
@@ -1493,6 +1527,18 @@
       "result",
       "pre_slots",
       "cond"
+    ],
+    [
+      "food",
+      "value",
+      "warm_food",
+      "v1"
+    ],
+    [
+      "gold",
+      "value",
+      "warm_gold",
+      "v1"
     ]
   ]
 }

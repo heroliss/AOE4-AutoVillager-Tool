@@ -85,6 +85,10 @@ def build_combined_graph() -> Graph:
     add("pre_q_cart", "control.if")
     add("cmp_slots", "logic.compare", {"op": ">"})     # 人口空位 > 0 ?（三段共用一次）
     add("pre_slots", "control.if")
+    # 预读：决定要生产后、抢锁/屏蔽【之前】，先把本段会用到的资源 OCR 算好缓存——把它的耗时挪出屏蔽窗口。
+    # 只在各段“队列空=即将生产”的分支上预热对应资源（村民→食物、乡骑/商队→黄金），默认只出村民时不会白跑黄金。
+    add("warm_food", "control.prefetch_data")          # 村民段：预热食物
+    add("warm_gold", "control.prefetch_data")          # 乡骑/商队段：预热黄金（两段共用）
 
     # 操作锁 / 输入屏蔽 / 存当前编组（整批生产共用一次）
     add("lock", "control.lock_acquire")
@@ -175,7 +179,7 @@ def build_combined_graph() -> Graph:
          "members": ["c_zero", "pre_sw_vill", "pre_q_vill",
                      "pre_sw_xq", "pre_q_xq",
                      "pre_sw_cart", "pre_q_cart",
-                     "cmp_slots", "pre_slots"]},
+                     "cmp_slots", "pre_slots", "warm_food", "warm_gold"]},
         {"title": "收尾（整批一次）", "color": "#5a9367",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
     ]
@@ -210,6 +214,8 @@ def build_combined_graph() -> Graph:
         "pre_q_cart": "门控·商队队列空吗？空→去看“人口有空位吗”；已在造→本帧结束。",
         "cmp_slots": "门控·人口空位 > 0？（三段共用：人口已满时谁都产不了，直接结束本帧）。",
         "pre_slots": "门控·有空位→开操作区(lock) 开始生产；人口已满→本帧到此结束（不抢锁/不屏蔽/不动编组）。",
+        "warm_food": "预读·确定要出村民后、抢锁屏蔽前，先把食物OCR算好缓存——把它的耗时挪出输入屏蔽窗口，屏蔽更短。",
+        "warm_gold": "预读·确定要出乡骑/商队后，先把黄金OCR算好缓存（两段共用）——把耗时挪出输入屏蔽窗口。",
         "sw_vill": "【开关】是否生产村民。关掉则整段跳过。",
         "if_sw_vill": "村民开关：开→进入村民段；关→直接跳到乡骑段。",
         "q_vill": "检测生产队列里是否已经有村民（避免重复排队）。",
@@ -260,13 +266,15 @@ def build_combined_graph() -> Graph:
     g.connect_exec("pre_sw_vill", "true", "pre_q_vill", "in")
     g.connect_exec("pre_sw_vill", "false", "pre_sw_xq", "in")
     g.connect_exec("pre_q_vill", "true", "pre_sw_xq", "in")     # 已在造 → 跳过本段，看乡骑
-    g.connect_exec("pre_q_vill", "false", "pre_slots", "in")    # 队列空 → 看人口有没有空位
+    g.connect_exec("pre_q_vill", "false", "warm_food", "in")    # 队列空 → 先预热食物OCR(挪出屏蔽窗口) → 看人口空位
+    g.connect_exec("warm_food", "out", "pre_slots", "in")
     g.connect_exec("pre_sw_xq", "true", "pre_q_xq", "in")
     g.connect_exec("pre_sw_xq", "false", "pre_sw_cart", "in")
     g.connect_exec("pre_q_xq", "true", "pre_sw_cart", "in")
-    g.connect_exec("pre_q_xq", "false", "pre_slots", "in")
+    g.connect_exec("pre_q_xq", "false", "warm_gold", "in")      # 队列空 → 先预热黄金OCR → 看人口空位
     g.connect_exec("pre_sw_cart", "true", "pre_q_cart", "in")   # false 不接 = 本帧结束
-    g.connect_exec("pre_q_cart", "false", "pre_slots", "in")    # true 不接 = 本帧结束
+    g.connect_exec("pre_q_cart", "false", "warm_gold", "in")    # 队列空 → 预热黄金OCR(与乡骑段共用) → 看人口空位
+    g.connect_exec("warm_gold", "out", "pre_slots", "in")
     g.connect_exec("pre_slots", "true", "lock", "in")           # 有空位 → 开操作区开始生产；false 不接 = 人口已满，本帧结束
 
     g.connect_exec("lock", "ok", "block_begin", "in")       # 占用中(busy)则结束本帧
@@ -358,5 +366,9 @@ def build_combined_graph() -> Graph:
     g.connect_data("slots", "value", "cmp_slots", "a")
     g.connect_data("c_zero", "value", "cmp_slots", "b")
     g.connect_data("cmp_slots", "result", "pre_slots", "cond")
+
+    # 预读：把要在屏蔽内用到的资源 OCR 提前算好缓存（仅"提前求值"，值仍在各段内正式使用）。
+    g.connect_data("food", "value", "warm_food", "v1")
+    g.connect_data("gold", "value", "warm_gold", "v1")
 
     return g

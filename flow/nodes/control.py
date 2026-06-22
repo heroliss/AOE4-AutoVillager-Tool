@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import time
 
-from ..core import ControlNode, DataNode, ParamSpec, DataType, exec_in, exec_out, data_out, register
+from ..core import ControlNode, DataNode, ParamSpec, DataType, exec_in, exec_out, data_in, data_out, register
 
 
 @register
@@ -33,6 +33,33 @@ class PrefetchFull(ControlNode):
 
     def execute(self, ctx, inputs):
         ctx.prefetch_full()
+        return {}, "out"
+
+
+@register
+class PrefetchData(ControlNode):
+    """预读：进入「时间敏感区」(如输入屏蔽)之前，先把接进来的若干数据值算好并缓存（逐帧记忆化），
+    把它们的识别/计算耗时挪出敏感区。本节点只做"提前求值"，按原样放行执行流，不读值、不分支、不改任何行为。
+
+    原理：执行器在执行一个节点【前】会先求值它的全部数据输入——所以只要把要在屏蔽内用到的值
+    （如食物/黄金 OCR）接到本节点，执行流走到这里时它们就被算好并缓存；真正进操作区时同帧免费取，
+    屏蔽窗口更短、玩家更不易察觉自动操作。
+
+    放置要点：接在「确定要生产之后、抢锁/屏蔽之前」，且只预热【本段真正会用到】的值——
+    否则会为用不到的值白白付识别耗时（如默认只出村民时不应预热黄金）。"""
+    type_id = "control.prefetch_data"
+    category = "控制"
+    title = "预读"
+    inputs = [
+        exec_in("in"),
+        data_in("v1", DataType.ANY, label="值1", help="要提前算好并缓存的值（接 OCR/识别等耗时输出）。不接=忽略。"),
+        data_in("v2", DataType.ANY, label="值2", help="同上，可多预热一个值。不接=忽略。"),
+        data_in("v3", DataType.ANY, label="值3", help="同上，可多预热一个值。不接=忽略。"),
+    ]
+    outputs = [exec_out("out")]
+
+    def execute(self, ctx, inputs):
+        # 数据输入已在执行前被求值并记忆化（见 Executor._resolve_inputs）——到这里即已"预热"，无需再做任何事。
         return {}, "out"
 
 
