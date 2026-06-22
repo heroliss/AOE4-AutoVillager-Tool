@@ -26,6 +26,11 @@ def main():
     ap.add_argument("--canvas", action="store_true", help="DPG 自绘画布（缩放，开发中）")
     args = ap.parse_args()
 
+    # 输入屏蔽(BlockInput)需要管理员权限；非管理员则尝试自提升重启（成功则本进程退出）。
+    # 用户拒绝 UAC 时带警告继续，编辑仍可用、仅“输入屏蔽”不生效。设 AOE4_NO_ELEVATE=1 可跳过。
+    from admin_util import ensure_admin_or_warn
+    ensure_admin_or_warn()
+
     path = args.file if args.file and os.path.exists(args.file) else None
     graph = Graph.load(path) if path else None
 
