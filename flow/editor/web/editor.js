@@ -3429,9 +3429,20 @@ const ED = (function () {
     try { const r = await api().toggle_monitor(); monOpen = !!(r && r.open); }
     catch (e) { showError("打开资源监控失败：" + (e && (e.stack || e.message) || e)); }
   }
+  // 开/关游戏内覆盖层（透明毛玻璃窄条，悬在游戏上方）
+  let overlayOpen = false;
+  async function toggleOverlay() {
+    try {
+      const r = await api().toggle_overlay();
+      overlayOpen = !!(r && r.open);
+      const b = document.getElementById("overlaybtn");
+      if (b) b.classList.toggle("active", overlayOpen);
+      if (r && r.open === false && r.reason) showError("打开覆盖层失败：" + r.reason);
+    } catch (e) { showError("打开覆盖层失败：" + (e && (e.stack || e.message) || e)); }
+  }
 
   const self = {
-    toggleRun, dryRun, stopRun, toggleProfile, togglePreview, toggleSimple, toggleSysMon,
+    toggleRun, dryRun, stopRun, toggleProfile, togglePreview, toggleSimple, toggleSysMon, toggleOverlay,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {

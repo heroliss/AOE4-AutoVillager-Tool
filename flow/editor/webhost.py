@@ -321,6 +321,8 @@ class Api:
         self._sysmon_game = {}               # 游戏进程监控：pid -> psutil.Process（找到即缓存复用，省 process_iter）
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
         self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
+        self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
+        self._overlay_bg_alpha = 150         # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透）
 
     def get_defs(self):
         return node_defs()
@@ -473,6 +475,151 @@ class Api:
         op = {0: 1.0, 1: 0.7, 2: 0.4}.get(int(level or 0), 1.0)
         w = self._mon_window
         return self._form_set(getattr(w, "native", None), "Opacity", float(op)) if w else False
+
+    # ==================== 游戏内覆盖层（共用「玻璃」窗口技术）====================
+    # 无边框 + 透明 + 置顶 + Windows 亚克力毛玻璃的独立系统窗口，悬在游戏上方。
+    # 背景透明度 = 亚克力 tint 的 alpha；内容透明度由页面 CSS 单独控制（两者独立）。
+    # 默认摆成贴屏幕顶边的窄条（左1/8~右7/8、高≤40px），中间主视野不被遮挡。
+    @staticmethod
+    def _form_invoke(native, fn):
+        """把任意函数投递到原生窗体的 UI 线程执行（亚克力等 Win32 调用需在创建窗口的线程上做）。"""
+        if native is None or not hasattr(native, "InvokeRequired"):
+            try:
+                fn()
+            except Exception:
+                pass
+            return
+        try:
+            from System import Action
+            if native.InvokeRequired:
+                native.BeginInvoke(Action(fn))
+            else:
+                fn()
+        except Exception:
+            try:
+                fn()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _apply_acrylic(native, accent_state, tint_argb):
+        """对原生窗口启用 Windows 亚克力/模糊（毛玻璃），透出并模糊背后的游戏画面。
+        accent_state: 0=禁用 3=普通模糊 4=亚克力；tint_argb: 0xAARRGGBB（A=背景着色不透明度）。
+        失败静默返回 False（降级为不模糊的普通透明窗，功能不受影响）。"""
+        if native is None:
+            return False
+        try:
+            import ctypes
+            from ctypes import Structure, POINTER, c_int, c_uint, c_void_p, pointer, byref, sizeof
+            hwnd = int(native.Handle.ToInt64())
+
+            class ACCENTPOLICY(Structure):
+                _fields_ = [("AccentState", c_int), ("AccentFlags", c_int),
+                            ("GradientColor", c_uint), ("AnimationId", c_int)]
+
+            class WINCOMPATTRDATA(Structure):
+                _fields_ = [("Attribute", c_int), ("Data", POINTER(ACCENTPOLICY)), ("SizeOfData", c_int)]
+
+            a = (tint_argb >> 24) & 0xFF; r = (tint_argb >> 16) & 0xFF
+            g = (tint_argb >> 8) & 0xFF; b = tint_argb & 0xFF
+            gradient = (a << 24) | (b << 16) | (g << 8) | r   # SetWindowCompositionAttribute 用 ABGR
+            accent = ACCENTPOLICY(int(accent_state), 2, gradient, 0)   # flags=2 → GradientColor 生效
+            data = WINCOMPATTRDATA(19, pointer(accent), sizeof(accent))  # 19 = WCA_ACCENT_POLICY
+            ok = ctypes.windll.user32.SetWindowCompositionAttribute(c_void_p(hwnd), byref(data))
+            return bool(ok)
+        except Exception:
+            return False
+
+    def _overlay_glass(self):
+        """给覆盖层窗口上毛玻璃：tint=深色、alpha=背景不透明度。窗口 shown 后调用（句柄已就绪）。"""
+        w = self._overlay_window
+        if w is None:
+            return
+        native = getattr(w, "native", None)
+        tint = ((int(self._overlay_bg_alpha) & 0xFF) << 24) | 0x141A24   # 深蓝灰着色
+        self._form_invoke(native, lambda: self._apply_acrylic(native, 4, tint))
+
+    def toggle_overlay(self):
+        """开/关游戏内覆盖层窗口；返回 {open: bool}。"""
+        if self._overlay_window is not None:
+            try:
+                self._overlay_window.destroy()
+            except Exception:
+                pass
+            self._overlay_window = None
+            return {"open": False}
+        return self._open_overlay()
+
+    def _open_overlay(self):
+        import webview
+        page = os.path.join(WEB_DIR, "overlay.html")
+        try:
+            scr = webview.screens[0]; sw = int(scr.width)
+        except Exception:
+            sw = 1920
+        eighth = sw // 8
+        kw = dict(width=sw - 2 * eighth, height=40, x=eighth, y=8, js_api=self,
+                  on_top=True, frameless=True, easy_drag=False, transparent=True,
+                  background_color="#0B0E14")
+        try:
+            self._overlay_window = webview.create_window("AOE4 Overlay", url=page, **kw)
+            try:
+                self._overlay_window.events.closed += self._on_overlay_closed
+            except Exception:
+                pass
+            try:
+                self._overlay_window.events.shown += self._overlay_glass   # 显示后再上亚克力
+            except Exception:
+                pass
+            return {"open": True}
+        except Exception as e:
+            self._overlay_window = None
+            return {"open": False, "reason": str(e)}
+
+    def _on_overlay_closed(self):
+        self._overlay_window = None
+
+    def overlay_set_on_top(self, flag):
+        w = self._overlay_window
+        return self._form_set(getattr(w, "native", None), "TopMost", bool(flag)) if w else False
+
+    def overlay_set_bg(self, alpha):
+        """调背景（毛玻璃）不透明度 0~255；0=背景全透明、只剩内容。立即重上亚克力。"""
+        try:
+            self._overlay_bg_alpha = max(0, min(255, int(alpha)))
+        except Exception:
+            return False
+        self._overlay_glass()
+        return True
+
+    def overlay_data(self):
+        """覆盖层轮询：当前面板项(只读，编辑下一步做) + 运行态 + 弹信息(命中断点/自动改写开关)。"""
+        g = self._run_graph or self._graph
+        items = []
+        if g is not None:
+            specs_cache = {}
+            for row in getattr(g, "panel", []):
+                if len(row) < 2:
+                    continue
+                nid, key = row[0], row[1]
+                label = row[2] if len(row) > 2 else key
+                node = g.nodes.get(nid)
+                if node is None:
+                    continue
+                spec = specs_cache.get((nid, key))
+                if spec is None:
+                    spec = next((s for s in node.params if s.key == key), None)
+                    specs_cache[(nid, key)] = spec
+                ptype = spec.ptype if spec else "str"
+                items.append({"id": nid, "label": label,
+                              "value": _param_to_js_raw(spec, node.values.get(key)) if spec else node.values.get(key),
+                              "kind": ptype})
+        alive = bool(self._run_thread and self._run_thread.is_alive())
+        with self._snap_lock:
+            paused = alive and self._run_paused   # 没在跑时 _run_paused 恒为 True，别误报「已暂停」
+            bp = self._bp_hit if alive else None
+        return {"items": items, "running": alive and not paused, "paused": paused, "bp_hit": bp,
+                "bg_alpha": self._overlay_bg_alpha}
 
     # ==================== 运行可视化（引擎在后台线程自行全速跑，前端只轮询）====================
     @staticmethod
@@ -968,13 +1115,15 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     except Exception:
         pass
 
-    def _close_monitor():           # 主编辑器关掉时，连带关掉独立的资源监控浮窗（否则它会让进程不退出）
-        if api._mon_window is not None:
-            try:
-                api._mon_window.destroy()
-            except Exception:
-                pass
-            api._mon_window = None
+    def _close_monitor():           # 主编辑器关掉时，连带关掉独立浮窗（资源监控 / 覆盖层），否则它们会让进程不退出
+        for attr in ("_mon_window", "_overlay_window"):
+            w = getattr(api, attr, None)
+            if w is not None:
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+                setattr(api, attr, None)
     try:
         api._window.events.closed += _close_monitor
     except Exception:
