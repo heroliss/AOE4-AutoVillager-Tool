@@ -387,8 +387,8 @@ def build_combined_graph() -> Graph:
     g.connect_data("tc", "count", "plan_v", "b")
     g.connect_data("plan_v", "value", "prod_v", "planned")
     g.connect_data("slots", "value", "prod_v", "available_slots")   # 人口空位预算（链头）
-    g.connect_data("food", "value", "prod_v", "resource")            # 资源1=食物
-    g.connect_data("c_cost_v", "value", "prod_v", "cost")            # 成本同源：门控与产能用同一个常量(可在面板按国家调)
+    g.connect_data("food", "value", "prod_v", "food")               # 村民吃食物
+    g.connect_data("c_cost_v", "value", "prod_v", "food_cost")      # 成本同源：门控与产能用同一个常量(可在面板按国家调)
     g.connect_data("sw_vill", "value", "prod_v", "switch")           # 段关→产0、预算透传
     g.connect_data("q_vill", "found", "prod_v", "busy")             # 队列已在造村民→产0、预算透传
     g.connect_data("prod_v", "count", "queue_v", "count")
@@ -400,10 +400,10 @@ def build_combined_graph() -> Graph:
     g.connect_data("tc", "count", "plan_x", "b")
     g.connect_data("plan_x", "value", "prod_x", "planned")
     g.connect_data("prod_v", "slots_left", "prod_x", "available_slots")  # 空位 = 村民用剩的
-    g.connect_data("prod_v", "resource_left", "prod_x", "resource")       # 资源1=食物（从村民段结转，村民和乡骑共用食物池）
-    g.connect_data("c_cost_x_food", "value", "prod_x", "cost")            # 资源1成本 = 乡骑食物单价(65)
-    g.connect_data("gold", "value", "prod_x", "res3")                     # 资源3=黄金（黄金链起点，村民不吃黄金）
-    g.connect_data("c_cost_x", "value", "prod_x", "cost3")               # 资源3成本 = 乡骑黄金单价(50)
+    g.connect_data("prod_v", "food_left", "prod_x", "food")              # 食物从村民段结转（村民和乡骑共用食物池）
+    g.connect_data("c_cost_x_food", "value", "prod_x", "food_cost")      # 乡骑食物单价(65)
+    g.connect_data("gold", "value", "prod_x", "gold")                    # 黄金（黄金链起点，村民不吃黄金）
+    g.connect_data("c_cost_x", "value", "prod_x", "gold_cost")           # 乡骑黄金单价(50)
     g.connect_data("sw_xq", "value", "prod_x", "switch")
     g.connect_data("q_xq", "found", "prod_x", "busy")
     g.connect_data("prod_x", "count", "queue_x", "count")
@@ -415,10 +415,10 @@ def build_combined_graph() -> Graph:
     g.connect_data("c_one", "value", "plan_cart", "b")
     g.connect_data("plan_cart", "value", "prod_cart", "planned")
     g.connect_data("prod_x", "slots_left", "prod_cart", "available_slots")   # 空位 = 乡骑用剩的（=村民也用剩的）
-    g.connect_data("prod_x", "res3_left", "prod_cart", "res3")               # 资源3=黄金 = 乡骑用剩的
-    g.connect_data("c_cost_cart", "value", "prod_cart", "cost3")             # 资源3成本 = 商人黄金单价
-    g.connect_data("wood", "value", "prod_cart", "res2")                     # 资源2=木头（默认成本0=不限制）
-    g.connect_data("c_cost_cart_wood", "value", "prod_cart", "cost2")        # 资源2成本 = 商人木头单价
+    g.connect_data("prod_x", "gold_left", "prod_cart", "gold")               # 黄金 = 乡骑用剩的
+    g.connect_data("c_cost_cart", "value", "prod_cart", "gold_cost")         # 商人黄金单价
+    g.connect_data("wood", "value", "prod_cart", "wood")                     # 木头（默认成本0=不限制）
+    g.connect_data("c_cost_cart_wood", "value", "prod_cart", "wood_cost")    # 商人木头单价
     g.connect_data("sw_cart", "value", "prod_cart", "switch")
     g.connect_data("q_cart", "found", "prod_cart", "busy")
     g.connect_data("prod_cart", "count", "queue_cart", "count")

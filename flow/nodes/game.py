@@ -234,24 +234,30 @@ class ProduceCount(DataNode):
     type_id = "game.produce_count"
     category = "游戏"
     title = "产能计算"
+    # 四种资源直接对应游戏里的【食物/木头/黄金/石头】；某资源不接、或其成本 ≤0 = 不看该资源。
+    RES = ("food", "wood", "gold", "stone")
+    RES_LABEL = {"food": "食物", "wood": "木头", "gold": "黄金", "stone": "石头"}
     inputs = [
         data_in("planned", DataType.NUMBER, label="计划数",
                 help="本来想造多少（如 每TC数×TC个数）。最终产量不会超过它。"),
         data_in("available_slots", DataType.NUMBER, label="空位",
                 help="人口空位（上限−当前）。不接=不受人口限制。多段串联时接【上一段】的“剩余空位”。"),
-        data_in("resource", DataType.NUMBER, label="资源1",
-                help="第1种资源可用量（如食物）。受 资源1÷成本1 限制。不接=不看资源1。多段共用该资源时接上一段“剩余资源1”。"),
-        data_in("res2", DataType.NUMBER, label="资源2", advanced=True,
-                help="第2种资源可用量（如木头）。受 资源2÷成本2 限制。不接=不看资源2。"),
-        data_in("res3", DataType.NUMBER, label="资源3", advanced=True,
-                help="第3种资源可用量（如黄金）。受 资源3÷成本3 限制。不接=不看资源3。"),
-        data_in("cost", DataType.NUMBER, label="成本1",
-                help="造 1 个消耗多少资源1。接了就用它（覆盖下方“单位成本1”参数）——这样成本可由一个常量节点"
-                     "同时喂给本节点和门控的“资源够不够”比较，只在一处设置、还能放到控制面板按国家调。≤0=不看资源1。"),
-        data_in("cost2", DataType.NUMBER, label="成本2", advanced=True,
-                help="造 1 个消耗多少资源2（覆盖参数“单位成本2”）。≤0 或不接=不看资源2。"),
-        data_in("cost3", DataType.NUMBER, label="成本3", advanced=True,
-                help="造 1 个消耗多少资源3（覆盖参数“单位成本3”）。≤0 或不接=不看资源3。"),
+        data_in("food", DataType.NUMBER, label="食物",
+                help="当前食物量。受 食物÷食物成本 限制。不接=不看食物。多段共用食物时接上一段“剩余食物”。"),
+        data_in("gold", DataType.NUMBER, label="黄金",
+                help="当前黄金量。受 黄金÷黄金成本 限制。不接=不看黄金。多段共用黄金时接上一段“剩余黄金”。"),
+        data_in("wood", DataType.NUMBER, label="木头", advanced=True,
+                help="当前木头量。受 木头÷木头成本 限制。不接=不看木头。"),
+        data_in("stone", DataType.NUMBER, label="石头", advanced=True,
+                help="当前石头量。受 石头÷石头成本 限制。不接=不看石头。"),
+        data_in("food_cost", DataType.NUMBER, label="食物成本",
+                help="造 1 个消耗多少食物。接了就用它（覆盖下方“食物单位成本”参数）——可由一个常量同时喂给本节点和门控比较、放面板按国家调。≤0=不看食物。"),
+        data_in("gold_cost", DataType.NUMBER, label="黄金成本",
+                help="造 1 个消耗多少黄金（覆盖参数“黄金单位成本”）。≤0 或不接=不看黄金。"),
+        data_in("wood_cost", DataType.NUMBER, label="木头成本", advanced=True,
+                help="造 1 个消耗多少木头（覆盖参数“木头单位成本”）。≤0 或不接=不看木头。"),
+        data_in("stone_cost", DataType.NUMBER, label="石头成本", advanced=True,
+                help="造 1 个消耗多少石头（覆盖参数“石头单位成本”）。≤0 或不接=不看石头。"),
         data_in("switch", DataType.BOOL, label="开关", advanced=True,
                 help="本段是否启用（接段开关）。为否则产量=0、把空位/资源预算原样传给下一段。不接=启用。"),
         data_in("busy", DataType.BOOL, label="已占用", advanced=True,
@@ -264,20 +270,22 @@ class ProduceCount(DataNode):
                  help="实际可生产数 = min(计划, 空位, 各资源÷各自成本, 上限−当前)，取整且 ≥0。接到“按键”的“数量”即排这么多次。"),
         data_out("slots_left", DataType.NUMBER, label="剩余空位",
                  help="本段用掉后剩下的人口空位。接到【下一段】产能计算的“空位”，多段共享人口池而不重复占用。不接=忽略。"),
-        data_out("resource_left", DataType.NUMBER, label="剩余资源1",
-                 help="资源1扣掉本段消耗后的剩余。多段共用同一资源（如乡骑和商人都吃黄金）时，接到下一段“资源1”。"),
-        data_out("res2_left", DataType.NUMBER, label="剩余资源2", advanced=True,
-                 help="资源2扣掉本段消耗后的剩余。"),
-        data_out("res3_left", DataType.NUMBER, label="剩余资源3", advanced=True,
-                 help="资源3扣掉本段消耗后的剩余。"),
+        data_out("food_left", DataType.NUMBER, label="剩余食物",
+                 help="食物扣掉本段消耗后的剩余。多段共用食物（如村民和乡骑都吃食物）时接到下一段“食物”。"),
+        data_out("gold_left", DataType.NUMBER, label="剩余黄金",
+                 help="黄金扣掉本段消耗后的剩余。多段共用黄金（如乡骑和商人都吃黄金）时接到下一段“黄金”。"),
+        data_out("wood_left", DataType.NUMBER, label="剩余木头", advanced=True, help="木头扣掉本段消耗后的剩余。"),
+        data_out("stone_left", DataType.NUMBER, label="剩余石头", advanced=True, help="石头扣掉本段消耗后的剩余。"),
     ]
     params = [
-        ParamSpec("cost_per_unit", "单位成本1", "float", default=50.0, minimum=0.0,
-                  help="造 1 个要花多少资源1（村民≈50 食物）。被“成本1”输入覆盖。0=不看资源1。"),
-        ParamSpec("cost2_per_unit", "单位成本2", "float", default=0.0, minimum=0.0,
-                  help="造 1 个要花多少资源2（木头等）。被“成本2”输入覆盖。0=不看资源2。", advanced=True),
-        ParamSpec("cost3_per_unit", "单位成本3", "float", default=0.0, minimum=0.0,
-                  help="造 1 个要花多少资源3（黄金等）。被“成本3”输入覆盖。0=不看资源3。", advanced=True),
+        ParamSpec("food_cost", "食物单位成本", "float", default=0.0, minimum=0.0,
+                  help="造 1 个要花多少食物（村民≈50）。被“食物成本”输入覆盖。0=不看食物。"),
+        ParamSpec("gold_cost", "黄金单位成本", "float", default=0.0, minimum=0.0,
+                  help="造 1 个要花多少黄金。被“黄金成本”输入覆盖。0=不看黄金。"),
+        ParamSpec("wood_cost", "木头单位成本", "float", default=0.0, minimum=0.0,
+                  help="造 1 个要花多少木头。被“木头成本”输入覆盖。0=不看木头。", advanced=True),
+        ParamSpec("stone_cost", "石头单位成本", "float", default=0.0, minimum=0.0,
+                  help="造 1 个要花多少石头。被“石头成本”输入覆盖。0=不看石头。", advanced=True),
         ParamSpec("cap", "数量上限", "int", default=-1, help="-1 表示不启用上限（需配合“当前数量”输入）。", advanced=True),
     ]
 
@@ -287,18 +295,19 @@ class ProduceCount(DataNode):
         active = (True if sw is None else bool(sw)) and not bool(inputs.get("busy"))
 
         slots = inputs.get("available_slots")
-        res = [inputs.get("resource"), inputs.get("res2"), inputs.get("res3")]
-        costs = []
-        for ikey, pkey in (("cost", "cost_per_unit"), ("cost2", "cost2_per_unit"), ("cost3", "cost3_per_unit")):
-            c = inputs.get(ikey)            # 接了“成本N”输入就用它，否则回落到参数
-            costs.append(self.values[pkey] if c is None else c)
+        amts = {nm: inputs.get(nm) for nm in self.RES}
+        costs = {}
+        for nm in self.RES:
+            c = inputs.get(nm + "_cost")          # 接了“X成本”输入就用它，否则回落到参数
+            costs[nm] = self.values[nm + "_cost"] if c is None else c
 
         count = planned
         if slots is not None:
             count = min(count, slots)
-        for r, c in zip(res, costs):
-            if r is not None and c and c > 0:
-                count = min(count, int(r // c))
+        for nm in self.RES:
+            a, c = amts[nm], costs[nm]
+            if a is not None and c and c > 0:
+                count = min(count, int(a // c))
         cap = self.values["cap"]
         current = inputs.get("current_count")
         if cap is not None and cap >= 0 and current is not None:
@@ -307,14 +316,9 @@ class ProduceCount(DataNode):
         if not active:               # 本段不该生产：产量0，预算原样透传（不占用人口/资源池）
             count = 0
 
-        slots_left = None if slots is None else slots - count
-        res_left = []
-        for r, c in zip(res, costs):
-            if r is None:
-                res_left.append(None)
-            else:
-                res_left.append(r - (count * c if (c and c > 0) else 0))
-
+        out = {"count": count, "slots_left": None if slots is None else slots - count}
+        for nm in self.RES:
+            a, c = amts[nm], costs[nm]
+            out[nm + "_left"] = None if a is None else a - (count * c if (c and c > 0) else 0)
         self.live = {"count": count}
-        return {"count": count, "slots_left": slots_left,
-                "resource_left": res_left[0], "res2_left": res_left[1], "res3_left": res_left[2]}
+        return out

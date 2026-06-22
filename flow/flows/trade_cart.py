@@ -24,6 +24,7 @@ def build_trade_cart_graph() -> Graph:
         "resource_region": [50, 1180, 140, 1206],
         "resource_regex": r"(\d+)",
         "min_resource": 100,
+        "res_key": "gold",            # 商人吃黄金
         "cost_per_unit": 100,         # 每个商人所需黄金（占位）
         "per_building": 5,            # 每个市场排队数量
         "building": None,             # 按单一市场，不做多建筑计数

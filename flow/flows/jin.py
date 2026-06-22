@@ -93,10 +93,10 @@ def build_jin_graph() -> Graph:
     # —— 两种单位的产能 ——
     add("c_xq_per", "data.const_number", {"value": XQ_PER_TC})
     add("planned_xq", "math.arith", {"op": "*"})
-    add("produce_xq", "game.produce_count", {"cost_per_unit": XQ_COST, "cap": XQ_CAP})
+    add("produce_xq", "game.produce_count", {"gold_cost": XQ_COST, "cap": XQ_CAP})  # 乡骑吃黄金
     add("c_v_per", "data.const_number", {"value": V_PER_TC})
     add("planned_v", "math.arith", {"op": "*"})
-    add("produce_v", "game.produce_count", {"cost_per_unit": V_COST, "cap": V_CAP})
+    add("produce_v", "game.produce_count", {"food_cost": V_COST, "cap": V_CAP})     # 村民吃食物
 
     # —— 开关与阈值 ——
     add("sw_xq", "data.switch", {"on": True})
@@ -177,14 +177,14 @@ def build_jin_graph() -> Graph:
     g.connect_data("tc", "count", "planned_xq", "b")
     g.connect_data("planned_xq", "value", "produce_xq", "planned")
     g.connect_data("slots", "value", "produce_xq", "available_slots")
-    g.connect_data("gold", "value", "produce_xq", "resource")
+    g.connect_data("gold", "value", "produce_xq", "gold")
 
     # 村民产能 = min(每TC*TC数, 空位, 食物//成本)
     g.connect_data("c_v_per", "value", "planned_v", "a")
     g.connect_data("tc", "count", "planned_v", "b")
     g.connect_data("planned_v", "value", "produce_v", "planned")
     g.connect_data("slots", "value", "produce_v", "available_slots")
-    g.connect_data("food", "value", "produce_v", "resource")
+    g.connect_data("food", "value", "produce_v", "food")
 
     # 乡骑条件 = 开关 且 黄金≥阈值 且 乡骑产能>0
     g.connect_data("gold", "value", "cmp_gold", "a")

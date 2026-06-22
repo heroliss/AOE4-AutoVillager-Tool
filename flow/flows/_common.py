@@ -26,6 +26,7 @@ def default_cfg() -> dict:
         "resource_regex": r"(\d+)",
         "resource_allowlist": "0123456789OolIsS ",
         "min_resource": 50,
+        "res_key": "food",           # 主要资源类型：food/wood/gold/stone（市场出商人改 gold）
         "cost_per_unit": 50,
         "per_building": 3,           # 每个建筑排队数量
         "building": {                # 多建筑计数（如多TC）；None 表示按单建筑、不计数
@@ -103,7 +104,8 @@ def build_single_type(cfg: dict) -> Graph:
 
     add("c_pertc", "data.const_number", {"value": cfg["per_building"]})
     add("planned", "math.arith", {"op": "*"})
-    add("produce", "game.produce_count", {"cost_per_unit": cfg["cost_per_unit"], "cap": -1})
+    res_key = cfg.get("res_key", "food")   # 这个单位主要吃哪种资源：food/wood/gold/stone
+    add("produce", "game.produce_count", {res_key + "_cost": cfg["cost_per_unit"], "cap": -1})
 
     add("queue", "action.press_key", {"key": cfg["queue_key"]})
     add("restore", "action.press_key", {"key": "0"})
@@ -175,7 +177,7 @@ def build_single_type(cfg: dict) -> Graph:
 
     g.connect_data("planned", "value", "produce", "planned")
     g.connect_data("slots", "value", "produce", "available_slots")
-    g.connect_data("food", "value", "produce", "resource")
+    g.connect_data("food", "value", "produce", res_key)   # 资源OCR → 对应资源通道(食物/木头/黄金/石头)
     g.connect_data("produce", "count", "queue", "count")
 
     return g
