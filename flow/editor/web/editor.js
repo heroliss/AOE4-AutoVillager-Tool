@@ -197,14 +197,14 @@ const ED = (function () {
           const x = e.canvasX, y = e.canvasY;
           const node = this.graph && this.graph.getNodeOnPos(x, y, this.visible_nodes);
           if (node) {
-            if (simpleMode) { cv.style.cursor = "default"; return ret; }   // 使用模式：节点只读（不可拖/连/改）
+            if (simpleMode) { cv.style.cursor = "crosshair"; return ret; }   // 使用模式：可拖动查看位置(连线/改参仍只读)
             if (e.altKey) { cv.style.cursor = "copy"; return ret; }        // 按住 Alt：拖动将把它放进/移出分组
             if (node.getSlotInPosition && node.getSlotInPosition(x, y)) { cv.style.cursor = "pointer"; return ret; }   // 端口=可点(连线)
             if (_hitWidget(node, x - node.pos[0], y - node.pos[1])) { cv.style.cursor = "pointer"; return ret; }       // 控件=可点
             cv.style.cursor = "crosshair"; return ret;                // 标题/节点体：可拖动 → 十字
           }
           if (foldIconAt(x, y) >= 0) { cv.style.cursor = "pointer"; return ret; }                     // 折叠/展开按钮 → 小手
-          if (!simpleMode && overGroupHandle(x, y)) { cv.style.cursor = e.altKey ? "copy" : "crosshair"; return ret; }   // 分组手柄：Alt=拖进/出组(copy)，否则拖动整组(十字)
+          if (overGroupHandle(x, y)) { cv.style.cursor = (!simpleMode && e.altKey) ? "copy" : "crosshair"; return ret; }   // 分组手柄：拖动整组(十字)；Alt=拖进/出组(copy，仅编辑模式)
           if (foldedBoxAt(x, y) >= 0) { cv.style.cursor = "pointer"; return ret; }                    // 折叠箱体：可双击展开 → 小手
           cv.style.cursor = "grab";                                   // 空白处：可平移 → 抓手
         } catch (_) { }
@@ -1404,16 +1404,18 @@ const ED = (function () {
   }
 
   // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板缩略图网格）。
-  // 截图预览：把节点的 base64 PNG 解码成 Image 并缓存（按 b64 失效），onload 触发一次重绘。
+  // 截图预览：把节点的 base64 PNG 解码成 Image 并缓存。返回【最近一张已解码完成】的图——
+  // 新图在后台解码、好了再换上，期间继续显示旧图，避免每帧 img.complete=false 时漏画造成的闪烁。
   function getPreviewImg(id, b64) {
     let c = _previewImgCache[id];
-    if (!c || c.b64 !== b64) {
+    if (!c) c = _previewImgCache[id] = { b64: null, shown: null };
+    if (c.b64 !== b64) {                 // 内容变了：后台解码新图，好了才替换（旧图先顶着）
+      c.b64 = b64;
       const img = new Image();
-      img.onload = () => { if (canvas) canvas.setDirty(true, false); };
+      img.onload = () => { c.shown = img; if (canvas) canvas.setDirty(true, false); };
       img.src = "data:image/png;base64," + b64;
-      c = _previewImgCache[id] = { b64, img };
     }
-    return c.img;
+    return c.shown;
   }
   function nodeDrawForeground(ctx) {
     if (this.flags && this.flags.collapsed) return;
@@ -2131,7 +2133,9 @@ const ED = (function () {
     snapshotNow();   // 记录初始快照，作为撤销的基线
     if (clean) markSaved();                         // 刚载入＝与磁盘一致，清除“未保存”标记
     else { attachBaselineRefs(); refreshDirty(); }  // 排版后保留原基线，重新挂上控件引用
-    if (simpleMode) simpleEntrySig = JSON.stringify(collect());   // 使用模式下载入/切换流程：刷新“退出时还原”的基线
+    // 使用模式下【切换/打开流程】(clean)才刷新“退出时还原”的基线；【自动排版】(clean=false)不刷新——
+    // 这样使用模式里的自动排版和拖动一样是临时的、退出使用模式即还原，符合“使用模式不改图/不保存”。
+    if (simpleMode && clean) simpleEntrySig = JSON.stringify(collect());
   }
 
   // 顶部工具栏：显示当前流程名 + 来源（内置只读 / 我的流程）；说明作为悬浮提示。
@@ -2613,9 +2617,10 @@ const ED = (function () {
     if (simpleMode) closeEditPopups();                         // 进只读模式：关掉所有编辑相关的弹窗/右键菜单
     if (simpleMode && helpEl) helpEl.style.display = "none";   // 使用模式不显示可编辑的节点说明
     renderPanel();
-    // 使用模式 = LiteGraph 只读：一处堵住「从端口拖出连线 / 拖动节点 / 改控件 / 克隆」等所有改图交互，
-    // 但保留平移/缩放（dragging_canvas 不受 read_only 限制）。比逐个 hook 拦截更彻底（橡皮筋线根本不会出现）。
-    if (canvas) { canvas.read_only = simpleMode; canvas.resize(); canvas.setDirty(true, true); }   // 两种模式都显示画布：切换后重算尺寸
+    // 使用模式【允许拖动节点/组的位置查看（不落盘，退出使用模式即还原）】，但仍只读其它改图操作：
+    // 改控件/连线/克隆/增删 由前面的“三道闸”+菜单/键盘 simpleMode 守卫各自拦下。故这里不再开 read_only
+    // （read_only 会连拖动也禁掉）；平移/缩放本就不受影响。
+    if (canvas) { canvas.read_only = false; canvas.resize(); canvas.setDirty(true, true); }   // 两种模式都显示画布：切换后重算尺寸
   }
   function toggleSimple() {
     if (!simpleMode) {                         // 编辑 → 使用：记下此刻的图，退出使用模式时据此还原（调参/拖动不落盘）
@@ -4215,7 +4220,7 @@ const ED = (function () {
     if (graph.getNodeOnPos(off[0], off[1], canvas.visible_nodes)) { if (selectedGroupId) selectGroup(null); return; }   // 点节点→取消组选中，交给 LiteGraph
     const ii = foldIconAt(off[0], off[1]);                                   // 先：单击右端 ⊟/⊞ 图标 → 折叠/展开（两种模式都可用）
     if (ii >= 0) { e.preventDefault(); e.stopImmediatePropagation(); setGroupCollapsed(ii, !groupDefs[ii].collapsed); return; }
-    if (simpleMode) return;            // 使用模式（只读）：不允许拖动整组移动节点（位置属于“改图”）
+    // 使用模式：允许拖动整组移动位置(查看用，不落盘)；改父组归属(Alt)仍在 onGroupDragMove/Up 里被 simpleMode 拦下。
     // 命中手柄时按【最内层】优先（子树成员少的先判定），这样嵌套时能抓到里层子组而不是外层父组。
     const order = groupDefs.map((g, i) => i).sort((a, b) => groupAllMembers(groupDefs[a]).length - groupAllMembers(groupDefs[b]).length);
     for (const i of order) {
@@ -4244,8 +4249,8 @@ const ED = (function () {
       _groupDrag.last = off; _groupDrag.moved = true;
       if (canvas) canvas.setDirty(true, true);
     }
-    // Alt 拖组：把整组从【祖先】框里摘出（自身/子组保留＝随组移动），并高亮将落入的目标组。
-    if (e.altKey) {
+    // Alt 拖组：把整组从【祖先】框里摘出（自身/子组保留＝随组移动），并高亮将落入的目标组。（改归属＝改图，使用模式不允许）
+    if (e.altKey && !simpleMode) {
       const g = groupDefs[_groupDrag.gi];
       if (g) {
         _altDrag = { kind: "group", detached: new Set(groupAllMembers(g)), keepIds: groupSubtreeIds(g), targetGi: -1 };
@@ -4263,7 +4268,7 @@ const ED = (function () {
     if (!gd) return;
     if (!gd.moved) { const cg = groupDefs[gd.gi]; selectGroup(cg && cg.id); return; }   // 只点不拖（点标题/折叠箱体）＝选中该组
     const g = groupDefs[gd.gi];
-    if (g && (altKeyDown || wasAlt)) {
+    if (g && !simpleMode && (altKeyDown || wasAlt)) {
       // 【按住 Alt】放下才改父组：落在某个组内 → 设为其子组（最内层那个）；落在空白 → 设为顶层。否则只是移动。
       // 用拖拽时实时算好的落点：那时祖先框已排除本组成员，不会因清空 _altDrag 后“回弹”把子组又判回原父组（=子组拖不进别的组）。
       const ti = (ad && ad.kind === "group") ? ad.targetGi : innermostGroupAt(gd.last[0], gd.last[1], g);

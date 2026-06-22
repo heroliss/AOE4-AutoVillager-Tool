@@ -120,6 +120,17 @@ def _card_h(node, note: str, width: float) -> float:
     return CARD_GAP + total
 
 
+# 运行时「截图预览」画在节点【上方】，最高约 标题(30)+图(≤96)+标签(17)≈143px。排版时给这些
+# 感知节点的【上方】预留这点高度，开预览时预览图就不会压住上一行节点。
+PREVIEW_RESERVE = 120.0
+_PREVIEW_TYPES = {"sense.template_match", "sense.ocr_number", "sense.ocr_text",
+                  "game.occlusion", "game.tc_count"}
+
+
+def _preview_reserve(node) -> float:
+    return PREVIEW_RESERVE if getattr(node, "type_id", "") in _PREVIEW_TYPES else 0.0
+
+
 def full_size(graph, nid, size_fn=None) -> tuple[float, float]:
     """节点的"占位尺寸" = 本体（含标题）+ 下方附属卡片。排版与重叠校验都用它，给预览/描述留空间。"""
     node = graph.nodes[nid]
@@ -360,8 +371,9 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: flo
         yy = Y_SPINE
         for n in col_spine[c]:
             w, h = sz[n]
-            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yy)
-            yy += h + node_gap
+            r = _preview_reserve(graph.nodes[n])     # 预览节点上方留出截图高度
+            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yy + r)
+            yy += r + h + node_gap
         spine_top[c] = Y_SPINE
         spine_bot[c] = (yy - node_gap) if col_spine[c] else Y_SPINE
 
@@ -388,8 +400,9 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: flo
         yb = spine_bot[c] + branch_gap
         for n in da:
             w, h = sz[n]
-            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yb)
-            yb += h + node_gap
+            r = _preview_reserve(graph.nodes[n])     # 预览节点上方留出截图高度
+            graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yb + r)
+            yb += r + h + node_gap
 
     # 整体平移，使最上沿（主线）对齐到 y0
     if graph.positions:
