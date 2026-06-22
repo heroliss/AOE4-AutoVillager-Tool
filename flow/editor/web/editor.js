@@ -1670,6 +1670,21 @@ const ED = (function () {
     if ((cur.description || "") !== (savedBaseline.description || "")) out.push("流程说明已修改");
     const baseN = {}; for (const n of savedBaseline.nodes) baseN[n.id] = n;
     const curN = {}; for (const n of cur.nodes) curN[n.id] = n;
+    const nodeOf = (id) => curN[id] || baseN[id];
+    // 节点·参数的“结构名”：节点标题·参数标签（如「开关(布尔)·开启」）——同类型节点多时仍可能不够具体。
+    const structName = (id, key) => { const n = nodeOf(id); return (n ? titleOf(n) : id) + "·" + (n ? paramLabelByType(n.type, key) : key); };
+    // 友好名：优先用户起的显示名（面板/折叠箱体同源的 labels）或面板置顶名，否则回退结构名——
+    // 这样改动详情会写「出村民」而不是含糊的「开关(布尔)·开启」，一眼看出改的是哪个。
+    const friendlyName = (id, key) => {
+      const lk = id + "|" + key;
+      const lab = (cur.labels && cur.labels[lk]) || (savedBaseline.labels && savedBaseline.labels[lk]);
+      if (lab) return lab;
+      const pf = (cur.panel || []).concat(savedBaseline.panel || []).find((p) => p[0] === id && p[1] === key);
+      if (pf && pf[2]) return pf[2];
+      return structName(id, key);
+    };
+    // 值的友好显示：布尔 → 开/关（switch 的 false→true 直接看不懂）。
+    const fmtVal = (v) => (v === true || v === "true") ? "开" : (v === false || v === "false") ? "关" : String(v);
     for (const n of cur.nodes) if (!baseN[n.id]) out.push(`＋ 新增节点：${titleOf(n)}`);
     for (const n of savedBaseline.nodes) if (!curN[n.id]) out.push(`－ 删除节点：${titleOf(n)}`);
     let moved = 0;
@@ -1677,7 +1692,7 @@ const ED = (function () {
       const b = baseN[n.id]; if (!b) continue;
       for (const k in (n.params || {}))
         if (String(n.params[k]) !== String((b.params || {})[k]))
-          out.push(`◇ ${titleOf(n)}·${paramLabelByType(n.type, k)}：${(b.params || {})[k]} → ${n.params[k]}`);
+          out.push(`◇ ${friendlyName(n.id, k)}：${fmtVal((b.params || {})[k])} → ${fmtVal(n.params[k])}`);
       if ((n.note || "") !== (b.note || "")) out.push(`◇ ${titleOf(n)}：描述已修改`);
       const bp = b.pos || [0, 0], np = n.pos || [0, 0];
       if (Math.round(bp[0]) !== Math.round(np[0]) || Math.round(bp[1]) !== Math.round(np[1])) moved++;
@@ -1690,16 +1705,15 @@ const ED = (function () {
     if (ea) out.push(`＋ 新增连线 ${ea} 条`);
     if (er) out.push(`－ 删除连线 ${er} 条`);
     // —— 以下把“笼统一句话”改成逐项列出，便于核对本次到底改了什么 ——
-    const nodeOf = (id) => curN[id] || baseN[id];
-    const pkName = (id, key) => { const n = nodeOf(id); return (n ? titleOf(n) : id) + "·" + (n ? paramLabelByType(n.type, key) : key); };
+    const pkName = structName;   // 结构名（节点·参数），用于“改名/暴露”等需要点出是哪个参数的地方
     const splitK = (k) => { const i = k.indexOf("|"); return [k.slice(0, i), k.slice(i + 1)]; };
     // 控制面板置顶项：逐项列出增 / 删 / 改名 / 调序
     const pKey = (p) => p[0] + "|" + p[1];
     const baseP = {}, curP = {};
     for (const p of (savedBaseline.panel || [])) baseP[pKey(p)] = p;
     for (const p of (cur.panel || [])) curP[pKey(p)] = p;
-    for (const k in curP) if (!(k in baseP)) out.push(`＋ 面板置顶：${pkName(curP[k][0], curP[k][1])}`);
-    for (const k in baseP) if (!(k in curP)) out.push(`－ 取消面板置顶：${pkName(baseP[k][0], baseP[k][1])}`);
+    for (const k in curP) if (!(k in baseP)) out.push(`＋ 面板置顶：${friendlyName(curP[k][0], curP[k][1])}`);
+    for (const k in baseP) if (!(k in curP)) out.push(`－ 取消面板置顶：${friendlyName(baseP[k][0], baseP[k][1])}`);
     for (const k in curP) if ((k in baseP) && (curP[k][2] || "") !== (baseP[k][2] || "")) out.push(`◇ 面板显示名：${pkName(curP[k][0], curP[k][1])} → ${curP[k][2] || "(默认)"}`);
     {
       const co = (cur.panel || []).map(pKey).join(","), bo = (savedBaseline.panel || []).map(pKey).join(",");
