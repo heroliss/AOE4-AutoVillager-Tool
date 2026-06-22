@@ -1662,12 +1662,15 @@ const ED = (function () {
     const p = d && (d.params || []).find((q) => q.key === key);
     return (p && p.label) || key;
   }
-  function summarizeChanges() {
+  // 逐项返回 {text, restore?}：restore 存在 = 该条可【单条恢复】到上次保存的值。
+  // 可单条恢复：参数值 / 节点描述 / 自定义显示名；结构性改动(增删节点·连线·分组等)只列出、不提供一键恢复。
+  function diffChanges() {
     if (!savedBaseline) return [];
     const cur = collect(), out = [];
+    const push = (text, restore) => out.push(restore ? { text, restore } : { text });
     const titleOf = (n) => (defByType[n.type] && defByType[n.type].title) || n.type;
-    if (cur.name !== savedBaseline.name) out.push(`流程名称：${savedBaseline.name} → ${cur.name}`);
-    if ((cur.description || "") !== (savedBaseline.description || "")) out.push("流程说明已修改");
+    if (cur.name !== savedBaseline.name) push(`流程名称：${savedBaseline.name} → ${cur.name}`);
+    if ((cur.description || "") !== (savedBaseline.description || "")) push("流程说明已修改");
     const baseN = {}; for (const n of savedBaseline.nodes) baseN[n.id] = n;
     const curN = {}; for (const n of cur.nodes) curN[n.id] = n;
     const nodeOf = (id) => curN[id] || baseN[id];
@@ -1685,25 +1688,27 @@ const ED = (function () {
     };
     // 值的友好显示：布尔 → 开/关（switch 的 false→true 直接看不懂）。
     const fmtVal = (v) => (v === true || v === "true") ? "开" : (v === false || v === "false") ? "关" : String(v);
-    for (const n of cur.nodes) if (!baseN[n.id]) out.push(`＋ 新增节点：${titleOf(n)}`);
-    for (const n of savedBaseline.nodes) if (!curN[n.id]) out.push(`－ 删除节点：${titleOf(n)}`);
+    for (const n of cur.nodes) if (!baseN[n.id]) push(`＋ 新增节点：${titleOf(n)}`);
+    for (const n of savedBaseline.nodes) if (!curN[n.id]) push(`－ 删除节点：${titleOf(n)}`);
     let moved = 0;
     for (const n of cur.nodes) {
       const b = baseN[n.id]; if (!b) continue;
       for (const k in (n.params || {}))
-        if (String(n.params[k]) !== String((b.params || {})[k]))
-          out.push(`◇ ${friendlyName(n.id, k)}：${fmtVal((b.params || {})[k])} → ${fmtVal(n.params[k])}`);
-      if ((n.note || "") !== (b.note || "")) out.push(`◇ ${titleOf(n)}：描述已修改`);
+        if (String(n.params[k]) !== String((b.params || {})[k])) {
+          const bv = (b.params || {})[k];
+          push(`◇ ${friendlyName(n.id, k)}：${fmtVal(bv)} → ${fmtVal(n.params[k])}`, () => restoreParam(n.id, k, bv));
+        }
+      if ((n.note || "") !== (b.note || "")) push(`◇ ${titleOf(n)}：描述已修改`, () => restoreNote(n.id, b.note || ""));
       const bp = b.pos || [0, 0], np = n.pos || [0, 0];
       if (Math.round(bp[0]) !== Math.round(np[0]) || Math.round(bp[1]) !== Math.round(np[1])) moved++;
     }
-    if (moved) out.push(`◇ ${moved} 个节点位置移动`);
+    if (moved) push(`◇ ${moved} 个节点位置移动`);
     const ek = (e) => e.src + "|" + e.src_port + "|" + e.dst + "|" + e.dst_port;
     const baseE = new Set(savedBaseline.edges.map(ek)), curE = new Set(cur.edges.map(ek));
     const ea = cur.edges.filter((e) => !baseE.has(ek(e))).length;
     const er = savedBaseline.edges.filter((e) => !curE.has(ek(e))).length;
-    if (ea) out.push(`＋ 新增连线 ${ea} 条`);
-    if (er) out.push(`－ 删除连线 ${er} 条`);
+    if (ea) push(`＋ 新增连线 ${ea} 条`);
+    if (er) push(`－ 删除连线 ${er} 条`);
     // —— 以下把“笼统一句话”改成逐项列出，便于核对本次到底改了什么 ——
     const pkName = structName;   // 结构名（节点·参数），用于“改名/暴露”等需要点出是哪个参数的地方
     const splitK = (k) => { const i = k.indexOf("|"); return [k.slice(0, i), k.slice(i + 1)]; };
@@ -1712,39 +1717,40 @@ const ED = (function () {
     const baseP = {}, curP = {};
     for (const p of (savedBaseline.panel || [])) baseP[pKey(p)] = p;
     for (const p of (cur.panel || [])) curP[pKey(p)] = p;
-    for (const k in curP) if (!(k in baseP)) out.push(`＋ 面板置顶：${friendlyName(curP[k][0], curP[k][1])}`);
-    for (const k in baseP) if (!(k in curP)) out.push(`－ 取消面板置顶：${friendlyName(baseP[k][0], baseP[k][1])}`);
-    for (const k in curP) if ((k in baseP) && (curP[k][2] || "") !== (baseP[k][2] || "")) out.push(`◇ 面板显示名：${pkName(curP[k][0], curP[k][1])} → ${curP[k][2] || "(默认)"}`);
+    for (const k in curP) if (!(k in baseP)) push(`＋ 面板置顶：${friendlyName(curP[k][0], curP[k][1])}`);
+    for (const k in baseP) if (!(k in curP)) push(`－ 取消面板置顶：${friendlyName(baseP[k][0], baseP[k][1])}`);
+    for (const k in curP) if ((k in baseP) && (curP[k][2] || "") !== (baseP[k][2] || "")) push(`◇ 面板显示名：${pkName(curP[k][0], curP[k][1])} → ${curP[k][2] || "(默认)"}`);
     {
       const co = (cur.panel || []).map(pKey).join(","), bo = (savedBaseline.panel || []).map(pKey).join(",");
-      if (co !== bo && co.split(",").sort().join() === bo.split(",").sort().join()) out.push("◇ 面板项顺序已调整");
+      if (co !== bo && co.split(",").sort().join() === bo.split(",").sort().join()) push("◇ 面板项顺序已调整");
     }
-    // 参数显示名（面板 / 折叠箱体共用）
+    // 参数显示名（面板 / 折叠箱体共用）——可单条恢复
     const cl = cur.labels || {}, bl = savedBaseline.labels || {};
-    for (const k in cl) if (cl[k] !== bl[k]) { const [id, key] = splitK(k); out.push(`◇ 显示名：${pkName(id, key)} → ${cl[k]}`); }
-    for (const k in bl) if (!(k in cl)) { const [id, key] = splitK(k); out.push(`◇ 清除显示名：${pkName(id, key)}`); }
+    for (const k in cl) if (cl[k] !== bl[k]) { const [id, key] = splitK(k); push(`◇ 显示名：${pkName(id, key)} → ${cl[k]}`, () => restoreLabel(id, key, bl[k] || "")); }
+    for (const k in bl) if (!(k in cl)) { const [id, key] = splitK(k); push(`◇ 清除显示名：${pkName(id, key)}`, () => restoreLabel(id, key, bl[k] || "")); }
     // 暴露给所在组的参数
     const fKey = (p) => p[0] + "|" + p[1];
     const baseF = new Set((savedBaseline.foldparams || []).map(fKey)), curF = new Set((cur.foldparams || []).map(fKey));
-    for (const k of curF) if (!baseF.has(k)) { const [id, key] = splitK(k); out.push(`＋ 暴露给组：${pkName(id, key)}`); }
-    for (const k of baseF) if (!curF.has(k)) { const [id, key] = splitK(k); out.push(`－ 取消暴露：${pkName(id, key)}`); }
+    for (const k of curF) if (!baseF.has(k)) { const [id, key] = splitK(k); push(`＋ 暴露给组：${pkName(id, key)}`); }
+    for (const k of baseF) if (!curF.has(k)) { const [id, key] = splitK(k); push(`－ 取消暴露：${pkName(id, key)}`); }
     const geSig = (a) => JSON.stringify([...(a || [])].map((x) => x.join("|")).sort());
-    if (geSig(cur.groupexpose) !== geSig(savedBaseline.groupexpose)) out.push("◇ 组的“向上暴露”设置已修改");
+    if (geSig(cur.groupexpose) !== geSig(savedBaseline.groupexpose)) push("◇ 组的“向上暴露”设置已修改");
     // 分组：逐个列出改了什么
     const gById = (gs) => { const m = {}; for (const g of (gs || [])) m[g.id] = g; return m; };
     const bg = gById(savedBaseline.groups), cg = gById(cur.groups);
     for (const id in cg) {
       const c = cg[id], b = bg[id];
-      if (!b) { out.push(`＋ 新增分组：${c.title || "分组"}`); continue; }
-      if ((c.title || "") !== (b.title || "")) out.push(`◇ 分组改名：${b.title} → ${c.title}`);
-      if ((c.desc || "") !== (b.desc || "")) out.push(`◇ 分组「${c.title}」描述已修改`);
+      if (!b) { push(`＋ 新增分组：${c.title || "分组"}`); continue; }
+      if ((c.title || "") !== (b.title || "")) push(`◇ 分组改名：${b.title} → ${c.title}`);
+      if ((c.desc || "") !== (b.desc || "")) push(`◇ 分组「${c.title}」描述已修改`);
       const cm = (c.members || []).slice().sort().join(","), bm = (b.members || []).slice().sort().join(",");
-      if (cm !== bm) out.push(`◇ 分组「${c.title}」成员变化`);
-      if (!!c.collapsed !== !!b.collapsed) out.push(`◇ 分组「${c.title}」${c.collapsed ? "已折叠" : "已展开"}`);
+      if (cm !== bm) push(`◇ 分组「${c.title}」成员变化`);
+      if (!!c.collapsed !== !!b.collapsed) push(`◇ 分组「${c.title}」${c.collapsed ? "已折叠" : "已展开"}`);
     }
-    for (const id in bg) if (!(id in cg)) out.push(`－ 删除分组：${bg[id].title || "分组"}`);
+    for (const id in bg) if (!(id in cg)) push(`－ 删除分组：${bg[id].title || "分组"}`);
     return out;
   }
+  function summarizeChanges() { return diffChanges().map((c) => c.text); }
 
   // 统一的「修改变化详情」弹窗：未保存提示 / 退出确认 / 主动保存预览 共用这一个窗口。
   // opts: { title, subtitle, buttons:[{act,label,style}], defaultAct }。返回 Promise<act>。
@@ -1754,7 +1760,6 @@ const ED = (function () {
   function showChangeDialog(opts) {
     return new Promise((resolve) => {
       const old = document.getElementById("unsaveddlg"); if (old) old.remove();
-      const changes = summarizeChanges();
       const box = document.createElement("div");
       box.id = "unsaveddlg";
       box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);width:min(560px,94vw);" +
@@ -1762,15 +1767,29 @@ const ED = (function () {
         "padding:14px 16px;z-index:200;box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
       let h = "<b style='color:#e6c07b'>" + esc(opts.title || "修改详情") + "</b>";
       if (opts.subtitle) h += "<div style='color:#9aa3af;margin-top:4px'>" + esc(opts.subtitle) + "</div>";
-      h += "<div style='margin-top:8px;color:#8fb6e0'>" + (changes.length ? ("共 " + changes.length + " 处改动：") : "") + "</div>";
-      h += "<div style='margin-top:4px;max-height:46vh;overflow:auto;background:#1b1f27;border:1px solid #2c323c;border-radius:6px;padding:8px 10px;color:#bcd'>";
-      if (changes.length) h += changes.map((c) => "<div style=\"margin:2px 0;white-space:pre-wrap\">" + esc(c) + "</div>").join("");
-      else h += "<div style='color:#7f8895'>（无可逐项列出的改动）</div>";
-      h += "</div><div style='margin-top:12px;text-align:right'>";
+      h += "<div id='cd_cnt' style='margin-top:8px;color:#8fb6e0'></div>";
+      h += "<div id='cd_list' style='margin-top:4px;max-height:46vh;overflow:auto;background:#1b1f27;border:1px solid #2c323c;border-radius:6px;padding:8px 10px;color:#bcd'></div>";
+      h += "<div style='margin-top:12px;text-align:right'>";
       h += (opts.buttons || []).map((b) => "<button data-act='" + esc(b.act) + "' style='" + b.style + "'>" + esc(b.label) + "</button>").join(" ");
       h += "</div>";
       box.innerHTML = h;
       document.body.appendChild(box);
+      const listEl = box.querySelector("#cd_list"), cntEl = box.querySelector("#cd_cnt");
+      const RB = "flex:none;background:#2f343d;color:#9fd0ff;border:1px solid #3f5f88;border-radius:4px;font-size:12px;height:20px;line-height:18px;cursor:pointer;padding:0 8px";
+      function renderList() {
+        const changes = diffChanges();
+        cntEl.textContent = changes.length ? ("共 " + changes.length + " 处改动（可单条恢复）：") : "";
+        if (!changes.length) { listEl.innerHTML = "<div style='color:#7f8895'>（无改动）</div>"; return; }
+        listEl.innerHTML = changes.map((c, i) =>
+          "<div style='display:flex;align-items:flex-start;gap:8px;margin:3px 0'>" +
+          "<div style='flex:1;white-space:pre-wrap'>" + esc(c.text) + "</div>" +
+          (c.restore ? "<button data-restore='" + i + "' style='" + RB + "' title='把这一条恢复到上次保存的值'>恢复</button>" : "") +
+          "</div>").join("");
+        listEl.querySelectorAll("[data-restore]").forEach((btn) => {
+          btn.onclick = () => { const c = diffChanges()[+btn.getAttribute("data-restore")]; if (c && c.restore) { try { c.restore(); } catch (e) {} } renderList(); };
+        });
+      }
+      renderList();
       const done = (v) => { box.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
       box.querySelectorAll("[data-act]").forEach((btn) => { btn.onclick = () => done(btn.getAttribute("data-act")); });
       const def = box.querySelector("[data-act='" + opts.defaultAct + "']");
@@ -1807,6 +1826,15 @@ const ED = (function () {
         { act: "cancel", label: "取消", style: _BTN_CANCEL },
       ],
       defaultAct: "save",   // 主动保存：默认焦点在“保存”，回车即存
+    });
+  }
+  // 随时查看「与上次保存相比改了什么」：内容同保存预览，可逐条「恢复」。只读查看，不触发保存/丢弃。
+  function viewChanges() {
+    showChangeDialog({
+      title: "当前修改（与上次保存相比）",
+      subtitle: "点每条右侧「恢复」可单独还原该项；关闭不影响其它改动。",
+      buttons: [{ act: "cancel", label: "关闭", style: _BTN_CANCEL }],
+      defaultAct: "cancel",
     });
   }
   // 通用确认框（不带改动清单）：返回 Promise<bool>。danger=true 时“确定”按钮用红色。
@@ -2154,6 +2182,24 @@ const ED = (function () {
     if (canvas) canvas.setDirty(true, true);
     scheduleSnap(); refreshDirty();
   }
+  // —— 单条「恢复到上次保存」：供「保存预览 / 查看修改」窗口里每条改动旁的“恢复”按钮调用 ——
+  function restoreParam(id, key, val) {   // 把某节点的某参数恢复为基线值（回写 widget + properties + 折叠控件）
+    const n = nodeByOurId(id); if (!n) return;
+    const w = (n.widgets || []).find((x) => x._key === key);
+    if (w) w.value = (w.type === "combo") ? String(val) : val;
+    if (!n.properties) n.properties = {};
+    n.properties[key] = w ? w.value : val;
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty(); syncFoldWidgetValues();
+  }
+  function restoreNote(id, note) {
+    const n = nodeByOurId(id); if (!n) return;
+    n._note = note;
+    if (canvas) canvas.setDirty(true, true);
+    scheduleSnap(); refreshDirty();
+  }
+  function restoreLabel(id, key, name) { setPinLabel(id, key, name); }   // 空=清除显示名（回落默认）
+
   // 默认显示名：「节点标题 · 参数标签」——自带节点上下文，多个节点置顶/暴露同名参数（区域/阈值/间隔(秒)…）也不混淆。
   // 控制面板与折叠箱体【共用这同一个默认】；填了自定义名则两处都用自定义名（随流程保存）。
   function defaultPinLabel(node, key) {
@@ -3244,6 +3290,7 @@ const ED = (function () {
     },
     fit,
     search: openSearch,
+    viewChanges,
     help: toggleHelp,
   };
 
@@ -3836,7 +3883,7 @@ const ED = (function () {
       "· <b>快捷键</b>：<b>Ctrl+S</b> 保存（弹改动详情预览）　<b>Ctrl+Shift+S</b> 另存为　<b>Ctrl+Z</b> 撤销　<b>Ctrl+Y</b> / <b>Ctrl+Shift+Z</b> 重做　<b>Ctrl+C</b> 复制　<b>Ctrl+V</b> 粘贴　" +
       "<b>Ctrl+D</b> 再制（选中组则克隆整组）　<b>Ctrl+A</b> 全选节点　<b>Ctrl+F</b> 图内搜索（找节点/分组并定位）　<b>Delete</b> 删除（选中组＝解散该组）<br>" +
       "<span style='color:#7f8895'>　复制/再制会连同选区内部连线、参数、说明、暴露设置一起带走；再制保留原分组归属，粘贴为自由节点。</span><br>" +
-      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存（都会先弹「修改变化详情」窗口预览要保存的改动）/ <b>📁 定位</b>（在文件浏览器中显示当前流程文件）<br>" +
+      "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存（都会先弹「修改变化详情」窗口预览要保存的改动）/ <b>📋 查看修改</b>（随时查看当前所有改动，可逐条恢复）/ <b>📁 定位</b>（在文件浏览器中显示当前流程文件）<br>" +
       "· 选中节点→右下角说明里勾选「显示到控制面板」，把常用开关/数值置顶到顶部面板，" +
       "普通使用时不必进节点图也能调（🎯 定位到节点）<br>" +
       "· <b>分组＝把若干节点封装成一个“函数块”</b>：右键节点→「分组…」把它(或多选)归入一个彩色分组；" +
