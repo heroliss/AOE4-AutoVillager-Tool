@@ -22,6 +22,7 @@ QUEUE_REGION = [10, 970, 500, 1025]
 POP_REGION = [50, 1140, 150, 1170]
 FOOD_REGION = [50, 1222, 140, 1248]
 GOLD_REGION = [50, 1180, 140, 1206]
+WOOD_REGION = [50, 1201, 140, 1227]   # 占位：木头数字区域，请按你的界面调整（仅商人用木头时才需要）
 TC = {
     "icon_region": [444, 1212, 492, 1259],
     "single_region": [300, 1140, 354, 1194],
@@ -60,6 +61,7 @@ def build_combined_graph() -> Graph:
     add("slots", "math.arith", {"op": "-"})       # 空位 = 人口上限 - 当前人口
     add("food", "sense.ocr_number", {"region": FOOD_REGION, "regex": r"(\d+)"})
     add("gold", "sense.ocr_number", {"region": GOLD_REGION, "regex": r"(\d+)"})
+    add("wood", "sense.ocr_number", {"region": WOOD_REGION, "regex": r"(\d+)"})  # 木头：默认不参与限制（成本0），仅在某单位需要木头时启用
     add("tc", "game.tc_count", TC)
     add("c_one", "data.const_number", {"value": 1})
 
@@ -97,6 +99,9 @@ def build_combined_graph() -> Graph:
     add("c_cost_cart", "data.const_number", {"value": 60})   # 商人单价(黄金)；不同国家不同，放到了控制面板可调
     add("cmp_gold_cart", "logic.compare", {"op": ">="})    # 黄金 ≥ 商人单价 ?
     add("pre_gold_cart", "control.if")
+    # 商人木头成本：默认 0 = 不参与限制（安全：木头区域没配好也不会误把商人卡成0）。
+    # 需要时把它设为实际值(如60)并把上面的「木头数字区域」设对，商人产量就会再受 木头÷成本 限制。
+    add("c_cost_cart_wood", "data.const_number", {"value": 0})
 
     # 操作锁 / 输入屏蔽 / 存当前编组（整批生产共用一次）
     add("lock", "control.lock_acquire")
@@ -120,7 +125,7 @@ def build_combined_graph() -> Graph:
     add("sw_xq", "data.switch", {"on": False})              # 开关：是否生产乡骑（金朝）
     add("if_sw_xq", "control.if")
     add("q_xq", "sense.template_match",
-        {"region": QUEUE_REGION, "templates": ["templates/xiangqi.png"], "threshold": 0.6, "transition_guard": True})
+        {"region": QUEUE_REGION, "templates": ["templates/xiangqi.jpg"], "threshold": 0.6, "transition_guard": True})
     add("if_qxq", "control.if")
     add("sel_tc_x", "action.press_key", {"key": "h"})       # 同村民段：计数节点内置“按键后自动重试重截”，无需固定延时
     add("c_per_x", "data.const_number", {"value": 2})
@@ -132,10 +137,10 @@ def build_combined_graph() -> Graph:
     add("sw_cart", "data.switch", {"on": False})            # 开关：是否生产商人（市场）
     add("if_sw_cart", "control.if")
     add("q_cart", "sense.template_match",
-        {"region": QUEUE_REGION, "templates": ["templates/trade_cart.png"], "threshold": 0.6, "transition_guard": True})
+        {"region": QUEUE_REGION, "templates": ["templates/businessman.png"], "threshold": 0.6, "transition_guard": True})
     add("if_qcart", "control.if")
     add("sel_market", "action.press_key", {"key": "j"})     # 选中所有市场（默认绑定 J）
-    add("c_per_cart", "data.const_number", {"value": 5})
+    add("c_per_cart", "data.const_number", {"value": 2})
     add("plan_cart", "math.arith", {"op": "*"})
     add("prod_cart", "game.produce_count", {"cost_per_unit": 60, "cap": -1})   # 成本由 c_cost_cart 喂入(下方连线)，此为兜底
     add("queue_cart", "action.press_key", {"key": "q"})
@@ -160,6 +165,7 @@ def build_combined_graph() -> Graph:
         ["c_cost_v", "value", "村民成本(食物)"],
         ["c_cost_x", "value", "乡骑成本(黄金)"],
         ["c_cost_cart", "value", "商人成本(黄金)"],
+        ["c_cost_cart_wood", "value", "商人成本(木头·0=不限)"],
         ["win", "hdr", "HDR模式"],
         ["tick", "interval", "循环间隔(秒)"],
         ["delay", "seconds", "每轮等待(秒)"],
@@ -175,7 +181,7 @@ def build_combined_graph() -> Graph:
         # 放一起对齐、视觉一致（食物虽只村民用，但与其它资源对齐更清楚）。
         {"title": "共享前段（每帧一次）", "color": "#4a8a8a",
          "members": ["tick", "mod", "if_mod", "win", "and_win", "if_win", "occ", "if_blocked", "if_trans",
-                     "pop", "slots", "food", "gold", "tc",
+                     "pop", "slots", "food", "gold", "wood", "tc",
                      "lock", "block_begin", "save_sel", "relmod1"]},
         {"title": "村民段", "color": "#3a6ea5",
          "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v",
@@ -192,7 +198,7 @@ def build_combined_graph() -> Graph:
                      "pre_sw_cart", "pre_q_cart",
                      "c_cost_v", "cmp_food_v", "pre_food_v",
                      "c_cost_x", "cmp_gold_x", "pre_gold_x",
-                     "c_cost_cart", "cmp_gold_cart", "pre_gold_cart",
+                     "c_cost_cart", "cmp_gold_cart", "pre_gold_cart", "c_cost_cart_wood",
                      "cmp_slots", "pre_slots"]},
         {"title": "收尾（整批一次）", "color": "#5a9367",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
@@ -213,6 +219,7 @@ def build_combined_graph() -> Graph:
         "slots": "人口空位 = 上限 - 当前，作为可生产数量的上限之一。",
         "food": "识别当前食物存量（约束村民产量）。",
         "gold": "识别当前黄金存量（约束乡骑/商人产量）。",
+        "wood": "识别当前木头存量。默认不参与限制（商人木头成本=0）；某单位需要木头时，把对应成本设为实际值并把本区域设对即可启用。",
         "tc": "统计当前有几个城镇中心(TC)，用于“每个TC各排一批”。",
         "c_one": "常量 1：商人按“市场数=1”计划（一般只一个市场）。",
         "lock": "抢占操作锁：多开/多脚本时避免同时抢操作。占用中则本帧结束。",
@@ -233,6 +240,7 @@ def build_combined_graph() -> Graph:
         "cmp_gold_x": "门控·黄金 ≥ 乡骑单价？顺带预热黄金OCR。",
         "pre_gold_x": "门控·黄金够→看人口空位；不够→跳过乡骑段，看商人。",
         "c_cost_cart": "常量·商人单价(黄金，默认60)。不同国家不同——已放到控制面板，可按你的国家调。同时供门控判断和产能计算。",
+        "c_cost_cart_wood": "常量·商人单价(木头，默认0=不限制)。安全起见默认不看木头；需要时设为实际值(如60)并把「木头数字区域」设对即可启用。已放到控制面板。",
         "cmp_gold_cart": "门控·黄金 ≥ 商人单价？",
         "pre_gold_cart": "门控·黄金够→看人口空位；不够→本帧结束。",
         "cmp_slots": "门控·人口空位 > 0？（三段共用：人口已满时谁都产不了，直接结束本帧）。",
@@ -245,7 +253,7 @@ def build_combined_graph() -> Graph:
                     "按完不必再放延时——下游「多TC计数」节点会在面板刷新出来前自动重试重截。",
         "c_per_v": "每个城镇中心一次排几个村民。",
         "plan_v": "计划数 = 每TC数量 × TC个数。",
-        "prod_v": "实际产量 = min(计划, 人口空位, 食物÷单价)。",
+        "prod_v": "实际产量 = min(计划, 人口空位, 食物÷单价)。并把“用剩的人口空位”结转给乡骑段——多段共享人口池、逐段扣减，避免同帧重复占用。村民这帧没真生产(关/已在造)时产0、空位原样传下去。",
         "queue_v": "按 Q 排队生产村民（按实际产量次数）。",
         "sw_xq": "【开关】是否生产乡骑（金朝特色）。默认关。",
         "if_sw_xq": "乡骑开关：开→进入乡骑段；关→跳到商人段。",
@@ -254,7 +262,7 @@ def build_combined_graph() -> Graph:
         "sel_tc_x": "按 H 选中所有城镇中心。按完不必再放延时——「多TC计数」节点会自动重试重截。",
         "c_per_x": "每个城镇中心一次排几个乡骑。",
         "plan_x": "计划数 = 每TC数量 × TC个数。",
-        "prod_x": "实际产量 = min(计划, 人口空位, 黄金÷单价)。",
+        "prod_x": "实际产量 = min(计划, 剩余人口空位, 黄金÷单价)。空位来自村民段结转；并把“用剩的空位/黄金”再结转给商人段（乡骑与商人共用黄金池）。乡骑没真生产时产0、预算透传。",
         "queue_x": "按 W 排队生产乡骑。",
         "sw_cart": "【开关】是否生产商人（市场出商人）。默认关。",
         "if_sw_cart": "商人开关：开→进入商人段；关→进入收尾。",
@@ -263,7 +271,7 @@ def build_combined_graph() -> Graph:
         "sel_market": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。",
         "c_per_cart": "每个市场一次排几个商人。",
         "plan_cart": "计划数 = 每市场数量 × 市场个数(此处常量1)。",
-        "prod_cart": "实际产量 = min(计划, 人口空位, 黄金÷单价)。",
+        "prod_cart": "实际产量 = min(计划, 剩余人口空位, 剩余黄金÷单价[, 木头÷木头单价])。空位/黄金均来自乡骑段结转——所以即使村民/乡骑同帧在产，商人仍按“真正剩下的”池子独立生产。木头默认不限制(成本0)。",
         "queue_cart": "按 Q 排队生产商人。",
         "restore": "按 0 恢复操作前暂存的编组选择。",
         "disband": "Ctrl+Alt+0：解散临时编组，避免污染玩家的编组。",
@@ -351,37 +359,54 @@ def build_combined_graph() -> Graph:
     g.connect_data("pop", "value2", "slots", "a")
     g.connect_data("pop", "value", "slots", "b")
 
-    # 村民段数据
+    # ——— 产能计算：多段共享同一“预算池”，逐段扣减后结转给下一段 ———
+    # 同一帧里依次跑 村民→乡骑→商人；它们共用人口（空位），乡骑与商人共用黄金。
+    # 关键修复：以前三段都读“没扣减过”的同一个空位/黄金，前段排了之后后段仍按旧值排 → 超额、被游戏静默
+    #   拒绝（实测“村民在产时商人怎么都不产、非得等村民这轮产完才和村民一起产”，正是这种同帧重复占用所致）。
+    # 现在：① 空位串成链：村民拿到“空位”，输出“剩余空位”给乡骑，乡骑再把剩余给商人；
+    #       ② 黄金在乡骑→商人之间串链（村民不吃黄金，无需经过它）；
+    #       ③ 每段把“开关/队列已占用”喂给产能节点：本段这帧其实不生产时产量记 0、预算原样透传，不误占池子。
+    #   于是村民在产时（村民这段 busy→产0、空位原样传下去），商人仍能用到完整空位/黄金，独立生产。
+
+    # 村民段数据（吃食物；空位预算链的起点）
     g.connect_data("sw_vill", "value", "if_sw_vill", "cond")
     g.connect_data("q_vill", "found", "if_qvill", "cond")
     g.connect_data("c_per_v", "value", "plan_v", "a")
     g.connect_data("tc", "count", "plan_v", "b")
     g.connect_data("plan_v", "value", "prod_v", "planned")
-    g.connect_data("slots", "value", "prod_v", "available_slots")
-    g.connect_data("food", "value", "prod_v", "resource")
-    g.connect_data("c_cost_v", "value", "prod_v", "cost")    # 成本同源：门控与产能用同一个常量(可在面板按国家调)
+    g.connect_data("slots", "value", "prod_v", "available_slots")   # 人口空位预算（链头）
+    g.connect_data("food", "value", "prod_v", "resource")            # 资源1=食物
+    g.connect_data("c_cost_v", "value", "prod_v", "cost")            # 成本同源：门控与产能用同一个常量(可在面板按国家调)
+    g.connect_data("sw_vill", "value", "prod_v", "switch")           # 段关→产0、预算透传
+    g.connect_data("q_vill", "found", "prod_v", "busy")             # 队列已在造村民→产0、预算透传
     g.connect_data("prod_v", "count", "queue_v", "count")
 
-    # 乡骑段数据
+    # 乡骑段数据（吃黄金；空位从村民段结转）
     g.connect_data("sw_xq", "value", "if_sw_xq", "cond")
     g.connect_data("q_xq", "found", "if_qxq", "cond")
     g.connect_data("c_per_x", "value", "plan_x", "a")
     g.connect_data("tc", "count", "plan_x", "b")
     g.connect_data("plan_x", "value", "prod_x", "planned")
-    g.connect_data("slots", "value", "prod_x", "available_slots")
-    g.connect_data("gold", "value", "prod_x", "resource")
+    g.connect_data("prod_v", "slots_left", "prod_x", "available_slots")  # 空位 = 村民用剩的
+    g.connect_data("gold", "value", "prod_x", "resource")                # 资源1=黄金（黄金链的起点，村民不吃黄金）
     g.connect_data("c_cost_x", "value", "prod_x", "cost")
+    g.connect_data("sw_xq", "value", "prod_x", "switch")
+    g.connect_data("q_xq", "found", "prod_x", "busy")
     g.connect_data("prod_x", "count", "queue_x", "count")
 
-    # 商人段数据（市场数按 1 计；空位仍受人口限制）
+    # 商人段数据（市场数按 1 计；空位和黄金都从乡骑段结转；可选再吃木头）
     g.connect_data("sw_cart", "value", "if_sw_cart", "cond")
     g.connect_data("q_cart", "found", "if_qcart", "cond")
     g.connect_data("c_per_cart", "value", "plan_cart", "a")
     g.connect_data("c_one", "value", "plan_cart", "b")
     g.connect_data("plan_cart", "value", "prod_cart", "planned")
-    g.connect_data("slots", "value", "prod_cart", "available_slots")
-    g.connect_data("gold", "value", "prod_cart", "resource")
-    g.connect_data("c_cost_cart", "value", "prod_cart", "cost")
+    g.connect_data("prod_x", "slots_left", "prod_cart", "available_slots")   # 空位 = 乡骑用剩的（=村民也用剩的）
+    g.connect_data("prod_x", "resource_left", "prod_cart", "resource")       # 黄金 = 乡骑用剩的
+    g.connect_data("c_cost_cart", "value", "prod_cart", "cost")              # 资源1成本=商人黄金单价
+    g.connect_data("wood", "value", "prod_cart", "res2")                     # 资源2=木头（默认成本0=不限制）
+    g.connect_data("c_cost_cart_wood", "value", "prod_cart", "cost2")        # 资源2成本=商人木头单价
+    g.connect_data("sw_cart", "value", "prod_cart", "switch")
+    g.connect_data("q_cart", "found", "prod_cart", "busy")
     g.connect_data("prod_cart", "count", "queue_cart", "count")
 
     # 生产门控数据（简化）：开关/队列复用各段已有节点（按帧记忆化）；产能/食物/TC 一概不读。

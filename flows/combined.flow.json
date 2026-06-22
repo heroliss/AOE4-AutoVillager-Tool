@@ -49,6 +49,11 @@
       "商人成本(黄金)"
     ],
     [
+      "c_cost_cart_wood",
+      "value",
+      "商人成本(木头·0=不限)"
+    ],
+    [
       "win",
       "hdr",
       "HDR模式"
@@ -102,6 +107,7 @@
         "slots",
         "food",
         "gold",
+        "wood",
         "tc",
         "lock",
         "block_begin",
@@ -175,6 +181,7 @@
         "c_cost_cart",
         "cmp_gold_cart",
         "pre_gold_cart",
+        "c_cost_cart_wood",
         "cmp_slots",
         "pre_slots"
       ]
@@ -395,10 +402,30 @@
       "note": "识别当前黄金存量（约束乡骑/商人产量）。"
     },
     {
+      "id": "wood",
+      "type": "sense.ocr_number",
+      "pos": [
+        5739.5,
+        870.0
+      ],
+      "params": {
+        "region": [
+          50,
+          1201,
+          140,
+          1227
+        ],
+        "scale": 1.0,
+        "allowlist": "0123456789/\\|OolIsS ",
+        "regex": "(\\d+)"
+      },
+      "note": "识别当前木头存量。默认不参与限制（商人木头成本=0）；某单位需要木头时，把对应成本设为实际值并把本区域设对即可启用。"
+    },
+    {
       "id": "tc",
       "type": "game.tc_count",
       "pos": [
-        5652.0,
+        5722.0,
         228.0
       ],
       "params": {
@@ -435,7 +462,7 @@
       "id": "c_one",
       "type": "data.const_number",
       "pos": [
-        8938.5,
+        8958.5,
         1016.0
       ],
       "params": {
@@ -531,7 +558,7 @@
       "id": "pre_slots",
       "type": "control.if",
       "pos": [
-        4449.0,
+        4484.0,
         40.0
       ],
       "params": {},
@@ -640,10 +667,22 @@
       "note": "门控·黄金够→看人口空位；不够→本帧结束。"
     },
     {
+      "id": "c_cost_cart_wood",
+      "type": "data.const_number",
+      "pos": [
+        4449.0,
+        280.0
+      ],
+      "params": {
+        "value": 0
+      },
+      "note": "常量·商人单价(木头，默认0=不限制)。安全起见默认不看木头；需要时设为实际值(如60)并把「木头数字区域」设对即可启用。已放到控制面板。"
+    },
+    {
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        4689.0,
+        4759.0,
         40.0
       ],
       "params": {},
@@ -653,7 +692,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        4929.0,
+        4999.0,
         40.0
       ],
       "params": {
@@ -665,7 +704,7 @@
       "id": "save_sel",
       "type": "action.press_key",
       "pos": [
-        5308.0,
+        5378.0,
         40.0
       ],
       "params": {
@@ -679,7 +718,7 @@
       "id": "relmod1",
       "type": "action.release_modifiers",
       "pos": [
-        5730.0,
+        5800.0,
         40.0
       ],
       "params": {},
@@ -689,8 +728,8 @@
       "id": "sw_vill",
       "type": "data.switch",
       "pos": [
-        6082.5,
-        232.0
+        6152.5,
+        412.0
       ],
       "params": {
         "on": true
@@ -701,7 +740,7 @@
       "id": "if_sw_vill",
       "type": "control.if",
       "pos": [
-        6117.5,
+        6187.5,
         40.0
       ],
       "params": {},
@@ -711,8 +750,8 @@
       "id": "q_vill",
       "type": "sense.template_match",
       "pos": [
-        6048.0,
-        412.0
+        6118.0,
+        592.0
       ],
       "params": {
         "region": [
@@ -733,7 +772,7 @@
       "id": "if_qvill",
       "type": "control.if",
       "pos": [
-        6470.5,
+        6540.5,
         40.0
       ],
       "params": {},
@@ -743,7 +782,7 @@
       "id": "sel_tc_v",
       "type": "action.press_key",
       "pos": [
-        6771.0,
+        6828.5,
         40.0
       ],
       "params": {
@@ -757,8 +796,8 @@
       "id": "c_per_v",
       "type": "data.const_number",
       "pos": [
-        6082.5,
-        852.0
+        6152.5,
+        232.0
       ],
       "params": {
         "value": 3
@@ -769,7 +808,7 @@
       "id": "plan_v",
       "type": "math.arith",
       "pos": [
-        6427.0,
+        6497.0,
         216.0
       ],
       "params": {
@@ -781,20 +820,22 @@
       "id": "prod_v",
       "type": "game.produce_count",
       "pos": [
-        6754.0,
+        6824.0,
         392.0
       ],
       "params": {
         "cost_per_unit": 50,
+        "cost2_per_unit": 0.0,
+        "cost3_per_unit": 0.0,
         "cap": -1
       },
-      "note": "实际产量 = min(计划, 人口空位, 食物÷单价)。"
+      "note": "实际产量 = min(计划, 人口空位, 食物÷单价)。并把“用剩的人口空位”结转给乡骑段——多段共享人口池、逐段扣减，避免同帧重复占用。村民这帧没真生产(关/已在造)时产0、空位原样传下去。"
     },
     {
       "id": "queue_v",
       "type": "action.press_key",
       "pos": [
-        7132.0,
+        7177.0,
         40.0
       ],
       "params": {
@@ -808,8 +849,8 @@
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
-        7510.5,
-        232.0
+        7555.5,
+        412.0
       ],
       "params": {
         "on": false
@@ -820,7 +861,7 @@
       "id": "if_sw_xq",
       "type": "control.if",
       "pos": [
-        7545.5,
+        7590.5,
         40.0
       ],
       "params": {},
@@ -830,8 +871,8 @@
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
-        7476.0,
-        412.0
+        7521.0,
+        592.0
       ],
       "params": {
         "region": [
@@ -841,7 +882,7 @@
           1025
         ],
         "templates": [
-          "templates/xiangqi.png"
+          "templates/xiangqi.jpg"
         ],
         "threshold": 0.6,
         "transition_guard": true
@@ -852,7 +893,7 @@
       "id": "if_qxq",
       "type": "control.if",
       "pos": [
-        7898.5,
+        7943.5,
         40.0
       ],
       "params": {},
@@ -862,7 +903,7 @@
       "id": "sel_tc_x",
       "type": "action.press_key",
       "pos": [
-        8199.0,
+        8231.5,
         40.0
       ],
       "params": {
@@ -876,8 +917,8 @@
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
-        7510.5,
-        836.0
+        7555.5,
+        232.0
       ],
       "params": {
         "value": 2
@@ -888,7 +929,7 @@
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
-        7855.0,
+        7900.0,
         216.0
       ],
       "params": {
@@ -900,20 +941,22 @@
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
-        8182.0,
+        8227.0,
         360.0
       ],
       "params": {
         "cost_per_unit": 80,
+        "cost2_per_unit": 0.0,
+        "cost3_per_unit": 0.0,
         "cap": -1
       },
-      "note": "实际产量 = min(计划, 人口空位, 黄金÷单价)。"
+      "note": "实际产量 = min(计划, 剩余人口空位, 黄金÷单价)。空位来自村民段结转；并把“用剩的空位/黄金”再结转给商人段（乡骑与商人共用黄金池）。乡骑没真生产时产0、预算透传。"
     },
     {
       "id": "queue_x",
       "type": "action.press_key",
       "pos": [
-        8560.0,
+        8580.0,
         40.0
       ],
       "params": {
@@ -927,8 +970,8 @@
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
-        8938.5,
-        232.0
+        8958.5,
+        412.0
       ],
       "params": {
         "on": false
@@ -939,7 +982,7 @@
       "id": "if_sw_cart",
       "type": "control.if",
       "pos": [
-        8973.5,
+        8993.5,
         40.0
       ],
       "params": {},
@@ -949,8 +992,8 @@
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
-        8904.0,
-        412.0
+        8924.0,
+        592.0
       ],
       "params": {
         "region": [
@@ -960,7 +1003,7 @@
           1025
         ],
         "templates": [
-          "templates/trade_cart.png"
+          "templates/businessman.png"
         ],
         "threshold": 0.6,
         "transition_guard": true
@@ -971,7 +1014,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        9326.5,
+        9346.5,
         40.0
       ],
       "params": {},
@@ -981,7 +1024,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        9627.0,
+        9634.5,
         40.0
       ],
       "params": {
@@ -995,11 +1038,11 @@
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        8938.5,
-        836.0
+        8958.5,
+        232.0
       ],
       "params": {
-        "value": 5
+        "value": 2
       },
       "note": "每个市场一次排几个商人。"
     },
@@ -1007,7 +1050,7 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        9283.0,
+        9303.0,
         216.0
       ],
       "params": {
@@ -1019,20 +1062,22 @@
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        9610.0,
+        9630.0,
         344.0
       ],
       "params": {
         "cost_per_unit": 60,
+        "cost2_per_unit": 0.0,
+        "cost3_per_unit": 0.0,
         "cap": -1
       },
-      "note": "实际产量 = min(计划, 人口空位, 黄金÷单价)。"
+      "note": "实际产量 = min(计划, 剩余人口空位, 剩余黄金÷单价[, 木头÷木头单价])。空位/黄金均来自乡骑段结转——所以即使村民/乡骑同帧在产，商人仍按“真正剩下的”池子独立生产。木头默认不限制(成本0)。"
     },
     {
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        9988.0,
+        9983.0,
         40.0
       ],
       "params": {
@@ -1046,7 +1091,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        10332.0,
+        10327.0,
         40.0
       ],
       "params": {
@@ -1060,7 +1105,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        10676.0,
+        10671.0,
         40.0
       ],
       "params": {
@@ -1074,7 +1119,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        11020.0,
+        11015.0,
         40.0
       ],
       "params": {},
@@ -1084,7 +1129,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        11260.0,
+        11255.0,
         40.0
       ],
       "params": {},
@@ -1094,7 +1139,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        11500.0,
+        11495.0,
         40.0
       ],
       "params": {
@@ -1106,7 +1151,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        11793.0,
+        11788.0,
         40.0
       ],
       "params": {},
@@ -1501,6 +1546,18 @@
       "cost"
     ],
     [
+      "sw_vill",
+      "value",
+      "prod_v",
+      "switch"
+    ],
+    [
+      "q_vill",
+      "found",
+      "prod_v",
+      "busy"
+    ],
+    [
       "prod_v",
       "count",
       "queue_v",
@@ -1537,8 +1594,8 @@
       "planned"
     ],
     [
-      "slots",
-      "value",
+      "prod_v",
+      "slots_left",
       "prod_x",
       "available_slots"
     ],
@@ -1553,6 +1610,18 @@
       "value",
       "prod_x",
       "cost"
+    ],
+    [
+      "sw_xq",
+      "value",
+      "prod_x",
+      "switch"
+    ],
+    [
+      "q_xq",
+      "found",
+      "prod_x",
+      "busy"
     ],
     [
       "prod_x",
@@ -1591,14 +1660,14 @@
       "planned"
     ],
     [
-      "slots",
-      "value",
+      "prod_x",
+      "slots_left",
       "prod_cart",
       "available_slots"
     ],
     [
-      "gold",
-      "value",
+      "prod_x",
+      "resource_left",
       "prod_cart",
       "resource"
     ],
@@ -1607,6 +1676,30 @@
       "value",
       "prod_cart",
       "cost"
+    ],
+    [
+      "wood",
+      "value",
+      "prod_cart",
+      "res2"
+    ],
+    [
+      "c_cost_cart_wood",
+      "value",
+      "prod_cart",
+      "cost2"
+    ],
+    [
+      "sw_cart",
+      "value",
+      "prod_cart",
+      "switch"
+    ],
+    [
+      "q_cart",
+      "found",
+      "prod_cart",
+      "busy"
     ],
     [
       "prod_cart",

@@ -143,6 +143,7 @@ def main() -> None:
         "pop": {"value": 50, "value2": 200, "ok": True},     # 空位 150
         "food": {"value": 300, "value2": None, "ok": True},
         "gold": {"value": 800, "value2": None, "ok": True},
+        "wood": {"value": 800, "value2": None, "ok": True},  # 商人段会读木头(默认成本0=不限制)
         "tc": {"count": 1, "ok": True},
     }
     print("== 统一生产：默认(村民开/乡骑关/商人关) -> 只出村民 ==")
@@ -154,9 +155,11 @@ def main() -> None:
     print("== 统一生产：三段全开 -> 村民+乡骑+商人都出 ==")
     logs, _ = run_with_stubs(build_combined_graph,
                              {**COMBINED, "sw_xq": {"value": True}, "sw_cart": {"value": True}})
-    ok &= check("出乡骑 w x2 = min(2*1,150,800//80=10)", any("按键 w x2" in m for m in logs))
+    # 注：现在三段共享同一人口/黄金池、逐段扣减后结转。空位150足够，黄金800足够，故各段仍按计划数排：
+    #   村民3、乡骑2、商人2（c_per_cart 默认=2）。空位链：150→村民用3剩147→乡骑用2剩145→商人；黄金链：乡骑800剩640→商人。
+    ok &= check("出乡骑 w x2 = min(2*1, 剩余空位147, 800//80=10)", any("按键 w x2" in m for m in logs))
     ok &= check("选市场 J 键(商人段开启)", any("按键 j" in m for m in logs))
-    ok &= check("出商人 q x5 = min(5*1,150,800//60=13)", any("按键 q x5" in m for m in logs))
+    ok &= check("出商人 q x2 = min(2*1, 剩余空位145, 剩余黄金640//60=10)", any("按键 q x2" in m for m in logs))
     ok &= check("出村民 q x3", any("按键 q x3" in m for m in logs))
 
     print("== 统一生产：关闭村民段 -> 该段被跳过 ==")

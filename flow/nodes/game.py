@@ -221,7 +221,15 @@ class TcCount(DataNode):
 # ==================== 产能计算 ====================
 @register
 class ProduceCount(DataNode):
-    """计算实际可生产数量 = min(计划, 空位, 资源//成本, 上限-当前)，结果 >=0 取整。"""
+    """计算实际可生产数量，并把“用掉后剩余的空位/资源”结转给下一段。
+
+    产量 = min(计划, 空位, 各资源//各自成本, 上限−当前)，取整且 ≥0；某成本 ≤0（或资源不接）视为“不看该资源”。
+    【多段共享同一池子的关键】村民/乡骑/商人在同一帧依次生产时，人口（空位）三段共用、黄金乡骑与商人共用。
+    若每段都读“没扣减过”的同一个空位/资源旧值，前段排了之后后段仍按旧值排 → 超额、被游戏静默拒绝
+    （表现为“前一个单位在产时后一个怎么都不产”）。所以本节点除了算 count，还输出“剩余空位/剩余资源”，
+    把它接到【下一段】对应输入，池子就会被逐段正确扣减。
+    再配合“开关/已占用”输入：本段其实不会生产时（段关、或队列已在造该单位）产量记 0、预算原样透传给下一段。
+    """
 
     type_id = "game.produce_count"
     category = "游戏"
@@ -230,38 +238,83 @@ class ProduceCount(DataNode):
         data_in("planned", DataType.NUMBER, label="计划数",
                 help="本来想造多少（如 每TC数×TC个数）。最终产量不会超过它。"),
         data_in("available_slots", DataType.NUMBER, label="空位",
-                help="人口空位（上限−当前）。不接=不受人口限制。"),
-        data_in("resource", DataType.NUMBER, label="资源",
-                help="可用资源量（食物/黄金…）。产量再受 资源÷单位成本 限制。不接=不受资源限制。"),
+                help="人口空位（上限−当前）。不接=不受人口限制。多段串联时接【上一段】的“剩余空位”。"),
+        data_in("resource", DataType.NUMBER, label="资源1",
+                help="第1种资源可用量（如食物）。受 资源1÷成本1 限制。不接=不看资源1。多段共用该资源时接上一段“剩余资源1”。"),
+        data_in("res2", DataType.NUMBER, label="资源2", advanced=True,
+                help="第2种资源可用量（如木头）。受 资源2÷成本2 限制。不接=不看资源2。"),
+        data_in("res3", DataType.NUMBER, label="资源3", advanced=True,
+                help="第3种资源可用量（如黄金）。受 资源3÷成本3 限制。不接=不看资源3。"),
+        data_in("cost", DataType.NUMBER, label="成本1",
+                help="造 1 个消耗多少资源1。接了就用它（覆盖下方“单位成本1”参数）——这样成本可由一个常量节点"
+                     "同时喂给本节点和门控的“资源够不够”比较，只在一处设置、还能放到控制面板按国家调。≤0=不看资源1。"),
+        data_in("cost2", DataType.NUMBER, label="成本2", advanced=True,
+                help="造 1 个消耗多少资源2（覆盖参数“单位成本2”）。≤0 或不接=不看资源2。"),
+        data_in("cost3", DataType.NUMBER, label="成本3", advanced=True,
+                help="造 1 个消耗多少资源3（覆盖参数“单位成本3”）。≤0 或不接=不看资源3。"),
+        data_in("switch", DataType.BOOL, label="开关", advanced=True,
+                help="本段是否启用（接段开关）。为否则产量=0、把空位/资源预算原样传给下一段。不接=启用。"),
+        data_in("busy", DataType.BOOL, label="已占用", advanced=True,
+                help="该单位是否已在队列里生产（接队列检测的“命中”）。为真则产量=0、预算原样透传。不接=未占用。"),
         data_in("current_count", DataType.NUMBER, label="当前数量", advanced=True,
                 help="已有数量，配合“数量上限”用（产量不超过 上限−当前）。一般不接。"),
-        data_in("cost", DataType.NUMBER, label="单位成本",
-                help="造 1 个的资源成本。接了就用它（覆盖下方“单位资源成本”参数）——这样成本可由一个常量节点"
-                     "同时喂给本节点和门控的“资源够不够”比较，只在一处设置、还能放到控制面板按国家调。"),
     ]
-    outputs = [data_out("count", DataType.NUMBER, label="数量",
-                        help="实际可生产数 = min(计划, 空位, 资源÷成本, 上限−当前)，取整且 ≥0。接到“按键”的“数量”即排这么多次。")]
+    outputs = [
+        data_out("count", DataType.NUMBER, label="数量",
+                 help="实际可生产数 = min(计划, 空位, 各资源÷各自成本, 上限−当前)，取整且 ≥0。接到“按键”的“数量”即排这么多次。"),
+        data_out("slots_left", DataType.NUMBER, label="剩余空位",
+                 help="本段用掉后剩下的人口空位。接到【下一段】产能计算的“空位”，多段共享人口池而不重复占用。不接=忽略。"),
+        data_out("resource_left", DataType.NUMBER, label="剩余资源1",
+                 help="资源1扣掉本段消耗后的剩余。多段共用同一资源（如乡骑和商人都吃黄金）时，接到下一段“资源1”。"),
+        data_out("res2_left", DataType.NUMBER, label="剩余资源2", advanced=True,
+                 help="资源2扣掉本段消耗后的剩余。"),
+        data_out("res3_left", DataType.NUMBER, label="剩余资源3", advanced=True,
+                 help="资源3扣掉本段消耗后的剩余。"),
+    ]
     params = [
-        ParamSpec("cost_per_unit", "单位资源成本", "float", default=50.0, minimum=0.0,
-                  help="造 1 个要花多少资源（村民≈50 食物）。用于“资源÷成本”这条限制。"),
+        ParamSpec("cost_per_unit", "单位成本1", "float", default=50.0, minimum=0.0,
+                  help="造 1 个要花多少资源1（村民≈50 食物）。被“成本1”输入覆盖。0=不看资源1。"),
+        ParamSpec("cost2_per_unit", "单位成本2", "float", default=0.0, minimum=0.0,
+                  help="造 1 个要花多少资源2（木头等）。被“成本2”输入覆盖。0=不看资源2。", advanced=True),
+        ParamSpec("cost3_per_unit", "单位成本3", "float", default=0.0, minimum=0.0,
+                  help="造 1 个要花多少资源3（黄金等）。被“成本3”输入覆盖。0=不看资源3。", advanced=True),
         ParamSpec("cap", "数量上限", "int", default=-1, help="-1 表示不启用上限（需配合“当前数量”输入）。", advanced=True),
     ]
 
     def evaluate(self, ctx, inputs):
-        count = inputs.get("planned") or 0
+        planned = inputs.get("planned") or 0
+        sw = inputs.get("switch")
+        active = (True if sw is None else bool(sw)) and not bool(inputs.get("busy"))
+
         slots = inputs.get("available_slots")
+        res = [inputs.get("resource"), inputs.get("res2"), inputs.get("res3")]
+        costs = []
+        for ikey, pkey in (("cost", "cost_per_unit"), ("cost2", "cost2_per_unit"), ("cost3", "cost3_per_unit")):
+            c = inputs.get(ikey)            # 接了“成本N”输入就用它，否则回落到参数
+            costs.append(self.values[pkey] if c is None else c)
+
+        count = planned
         if slots is not None:
             count = min(count, slots)
-        resource = inputs.get("resource")
-        cost = inputs.get("cost")          # 接了“单位成本”就用它，否则回落到参数
-        if cost is None:
-            cost = self.values["cost_per_unit"]
-        if resource is not None and cost and cost > 0:
-            count = min(count, int(resource // cost))
+        for r, c in zip(res, costs):
+            if r is not None and c and c > 0:
+                count = min(count, int(r // c))
         cap = self.values["cap"]
         current = inputs.get("current_count")
         if cap is not None and cap >= 0 and current is not None:
             count = min(count, cap - current)
         count = max(0, int(count))
+        if not active:               # 本段不该生产：产量0，预算原样透传（不占用人口/资源池）
+            count = 0
+
+        slots_left = None if slots is None else slots - count
+        res_left = []
+        for r, c in zip(res, costs):
+            if r is None:
+                res_left.append(None)
+            else:
+                res_left.append(r - (count * c if (c and c > 0) else 0))
+
         self.live = {"count": count}
-        return {"count": count}
+        return {"count": count, "slots_left": slots_left,
+                "resource_left": res_left[0], "res2_left": res_left[1], "res3_left": res_left[2]}
