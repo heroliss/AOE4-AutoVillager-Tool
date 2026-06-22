@@ -2966,8 +2966,13 @@ const ED = (function () {
     const term = nodeByOurId(runPathArr[runPathArr.length - 1]);
     if (!term) return null;
     const execOuts = (term.outputs || []).filter((o) => o.type === "exec");
-    if (execOuts.length >= 2)              // 停在判断分支 = 这轮被它拦下、没执行后续操作
+    if (execOuts.length >= 2) {            // 停在判断分支 = 这轮被它拦下、没执行后续操作
+      // 门控类例行短路（开关关 / 队列正在造 / 资源·人口不足）每帧都会发生，是稳态常态、不该刷屏。
+      // 约定：门控节点 id 以 "pre_" 开头、或描述以「门控」开头 → 不记日志（不在游戏/遮挡/被修饰键暂停等非门控原因仍照常记）。
+      const note = (term._note || "").trim();
+      if ((term._id || "").startsWith("pre_") || note.startsWith("门控")) return null;
       return { level: "INFO", msg: "本轮未操作 · " + branchStopReason(term) };
+    }
     return { level: "INFO", msg: "本轮已完成一轮" };
   }
   // 处理一次轮询结果：刷新高亮状态 + 追加增量日志 + 命中断点则暂停（断点判定已在引擎侧精确完成）。
