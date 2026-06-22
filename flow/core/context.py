@@ -52,6 +52,7 @@ class ExecutionContext:
         self._node_times: dict[str, list] = {}   # node_id -> [self_ms, cum_ms]
 
         self._block_active = False              # 输入屏蔽是否生效中
+        self._block_warned = False              # 输入屏蔽失败（多半非管理员）只警告一次
         self._lock_held = False                 # 文件锁是否持有中
 
         self._on_log = on_log
@@ -152,13 +153,17 @@ class ExecutionContext:
             self._full_frame = np.array(shot)[:, :, :3]  # BGRA -> BGR
         return self._full_frame
 
-    def capture_region(self, region):
-        """截取指定区域（BGR numpy），按帧按区域缓存；若已预取整屏则切片复用。"""
+    def capture_region(self, region, fresh: bool = False):
+        """截取指定区域（BGR numpy），按帧按区域缓存；若已预取整屏则切片复用。
+
+        fresh=True：跳过本帧缓存、强制重新截一张并刷新缓存。用于「按键/点击后等 UI 刷新」
+        的重试轮询——同一帧内多次重截同一区域时，必须绕过缓存才能拿到刷新后的新画面。"""
         key = tuple(region)
-        cached = self._region_cache.get(key)
-        if cached is not None:
-            return cached
-        if self._full_frame is not None:
+        if not fresh:
+            cached = self._region_cache.get(key)
+            if cached is not None:
+                return cached
+        if self._full_frame is not None and not fresh:
             ox, oy = self._full_origin
             left, top, right, bottom = region
             img = self._full_frame[top - oy:bottom - oy, left - ox:right - ox]
@@ -250,6 +255,10 @@ class ExecutionContext:
         from input_blocker import _set_block
         ok = _set_block(True)
         self._block_active = True
+        if not ok and not self._block_warned:
+            self._block_warned = True
+            self.log("WARN", "输入屏蔽未生效——多半因为未以管理员身份运行。自动操作期间无法屏蔽鼠标键盘，"
+                             "可能被人为误触打断。请以管理员身份重启本程序。")
         return ok
 
     def block_input_stop(self) -> None:

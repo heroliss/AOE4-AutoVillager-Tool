@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import time
+
 from ..core import DataNode, ParamSpec, DataType, data_in, data_out, register
 from . import _imaging
 
@@ -120,10 +122,11 @@ class TcCount(DataNode):
     title = "多TC计数"
     outputs = [
         data_out("count", DataType.NUMBER, label="数量",
-                 help="当前选中的城镇中心个数。⚠靠识别“TC 面板”得到——必须先按键选中所有 TC、面板出来后才数得到，"
-                      "否则数到 0。所以读它之前要先选 TC 并留一点 UI 刷新等待。"),
+                 help="当前选中的城镇中心个数。⚠靠识别“TC 面板”得到——必须先按键选中所有 TC、面板出来后才数得到。"
+                      "本节点已【内置“按键后自动重试重截”】（见参数 重试次数/重试间隔）：按 H 后面板还没刷新出来时，"
+                      "它会小步重截+重匹配，一识别到立即返回——所以【不需要】在它前面再放固定延时节点。"),
         data_out("ok", DataType.BOOL, label="成功",
-                 help="是否成功识别到 TC（还没建 TC / 没选中 / 被遮挡时为否）。"),
+                 help="是否成功识别到 TC（重试若干次仍没识别到 / 还没建 TC / 被遮挡 时为否）。"),
     ]
     params = [
         ParamSpec("icon_region", "多TC检测区域", "region", default=[444, 1212, 492, 1259],
@@ -137,6 +140,12 @@ class TcCount(DataNode):
         ParamSpec("threshold", "匹配阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01),
         ParamSpec("crop_size", "数字裁剪尺寸", "int", default=20, minimum=4, maximum=64),
         ParamSpec("early_exit", "提前退出阈值", "float", default=0.95, minimum=0.0, maximum=1.0, step=0.01),
+        ParamSpec("retry_max", "重试次数", "int", default=8, minimum=0, maximum=30,
+                  help="按“选所有TC键”后若没立刻识别到 TC 面板（UI 还在刷新），最多再重截+重匹配这么多次；"
+                       "一旦识别到就立即返回，UI 快时几乎零等待。设 0=不重试（回到一次性检测）。"),
+        ParamSpec("retry_interval", "重试间隔(秒)", "float", default=0.02, minimum=0.0, maximum=0.5, step=0.01,
+                  help="每次重试之间等待多久（默认 0.02 秒）。越小越快越费 CPU；UI 刷新慢可调大。"
+                       "最坏耗时 ≈ 重试次数 × 本间隔，仅在迟迟没识别到时才会用满。"),
     ]
 
     _crop_cache: dict = {}
@@ -153,29 +162,26 @@ class TcCount(DataNode):
         self._crop_cache[key] = crop
         return crop
 
-    def evaluate(self, ctx, inputs):
-        thr = self.values["threshold"]
-
+    def _detect_once(self, ctx, thr, fresh):
+        """单次检测当前 TC 数量。fresh=True 时绕过本帧截图缓存、重新截屏（供重试用）。
+        返回 (结果dict, 路径文字)。"""
         # 1) 单TC预检测
         single_tmpl = _imaging.load_gray(self.values["single_template"])
         if single_tmpl is not None:
-            sg = _imaging.to_gray(ctx.capture_region(self.values["single_region"]))
+            sg = _imaging.to_gray(ctx.capture_region(self.values["single_region"], fresh=fresh))
             if _imaging.best_match(sg, single_tmpl) >= thr:
-                self.live = {"count": 1, "path": "单TC"}
-                return {"count": 1, "ok": True}
+                return {"count": 1, "ok": True}, "单TC"
 
         # 2) 多TC：阶段1 判断是否有 TC 图标
         numbered = self.values["numbered_templates"] or []
-        icon_gray = _imaging.to_gray(ctx.capture_region(self.values["icon_region"]))
+        icon_gray = _imaging.to_gray(ctx.capture_region(self.values["icon_region"], fresh=fresh))
         if not numbered or _imaging.best_match(icon_gray, _imaging.load_gray(numbered[0])) < thr:
-            self.live = {"count": 0, "path": "未检测到TC"}
-            return {"count": 0, "ok": False}
+            return {"count": 0, "ok": False}, "未检测到TC"
 
         # 3) 阶段2：左上角精确匹配数字
         size = self.values["crop_size"]
         if icon_gray.shape[0] < size or icon_gray.shape[1] < size:
-            self.live = {"count": 1, "path": "区域过小"}
-            return {"count": 1, "ok": True}
+            return {"count": 1, "ok": True}, "区域过小"
         crop = icon_gray[0:size, 0:size]
         best_n, best_c = 1, 0.0
         for i, path in enumerate(numbered, start=1):
@@ -190,8 +196,26 @@ class TcCount(DataNode):
                 if mv >= self.values["early_exit"]:
                     break
         count = 1 + best_n
-        self.live = {"count": count, "path": f"多TC(n={best_n})"}
-        return {"count": count, "ok": True}
+        return {"count": count, "ok": True}, f"多TC(n={best_n})"
+
+    def evaluate(self, ctx, inputs):
+        thr = self.values["threshold"]
+
+        # 首次检测用本帧缓存（与同帧其它读取共享）；没识别到——多半是按 H 后 TC 面板还没刷新出来——
+        # 就小步重试：等一小会、强制重截(fresh)、重匹配，直到识别到或用尽重试次数。识别到立即返回。
+        out, path = self._detect_once(ctx, thr, fresh=False)
+        tries = 1
+        if not ctx.dry_run:   # 干跑(无游戏)不重试，避免 selfcheck 空等
+            retry_max = int(self.values.get("retry_max", 0) or 0)
+            interval = float(self.values.get("retry_interval", 0.0) or 0.0)
+            while not out["ok"] and tries <= retry_max:
+                if interval > 0:
+                    time.sleep(interval)
+                out, path = self._detect_once(ctx, thr, fresh=True)
+                tries += 1
+
+        self.live = {"count": out["count"], "path": path, "tries": tries}
+        return out
 
 
 # ==================== 产能计算 ====================

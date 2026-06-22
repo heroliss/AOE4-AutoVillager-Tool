@@ -94,9 +94,8 @@ def build_single_type(cfg: dict) -> Graph:
     use_count = cfg.get("building") is not None
     if use_count:
         b = cfg["building"]
-        add("wait_tc", "control.delay", {"seconds": 0.05})   # ⚠按选所有TC键后等游戏UI刷新出TC面板，再数TC（否则面板没出来→数到0）
-        g.notes["wait_tc"] = ("按“选所有TC键”后等一小会（默认0.05秒）让游戏UI刷新出TC面板，再去数TC——"
-                              "否则面板还没出来就数，会数到0、当帧不生产。凡“按键/点击后紧接着做图像识别”都应留这种刷新等待。")
+        # 不再放固定延时：「多TC计数」节点已内置“按键后自动重试重截”——按 H 后 TC 面板还没刷新出来时
+        # 它会小步重截+重匹配、一识别到就立即返回（自适应，比固定 0.05 秒更快也更稳）。
         add("tc", "game.tc_count",
             {"icon_region": b["icon_region"], "single_region": b["single_region"],
              "single_template": b["single_template"], "numbered_templates": b["numbered_templates"]})
@@ -130,8 +129,8 @@ def build_single_type(cfg: dict) -> Graph:
     g.connect_exec("save_sel", "out", "relmod1", "in")
     g.connect_exec("relmod1", "out", "select_b", "in")
     if use_count:
-        g.connect_exec("select_b", "out", "wait_tc", "in")   # 按选所有TC键 -> 等UI刷新 -> 数TC
-        g.connect_exec("wait_tc", "out", "if_tcok", "in")
+        # 按选所有TC键 -> 直接数TC（计数节点内置“按键后自动重试重截”，无需固定延时）
+        g.connect_exec("select_b", "out", "if_tcok", "in")
         g.connect_exec("if_tcok", "true", "queue", "in")
     else:
         g.connect_exec("select_b", "out", "queue", "in")
