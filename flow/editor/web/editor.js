@@ -382,7 +382,7 @@ const ED = (function () {
     }
   }
 
-  // 「关闭开关」节点的“目标开关”：用户不知道节点 id，所以给个下拉，列出图里所有开关——
+  // 「设置开关」节点的“目标开关”：用户不知道节点 id，所以给个下拉，列出图里所有开关——
   // 有面板显示名(如「出商人(市场)」)就显示名、否则显示 id；存的值这两种都能被引擎解析(按名或按id)。
   function switchLabel(n) { return pinLabels[n._id + "|on"] || n._id; }
   function switchTargetOptions() {
@@ -397,7 +397,7 @@ const ED = (function () {
     if (!node.properties) node.properties = {};
     const cb = (v) => { if (!node.properties) node.properties = {}; node.properties[p.key] = v; scheduleSnap(); };
     let w;
-    if ((def && def.type) === "control.disable_switch" && p.key === "target")
+    if ((def && def.type) === "control.set_switch" && p.key === "target")
       // 目标开关：图感知的下拉（值随当前图里的开关动态生成），免去手填节点 id
       w = node.addWidget("combo", p.label, p.default == null ? "" : String(p.default), cb, { values: switchTargetOptions });
     else if (p.ptype === "int")
@@ -2270,10 +2270,11 @@ const ED = (function () {
     scheduleSnap(); refreshDirty();
   }
   function restoreLabel(id, key, name) { setPinLabel(id, key, name); }   // 空=清除显示名（回落默认）
-  // 运行中节点自动改写了别的参数（如「关闭开关」把某开关关掉）：回写到编辑器里的对应控件，
+  // 运行中节点自动改写了别的参数（如「设置开关」把某开关设为开/关）：回写到编辑器里的对应控件，
   // 让界面也显示成新值、并记为一处可保存/可恢复的改动。按 (节点|参数) 去重，避免每帧重复套用。
   let _appliedPW = {};
   function applyRunParamWrites(pw) {
+    let any = false;
     for (const nid in pw) {
       const kv = pw[nid] || {};
       for (const key in kv) {
@@ -2282,9 +2283,11 @@ const ED = (function () {
         const n = nodeByOurId(nid); if (!n) continue;
         _appliedPW[sig] = val;
         restoreParam(nid, key, val);               // 复用：回写 widget+properties，记为改动(可在「查看修改」里恢复)
-        try { flashLocate(n, key); } catch (e) {}  // 高亮一下，提醒用户“这个开关被自动关了”
+        try { flashLocate(n, key); } catch (e) {}  // 高亮一下，提醒用户“这个开关被自动改了”
+        any = true;
       }
     }
+    if (any) renderPanel();                          // 同步刷新控制面板控件（restoreParam 不刷面板）——否则面板勾选不跟着变
   }
   // —— 结构性改动的单条恢复（位置移动 / 节点增删 / 连线增删）——
   function _afterEdit() { if (canvas) canvas.setDirty(true, true); scheduleSnap(); refreshDirty(); }
@@ -3236,7 +3239,7 @@ const ED = (function () {
       runTimes = t.times || (profileOn ? runTimes : {});   // 仅在“性能监控”开启时引擎才附带耗时
       if (t.previews) runPreviews = t.previews;             // 截图预览：各感知节点截到的区域图(base64)
       else if (!previewOn) runPreviews = {};
-      if (t.param_writes && realRun) applyRunParamWrites(t.param_writes);   // 仅正式运行才把自动改写(如关开关)落到编辑器；试运行不动用户配置
+      if (t.param_writes) applyRunParamWrites(t.param_writes);   // 把运行时自动改写(如设开关)落到编辑器控件+面板(试运行同样反映，便于调试；记为可恢复的改动)
       _lastTick = t.tick;
     }
     const ts = nowHMS();

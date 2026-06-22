@@ -54,6 +54,19 @@ BUILTIN_FLOWS_DIR = os.path.abspath("flows")
 USER_FLOWS_DIR = os.path.abspath("user_flows")
 # 截模板的保存目录（与内置模板同目录，节点里按相对路径 templates/xxx.png 读取）。
 TEMPLATES_DIR = os.path.abspath("templates")
+
+
+def _to_rel_path(path):
+    """文件在工程目录内时转成相对路径(正斜杠，如 templates/xxx.png)，便于跨机器/打包；
+    工程目录之外则原样保留绝对路径。"""
+    if not path:
+        return path
+    try:
+        base = os.path.dirname(TEMPLATES_DIR)   # 工程根 = templates 的上级目录
+        rel = os.path.relpath(os.path.abspath(path), base)
+        return path if rel.startswith("..") else rel.replace("\\", "/")
+    except Exception:
+        return path
 # 记住上次打开的流程，下次启动自动载入（让编辑器更像“成品工具”：开机即用）。
 # 会话状态存到 %APPDATA%（见 user_settings），不再放程序目录——避免污染仓库 / 重装丢失 / 权限问题。
 import user_settings
@@ -803,7 +816,8 @@ class Api:
             file_types=("图片 (*.png;*.jpg;*.jpeg;*.bmp;*.gif)",))
         if not res:
             return []
-        return list(res) if isinstance(res, (list, tuple)) else [res]
+        paths = list(res) if isinstance(res, (list, tuple)) else [res]
+        return [_to_rel_path(p) for p in paths]   # 工程内的图片转相对路径(templates/xxx.png)，跨机可用
 
     def image_data_url(self, path):
         """把模板图片读成 data URL（base64），供前端在节点上画缩略图预览。

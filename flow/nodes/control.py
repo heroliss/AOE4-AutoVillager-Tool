@@ -179,30 +179,33 @@ class Delay(ControlNode):
 
 
 @register
-class DisableSwitch(ControlNode):
-    """关闭开关：把【另一个开关(布尔)节点】自动置为「关」，并提示一条日志。总是放行执行流。
+class SetSwitch(ControlNode):
+    """设置开关：运行时把【另一个开关(布尔)节点】设成「开」或「关」，并提示一条日志。总是放行执行流。
 
-    典型用法：识别到“前提不成立”就自动停掉对应生产——例如按 J 选市场后没数到市场，
-    就关掉「出商人」开关；下一帧门控即不再进入商人段（也不再反复按 J 骚扰玩家）。
-    被关掉的开关在编辑器里会真的显示成「关」，可保存为永久。
+    典型用法：识别到某情况就自动开/关对应生产——例如按 J 选市场后没数到市场，就把「出商人」设为「关」；
+    下一帧门控即不再进入商人段（也不再反复按 J 骚扰）。被改的开关在编辑器/控制面板里会真的跟着变，可保存为永久。
 
-    用法：把它接在某判断的“否定”路径上（无条件关）；或接一个「保持开启?」条件（为真才保持、为假才关）。"""
-    type_id = "control.disable_switch"
+    用法：① 接在某判断的某条路径上（无条件设置）；② 或接一个「条件」——为真才设置、为假则不动。
+    要“仅在前提不成立时关掉”，把「选中建筑计数·成功」取「非」后接到「条件」、并把「设为」设成「关」。"""
+    type_id = "control.set_switch"
+    aliases = ("control.disable_switch",)   # 旧名「关闭开关」，兼容已保存的流程
     category = "控制"
-    title = "关闭开关"
+    title = "设置开关"
     inputs = [
         exec_in("in"),
-        data_in("keep_on", DataType.BOOL, label="保持开启?",
-                help="连入一个条件：为真→保持目标开关不动；为假或不接→把它关掉。"
-                     "例：接「选中建筑计数·成功」——有市场就保持，没市场就自动关闭「出商人」。"),
+        data_in("condition", DataType.BOOL, label="条件",
+                help="可选。为真→执行设置；为假→不动。不接=每次执行到都设置。"
+                     "（要‘没市场才关’：把「选中建筑计数·成功」取「非」后接这里，「设为」选「关」。）"),
     ]
     outputs = [exec_out("out")]
     params = [
         ParamSpec("target", "目标开关", "str", default="",
-                  help="要关闭哪个开关。编辑器里这是个下拉框，直接从图中所有「开关(布尔)」里选即可"
+                  help="要设置哪个开关。编辑器里这是个下拉框，直接从图中所有「开关(布尔)」里选即可"
                        "（有面板显示名就显示名、否则显示节点 id），不必记节点 id。"),
+        ParamSpec("value", "设为", "bool", default=False,
+                  help="触发时把目标开关设成这个值：开 / 关。"),
         ParamSpec("reason", "原因(提示语)", "str", default="",
-                  help="关闭时在日志里说明原因，如「未检测到市场」。"),
+                  help="设置时在日志里说明原因，如「未检测到市场」。"),
     ]
 
     def _resolve_target(self, g) -> Optional[str]:
@@ -232,17 +235,19 @@ class DisableSwitch(ControlNode):
         return getattr(node, "title", None) or node_id
 
     def execute(self, ctx, inputs):
-        if inputs.get("keep_on"):
-            return {}, "out"           # 条件成立(如有市场) → 保持开启、什么都不做
+        cond = inputs.get("condition")
+        if cond is not None and not cond:
+            return {}, "out"           # 有条件且为假 → 不设置
         g = ctx.graph
         node_id = self._resolve_target(g) if g is not None else None
         if node_id is None:
             return {}, "out"           # 目标找不到(干跑无图/拼错 id)：安静放行
         node = g.nodes.get(node_id)
-        if node is None or not bool(node.values.get("on", True)):
-            return {}, "out"           # 已经是关的：不重复关、不重复提示
-        ctx.write_param(node_id, "on", False)
+        val = bool(self.values.get("value", False))
+        if node is None or bool(node.values.get("on", not val)) == val:
+            return {}, "out"           # 已是目标值：不重复设、不重复提示（缺省按“尚未到目标值”处理→会设一次）
+        ctx.write_param(node_id, "on", val)
         reason = (self.values.get("reason") or "").strip()
-        msg = f"已自动关闭开关「{self._label_of(g, node_id)}」" + (f"（{reason}）" if reason else "")
+        msg = f"已把开关「{self._label_of(g, node_id)}」设为「{'开' if val else '关'}」" + (f"（{reason}）" if reason else "")
         ctx.log("WARN", msg, node_id)
         return {}, "out"

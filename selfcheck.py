@@ -183,13 +183,13 @@ def main() -> None:
     ok &= check("队列已有村民则不再出村民", not any("按键 q x3" in m for m in logs))
     ok &= check("但商人段仍正常(选市场J)", any("按键 j" in m for m in logs))
 
-    print("== 统一生产：只开商人但没有市场 -> 自动关闭出商人开关并提示 ==")
+    print("== 统一生产：只开商人但没有市场 -> 自动把出商人开关设为关并提示 ==")
     logs, _ = run_with_stubs(build_combined_graph,
                              {**COMBINED, "sw_vill": {"value": False}, "sw_xq": {"value": False},
                               "sw_cart": {"value": True}, "market": {"count": 0, "ok": False}})
     ok &= check("没市场仍按J确认了一次", any("按键 j" in m for m in logs))
     ok &= check("没市场则不排商人(产量0、不按键)", not any("按键 q" in m for m in logs))
-    ok &= check("没市场自动关闭出商人开关并提示", any("自动关闭" in m for m in logs))
+    ok &= check("没市场自动把出商人设为关并提示", any("设为「关」" in m for m in logs))
 
     print("== 统一生产：食物不足(买不起1个) -> 跳过整个操作区(不抢锁/不按H/不排队) ==")
     logs, ctx = run_with_stubs(build_combined_graph,

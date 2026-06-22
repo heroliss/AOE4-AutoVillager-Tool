@@ -160,7 +160,8 @@
         "if_qcart",
         "sel_market",
         "market",
-        "disable_cart",
+        "not_mkt",
+        "set_cart",
         "c_per_cart",
         "plan_cart",
         "prod_cart",
@@ -415,7 +416,7 @@
       "type": "sense.ocr_number",
       "pos": [
         6049.5,
-        1134.0
+        1154.0
       ],
       "params": {
         "region": [
@@ -1111,24 +1112,35 @@
       "note": "数当前有几个市场（与城镇中心计数同套算法）。没数到市场→「成功」=否、「数量」=0：用它驱动『没市场就自动关掉出商人开关』，并把“每市场×市场数”作为商人计划数。"
     },
     {
-      "id": "disable_cart",
-      "type": "control.disable_switch",
+      "id": "not_mkt",
+      "type": "logic.not",
+      "pos": [
+        10111.0,
+        392.0
+      ],
+      "params": {},
+      "note": "「非」：把「数市场·成功」取反 = “没有市场”。接给「设置开关」的条件。"
+    },
+    {
+      "id": "set_cart",
+      "type": "control.set_switch",
       "pos": [
         10403.0,
         40.0
       ],
       "params": {
         "target": "sw_cart",
+        "value": false,
         "reason": "未检测到市场"
       },
-      "note": "关闭开关：接「数市场·成功」——有市场就保持；按 J 后【没数到市场】就自动把「出商人」开关置为关并在日志提示（下一帧门控即跳过商人段、不再反复按 J）。开关在编辑器里会真的显示成关，可保存。"
+      "note": "设置开关：条件接「没有市场」、设为「关」——按 J 后没数到市场就把「出商人」开关设为关并在日志提示（下一帧门控即跳过商人段、不再反复按 J）。开关在编辑器/面板里会真的跟着变成关，可保存。"
     },
     {
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
         9706.0,
-        1050.0
+        1070.0
       ],
       "params": {
         "value": 2
@@ -1140,7 +1152,7 @@
       "type": "math.arith",
       "pos": [
         10067.5,
-        392.0
+        588.0
       ],
       "params": {
         "op": "*"
@@ -1152,7 +1164,7 @@
       "type": "game.produce_count",
       "pos": [
         10403.5,
-        336.0
+        360.0
       ],
       "params": {
         "food_cost": 0.0,
@@ -1511,11 +1523,11 @@
     [
       "sel_market",
       "out",
-      "disable_cart",
+      "set_cart",
       "in"
     ],
     [
-      "disable_cart",
+      "set_cart",
       "out",
       "queue_cart",
       "in"
@@ -1765,8 +1777,14 @@
     [
       "market",
       "ok",
-      "disable_cart",
-      "keep_on"
+      "not_mkt",
+      "a"
+    ],
+    [
+      "not_mkt",
+      "result",
+      "set_cart",
+      "condition"
     ],
     [
       "c_per_cart",

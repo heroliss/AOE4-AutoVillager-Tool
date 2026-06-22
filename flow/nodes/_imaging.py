@@ -76,33 +76,33 @@ def resize_to(tmpl_gray, width: int, height: int):
     return cv2.resize(tmpl_gray, (width, height))
 
 
-def encode_preview_stack(items, max_dim: int = 220) -> str:
-    """把多块 (ASCII标签, BGR/灰度图) 竖直拼成一张预览图（每块顶部标小标签），编码为 base64 PNG。
-    用于「选中建筑计数」同时预览“单建筑预检测区域”和“数量图标区域”——一眼看出哪个区域没对准。失败返回空串。"""
+def encode_preview_stack(items, max_dim: int = 200) -> str:
+    """把多块 (ASCII标签, BGR/灰度图) 【左右并排】拼成一张预览图（每块顶部标小标签），编码为 base64 PNG。
+    用于「选中建筑计数」同时预览“单建筑预检测区域”和“数量图标区域”+各自置信度——一眼看出哪块没对准/分数多低。失败返回空串。"""
     try:
         import cv2
         import base64
         import numpy as np
         tiles = []
-        width = 0
+        height = 0
         for tag, im in items:
             if im is None:
                 continue
             g = im if im.ndim == 3 else cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)
             h, w = g.shape[:2]
-            if w > max_dim and w > 0:
-                s = max_dim / float(w)
-                g = cv2.resize(g, (max_dim, max(1, int(h * s))), interpolation=cv2.INTER_AREA)
-            g = cv2.copyMakeBorder(g, 14, 4, 2, 2, cv2.BORDER_CONSTANT, value=(20, 22, 28))
+            if h > max_dim and h > 0:
+                s = max_dim / float(h)
+                g = cv2.resize(g, (max(1, int(w * s)), max_dim), interpolation=cv2.INTER_AREA)
+            g = cv2.copyMakeBorder(g, 14, 2, 2, 6, cv2.BORDER_CONSTANT, value=(20, 22, 28))
             cv2.putText(g, str(tag), (3, 11), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (180, 210, 255), 1, cv2.LINE_AA)
             tiles.append(g)
-            width = max(width, g.shape[1])
+            height = max(height, g.shape[0])
         if not tiles:
             return ""
-        tiles = [t if t.shape[1] == width else
-                 cv2.copyMakeBorder(t, 0, 0, 0, width - t.shape[1], cv2.BORDER_CONSTANT, value=(20, 22, 28))
+        tiles = [t if t.shape[0] == height else
+                 cv2.copyMakeBorder(t, 0, height - t.shape[0], 0, 0, cv2.BORDER_CONSTANT, value=(20, 22, 28))
                  for t in tiles]
-        ok, buf = cv2.imencode(".png", np.vstack(tiles))
+        ok, buf = cv2.imencode(".png", np.hstack(tiles))
         return base64.b64encode(buf.tobytes()).decode("ascii") if ok else ""
     except Exception:
         return ""

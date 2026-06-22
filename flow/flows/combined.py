@@ -155,8 +155,9 @@ def build_combined_graph() -> Graph:
     add("if_qcart", "control.if")
     add("sel_market", "action.press_key", {"key": "j"})     # 选中所有市场（默认绑定 J）
     add("market", "game.building_count", MARKET)            # 数市场（与 TC 同套算法）：没市场→ok=False、count=0
-    add("disable_cart", "control.disable_switch",           # 没市场就自动关掉「出商人」开关并提示
-        {"target": "sw_cart", "reason": "未检测到市场"})
+    add("not_mkt", "logic.not")                             # 「没有市场」= 非(市场·成功)
+    add("set_cart", "control.set_switch",                   # 没市场就把「出商人」开关设为「关」并提示
+        {"target": "sw_cart", "value": False, "reason": "未检测到市场"})
     add("c_per_cart", "data.const_number", {"value": 2})
     add("plan_cart", "math.arith", {"op": "*"})
     add("prod_cart", "game.produce_count", {"cost_per_unit": 60, "cap": -1})   # 成本由 c_cost_cart 喂入(下方连线)，此为兜底
@@ -208,7 +209,7 @@ def build_combined_graph() -> Graph:
          "members": ["sw_xq", "if_sw_xq", "q_xq", "if_qxq", "sel_tc_x",
                      "c_per_x", "plan_x", "prod_x", "queue_x"]},
         {"title": "商人段（市场）", "color": "#a5793a",
-         "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market", "market", "disable_cart",
+         "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market", "market", "not_mkt", "set_cart",
                      "c_per_cart", "plan_cart", "prod_cart", "queue_cart"]},
         {"title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#7a6a4a",
          "members": ["c_zero", "pre_sw_vill", "pre_q_vill",
@@ -293,8 +294,9 @@ def build_combined_graph() -> Graph:
                       "下游「数市场」节点会在面板刷新出来前自动重试重截。",
         "market": "数当前有几个市场（与城镇中心计数同套算法）。没数到市场→「成功」=否、「数量」=0："
                   "用它驱动『没市场就自动关掉出商人开关』，并把“每市场×市场数”作为商人计划数。",
-        "disable_cart": "关闭开关：接「数市场·成功」——有市场就保持；按 J 后【没数到市场】就自动把「出商人」开关置为关"
-                        "并在日志提示（下一帧门控即跳过商人段、不再反复按 J）。开关在编辑器里会真的显示成关，可保存。",
+        "not_mkt": "「非」：把「数市场·成功」取反 = “没有市场”。接给「设置开关」的条件。",
+        "set_cart": "设置开关：条件接「没有市场」、设为「关」——按 J 后没数到市场就把「出商人」开关设为关并在日志提示"
+                    "（下一帧门控即跳过商人段、不再反复按 J）。开关在编辑器/面板里会真的跟着变成关，可保存。",
         "c_per_cart": "每个市场一次排几个商人。",
         "plan_cart": "计划数 = 每市场数量 × 市场个数（来自「数市场」；没市场则=0，自然不排）。",
         "prod_cart": "实际产量 = min(计划, 剩余人口空位, 剩余黄金÷单价[, 木头÷木头单价])。空位/黄金均来自乡骑段结转——所以即使村民/乡骑同帧在产，商人仍按“真正剩下的”池子独立生产。木头默认不限制(成本0)。",
@@ -365,8 +367,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_sw_cart", "false", "restore", "in")
     g.connect_exec("if_qcart", "false", "sel_market", "in")
     g.connect_exec("if_qcart", "true", "restore", "in")
-    g.connect_exec("sel_market", "out", "disable_cart", "in")   # 按J后先判市场：没有就关掉「出商人」开关
-    g.connect_exec("disable_cart", "out", "queue_cart", "in")   # 再排队（没市场则产量0、press_key自然不按）
+    g.connect_exec("sel_market", "out", "set_cart", "in")       # 按J后先判市场：没有就把「出商人」开关设为关
+    g.connect_exec("set_cart", "out", "queue_cart", "in")       # 再排队（没市场则产量0、press_key自然不按）
     g.connect_exec("queue_cart", "out", "restore", "in")
 
     # 收尾
@@ -429,7 +431,8 @@ def build_combined_graph() -> Graph:
     # 商人段数据（市场数由「数市场」实测；空位与黄金从乡骑段结转；可选再吃木头）
     g.connect_data("sw_cart", "value", "if_sw_cart", "cond")
     g.connect_data("q_cart", "found", "if_qcart", "cond")
-    g.connect_data("market", "ok", "disable_cart", "keep_on")    # 有市场→保持开启；没市场→关掉「出商人」
+    g.connect_data("market", "ok", "not_mkt", "a")              # 没有市场 = 非(市场·成功)
+    g.connect_data("not_mkt", "result", "set_cart", "condition")   # 没市场→条件为真→把「出商人」设为关
     g.connect_data("c_per_cart", "value", "plan_cart", "a")
     g.connect_data("market", "count", "plan_cart", "b")          # 计划=每市场数×市场个数（没市场=0）
     g.connect_data("plan_cart", "value", "prod_cart", "planned")

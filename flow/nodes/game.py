@@ -134,6 +134,9 @@ class BuildingCount(DataNode):
         data_out("ok", DataType.BOOL, label="成功",
                  help="是否成功识别到该建筑（重试若干次仍没识别到 / 还没建该建筑 / 被遮挡 时为否）。"
                       "可直接接到“出兵段”的开关上：识别不到（如没有市场）就不进该段。"),
+        data_out("conf", DataType.NUMBER, label="置信度", advanced=True,
+                 help="本次“决定结果的那一档”的模板匹配分数(0~1)，用于调试/调参：没数到时看它有多接近“匹配阈值”，"
+                      "据此决定是把阈值调低还是重截模板。开「🖼预览」还能看到 single/count 两块各自的分数。"),
     ]
     params = [
         ParamSpec("building_name", "建筑名称", "str", default="城镇中心",
@@ -171,22 +174,35 @@ class BuildingCount(DataNode):
         self._crop_cache[key] = crop
         return crop
 
+    @staticmethod
+    def _f(v):
+        return "—" if v is None else f"{v:.2f}"
+
     def _detect_once(self, ctx, thr, fresh):
         """单次检测当前选中建筑数量。fresh=True 时绕过本帧截图缓存、重新截屏（供重试用）。
-        返回 (结果dict, 路径文字)。"""
+        返回 (结果dict, 路径文字)。顺带把各阶段匹配置信度记到 self._dbg，供预览/调试显示。"""
         name = self.values.get("building_name") or "建筑"
+        dbg = {"single": None, "icon": None, "digit": None, "decided": 0.0, "thr": thr}
+        self._dbg = dbg
         # 1) 单个预检测
         single_tmpl = _imaging.load_gray(self.values["single_template"])
         if single_tmpl is not None:
             sg = _imaging.to_gray(ctx.capture_region(self.values["single_region"], fresh=fresh))
-            if _imaging.best_match(sg, single_tmpl) >= thr:
-                return {"count": 1, "ok": True}, f"单{name}"
+            ss = _imaging.best_match(sg, single_tmpl)
+            dbg["single"] = ss
+            if ss >= thr:
+                dbg["decided"] = ss
+                return {"count": 1, "ok": True}, f"单{name}(single {ss:.2f}≥{thr:.2f})"
 
         # 2) 多个：阶段1 判断是否有数量图标
         numbered = self.values["numbered_templates"] or []
         icon_gray = _imaging.to_gray(ctx.capture_region(self.values["icon_region"], fresh=fresh))
-        if not numbered or _imaging.best_match(icon_gray, _imaging.load_gray(numbered[0])) < thr:
-            return {"count": 0, "ok": False}, f"未检测到{name}"
+        c0 = _imaging.best_match(icon_gray, _imaging.load_gray(numbered[0])) if numbered else 0.0
+        dbg["icon"] = c0
+        if not numbered or c0 < thr:
+            dbg["decided"] = max(dbg["single"] or 0.0, c0)
+            return ({"count": 0, "ok": False},
+                    f"未检测到{name}(single {self._f(dbg['single'])} / count {self._f(c0)} 均 < {thr:.2f})")
 
         # 3) 阶段2：左上角精确匹配数字
         size = self.values["crop_size"]
@@ -205,8 +221,10 @@ class BuildingCount(DataNode):
                 best_c, best_n = mv, i
                 if mv >= self.values["early_exit"]:
                     break
+        dbg["digit"] = best_c
+        dbg["decided"] = best_c
         count = 1 + best_n
-        return {"count": count, "ok": True}, f"{name}×{count}"
+        return {"count": count, "ok": True}, f"{name}×{count}(digit {best_c:.2f})"
 
     def evaluate(self, ctx, inputs):
         thr = self.values["threshold"]
@@ -224,15 +242,18 @@ class BuildingCount(DataNode):
                 out, path = self._detect_once(ctx, thr, fresh=True)
                 tries += 1
 
-        self.live = {"count": out["count"], "path": path, "tries": tries}
+        dbg = getattr(self, "_dbg", {}) or {}
+        out["conf"] = round(float(dbg.get("decided") or 0.0), 3)   # 暴露“决定本次结果的那一档”置信度，便于调参/排查
+        self.live = {"count": out["count"], "path": path, "tries": tries,
+                     "single": dbg.get("single"), "count_conf": dbg.get("icon"), "digit": dbg.get("digit")}
         if ctx.preview_enabled:
-            # 同时预览“单建筑预检测区域(single 1x)”和“数量图标区域(count Nx)”——这两块各自独立，
-            # 单建筑没数到时(如只有1个市场却 count=0)，多半是上面这块 single 区域没对准，一眼可查。
+            # 左右并排预览“单建筑预检测区域(single)”和“数量图标区域(count)”+各自置信度——这两块各自独立，
+            # 单建筑没数到时(如只有1个市场却 count=0)，多半是 single 这块没对准、或分数没过阈值，一眼可查。
             items = []
             sr = self.values.get("single_region")
             if sr:
-                items.append(("single 1x", ctx.capture_region(sr)))
-            items.append(("count Nx", ctx.capture_region(self.values["icon_region"])))
+                items.append((f"single {self._f(dbg.get('single'))}", ctx.capture_region(sr)))
+            items.append((f"count {self._f(dbg.get('icon'))}", ctx.capture_region(self.values["icon_region"])))
             self.live["preview"] = _imaging.encode_preview_stack(items)
         return out
 
