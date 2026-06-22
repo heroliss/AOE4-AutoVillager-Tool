@@ -1836,11 +1836,17 @@ const ED = (function () {
           (c.restore ? "<button data-restore='" + i + "' style='" + RB + "' title='把这一条恢复到上次保存的值'>恢复</button>" : "") +
           "</div>").join("");
         listEl.querySelectorAll("[data-restore]").forEach((btn) => {
-          btn.onclick = () => { const c = diffChanges()[+btn.getAttribute("data-restore")]; if (c && c.restore) { try { c.restore(); } catch (e) {} } renderList(); };
+          btn.onclick = () => {
+            const c = diffChanges()[+btn.getAttribute("data-restore")];
+            _changeDlgRestoring = true;                              // 标记“本次改动来自弹窗内部”，别触发自动关闭
+            try { if (c && c.restore) c.restore(); } catch (e) {} finally { _changeDlgRestoring = false; }
+            renderList();                                            // 弹窗内的恢复仍就地刷新列表
+          };
         });
       }
       renderList();
-      const done = (v) => { box.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
+      const done = (v) => { _changeDlgClose = null; box.remove(); document.removeEventListener("keydown", onKey, true); resolve(v); };
+      if (opts.autoCloseOnEdit) _changeDlgClose = done;             // 仅“查看修改”窗：图上任何其它改动即自动关闭(免去实时刷新)
       box.querySelectorAll("[data-act]").forEach((btn) => { btn.onclick = () => done(btn.getAttribute("data-act")); });
       const def = box.querySelector("[data-act='" + opts.defaultAct + "']");
       setTimeout(() => { if (def) def.focus(); }, 0);
@@ -1882,9 +1888,10 @@ const ED = (function () {
   function viewChanges() {
     showChangeDialog({
       title: "当前修改（与上次保存相比）",
-      subtitle: "点每条右侧「恢复」可单独还原该项；关闭不影响其它改动。",
+      subtitle: "点每条右侧「恢复」可单独还原该项；在图上做任何其它改动会自动关闭本窗（避免列表过时）。",
       buttons: [{ act: "cancel", label: "关闭", style: _BTN_CANCEL }],
       defaultAct: "cancel",
+      autoCloseOnEdit: true,
     });
   }
   // 通用确认框（不带改动清单）：返回 Promise<bool>。danger=true 时“确定”按钮用红色。
@@ -4055,7 +4062,10 @@ const ED = (function () {
     renderPanel();   // 面板控件值与节点保持同步
     if (runSession) { try { api().run_update(collect()); } catch (e) {} }   // 试运行中：参数热更新到引擎
   }
-  function scheduleSnap() { clearTimeout(snapTimer); snapTimer = setTimeout(snapshotNow, 250); }
+  // “查看修改”窗：图上任何【外部】改动即自动关闭它（弹窗内的「恢复」例外，靠 _changeDlgRestoring 区分）。
+  let _changeDlgClose = null, _changeDlgRestoring = false;
+  function maybeCloseChangeDlgOnEdit() { if (_changeDlgClose && !_changeDlgRestoring) _changeDlgClose("cancel"); }
+  function scheduleSnap() { maybeCloseChangeDlgOnEdit(); clearTimeout(snapTimer); snapTimer = setTimeout(snapshotNow, 250); }
   function applySnapshot(s) {
     suppressSnap = true;
     const data = JSON.parse(s);
@@ -4304,6 +4314,7 @@ const ED = (function () {
       canvas.allow_searchbox = false;   // 关闭双击/Shift 弹出的搜索框（易误触；加节点统一走右键空白处"添加节点"）
       canvas.show_info = false;          // 隐藏左下角 T/I/N/V/FPS 调试信息（对普通用户无意义）
       canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
+      canvas.render_connection_arrows = true;    // 每条连线中段画一个方向箭头，一眼看出数据/执行的流向
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）/ 折叠态画“子图箱体”

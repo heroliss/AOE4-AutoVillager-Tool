@@ -30,12 +30,12 @@ TC = {
     "single_template": "templates/tc_single.png",
     "numbered_templates": [f"templates/tc_number_{i}.png" for i in range(1, 7)],
 }
-# 市场计数：与 TC 完全同一套算法/区域（选中后弹同样的数量面板）。模板文件名即实际数量：
+# 市场计数：与 TC 同一套算法（选中后弹同样的数量面板）。模板文件名即实际数量：
 #   market_single.png=1个，market_num_2..9.png=2..9个（按数量升序填入 numbered_templates，列表第N张=1+N个）。
-#   截图区域默认沿用 TC 的（用户确认位置一致）；若市场面板位置不同，用「🖼预览」核对后再调。
+#   数量图标区域为市场专属(用户实测 389,1210,437,1257)；单建筑预检测区域暂沿用 TC 的，若不准用「🖼预览」核对后再调。
 MARKET = {
     "building_name": "市场",
-    "icon_region": [444, 1212, 492, 1259],
+    "icon_region": [389, 1210, 437, 1257],
     "single_region": [300, 1140, 354, 1194],
     "single_template": "templates/market_single.png",
     "numbered_templates": [f"templates/market_num_{i}.png" for i in range(2, 10)],

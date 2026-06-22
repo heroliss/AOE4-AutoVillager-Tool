@@ -826,24 +826,27 @@ class Api:
 
     # ---------- 采集工具（框选/取点/吸色/截模板/捕获按键）----------
     def _capture(self, fn):
-        """统一外壳：采集前把编辑器让开（最小化→等游戏重绘→抓屏），采完再恢复。
+        """统一外壳：采集前把编辑器让开（隐藏→等游戏重绘→抓屏），采完再显示出来。
 
         采集覆盖层是 topmost 全屏窗，盖住一切；要点只是抓屏那一刻编辑器别挡着游戏。
         fn 在本（worker）线程内自建 Tk root 跑 mainloop，阻塞到覆盖层关闭再返回。
-        """
+
+        用 hide()/show() 而不是 minimize()/restore()：后者的 restore 会把窗口恢复成“普通”状态，
+        若采集前是【最大化】的，回来就缩小了（用户反馈）。hide/show 只切换可见性、不动窗口状态，
+        最大化/普通都原样保留。"""
         win = self._window
         try:
             if win:
                 try:
-                    win.minimize()
-                    time.sleep(0.35)  # 等最小化动画结束 + 游戏画面重绘出来再抓屏
+                    win.hide()
+                    time.sleep(0.35)  # 等编辑器隐藏 + 游戏画面重绘出来再抓屏
                 except Exception:
-                    pass  # 最小化失败也继续采集（最多是编辑器没让开，覆盖层仍置顶）
+                    pass  # 隐藏失败也继续采集（最多是编辑器没让开，覆盖层仍置顶）
             return fn()
         finally:
             try:
                 if win:
-                    win.restore()
+                    win.show()   # 原样显示出来（最大化状态保留）
             except Exception:
                 pass
 
