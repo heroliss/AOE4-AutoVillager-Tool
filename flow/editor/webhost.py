@@ -322,7 +322,9 @@ class Api:
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
         self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
-        self._overlay_bg_alpha = 150         # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透）
+        self._overlay_bg_alpha = 80          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透；以透明为主故默认偏淡）
+        self._overlay_rect = [0, 0, 200, 40] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
+        self._overlay_screen = [1920, 1080]  # 屏幕逻辑尺寸（拖拽钳制用）
 
     def get_defs(self):
         return node_defs()
@@ -536,7 +538,7 @@ class Api:
         if w is None:
             return
         native = getattr(w, "native", None)
-        tint = ((int(self._overlay_bg_alpha) & 0xFF) << 24) | 0x141A24   # 深蓝灰着色
+        tint = ((int(self._overlay_bg_alpha) & 0xFF) << 24) | 0x35435C   # 中性蓝灰着色（偏淡，不发黑）
         self._form_invoke(native, lambda: self._apply_acrylic(native, 4, tint))
 
     def toggle_overlay(self):
@@ -554,11 +556,14 @@ class Api:
         import webview
         page = os.path.join(WEB_DIR, "overlay.html")
         try:
-            scr = webview.screens[0]; sw = int(scr.width)
+            scr = webview.screens[0]; sw = int(scr.width); sh = int(scr.height)
         except Exception:
-            sw = 1920
-        eighth = sw // 8
-        kw = dict(width=sw - 2 * eighth, height=40, x=eighth, y=8, js_api=self,
+            sw, sh = 1920, 1080
+        self._overlay_screen = [sw, sh]
+        # 初始摆到左1/8处、贴顶；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)。
+        x0, y0, w0, h0 = sw // 8, 8, 360, 40
+        self._overlay_rect = [x0, y0, w0, h0]
+        kw = dict(width=w0, height=h0, x=x0, y=y0, js_api=self,
                   on_top=True, frameless=True, easy_drag=False, transparent=True,
                   background_color="#0B0E14")
         try:
@@ -593,33 +598,72 @@ class Api:
         return True
 
     def overlay_data(self):
-        """覆盖层轮询：当前面板项(只读，编辑下一步做) + 运行态 + 弹信息(命中断点/自动改写开关)。"""
+        """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。
+        当前只显示开关(bool)项——即出村民/出乡骑/出商人三个开关；子集自选下一步做。"""
         g = self._run_graph or self._graph
         items = []
         if g is not None:
-            specs_cache = {}
             for row in getattr(g, "panel", []):
                 if len(row) < 2:
                     continue
                 nid, key = row[0], row[1]
-                label = row[2] if len(row) > 2 else key
                 node = g.nodes.get(nid)
                 if node is None:
                     continue
-                spec = specs_cache.get((nid, key))
-                if spec is None:
-                    spec = next((s for s in node.params if s.key == key), None)
-                    specs_cache[(nid, key)] = spec
-                ptype = spec.ptype if spec else "str"
-                items.append({"id": nid, "label": label,
-                              "value": _param_to_js_raw(spec, node.values.get(key)) if spec else node.values.get(key),
-                              "kind": ptype})
+                if node.type_id != "data.switch":   # 暂时只上生产开关(出村民/出乡骑/出商人)，排除 HDR 等其它布尔项
+                    continue
+                items.append({"id": nid, "label": (row[2] if len(row) > 2 else key),
+                              "value": bool(node.values.get(key)), "kind": "bool"})
         alive = bool(self._run_thread and self._run_thread.is_alive())
         with self._snap_lock:
             paused = alive and self._run_paused   # 没在跑时 _run_paused 恒为 True，别误报「已暂停」
             bp = self._bp_hit if alive else None
         return {"items": items, "running": alive and not paused, "paused": paused, "bp_hit": bp,
-                "bg_alpha": self._overlay_bg_alpha}
+                "bg_alpha": self._overlay_bg_alpha,
+                "rect": list(self._overlay_rect), "screen": list(self._overlay_screen)}
+
+    def overlay_resize(self, w, h):
+        """页面按内容测得宽高后调用：把窗口收成贴合内容的小窄条。位置保持(并保证不出屏右/下)。"""
+        win = self._overlay_window
+        if win is None:
+            return False
+        try:
+            w = max(80, min(int(w), int(self._overlay_screen[0])))
+            h = max(24, min(int(h), 200))
+        except Exception:
+            return False
+        x, y = self._overlay_rect[0], self._overlay_rect[1]
+        x = max(0, min(x, self._overlay_screen[0] - w))   # 收窄后若越界则拉回屏内
+        y = max(0, min(y, self._overlay_screen[1] - h))
+        self._overlay_rect = [x, y, w, h]
+        def _do():
+            try:
+                win.resize(w, h); win.move(x, y)
+            except Exception:
+                pass
+        self._form_invoke(getattr(win, "native", None), _do)
+        return True
+
+    def overlay_move(self, x, y):
+        """拖拽时调用：把窗口移到(x,y)，钳制在屏幕内（不允许任何部分移出屏幕）。"""
+        win = self._overlay_window
+        if win is None:
+            return False
+        try:
+            w, h = self._overlay_rect[2], self._overlay_rect[3]
+            sw, sh = self._overlay_screen
+            x = max(0, min(int(x), sw - w))
+            y = max(0, min(int(y), sh - h))
+        except Exception:
+            return False
+        self._overlay_rect[0] = x; self._overlay_rect[1] = y
+        def _do():
+            try:
+                win.move(x, y)
+            except Exception:
+                pass
+        self._form_invoke(getattr(win, "native", None), _do)
+        return True
 
     # ==================== 运行可视化（引擎在后台线程自行全速跑，前端只轮询）====================
     @staticmethod
