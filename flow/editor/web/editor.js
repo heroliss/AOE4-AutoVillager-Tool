@@ -2173,6 +2173,108 @@ const ED = (function () {
     selectedNode = node; showNodeHelp(node);   // 顺带展开右下角说明（在那里可取消显示）
     canvas.setDirty(true, true);
   }
+
+  // ==================== 图内文字搜索（Ctrl+F）====================
+  // 在节点图里按文字找：节点的 类型/参数值/参数名/自定义显示名/说明/内部id，以及分组名/描述；
+  // 点结果即调用 locateNode 选中并居中。图一大时不必肉眼翻找。
+  function searchableFields(n) {
+    const out = [];
+    const def = defByType[n._typeId];
+    out.push(["类型", (def && def.title) || n._typeId]);
+    if ((n._note || "").trim()) out.push(["说明", n._note]);
+    for (const key in (n.properties || {})) {
+      const v = n.properties[key];
+      out.push(["参数·" + paramLabelByType(n._typeId, key), String(v == null ? "" : v)]);
+      const cl = customLabel(n._id, key);
+      if (cl) out.push(["显示名", cl]);
+    }
+    out.push(["id", n._id]);
+    return out;
+  }
+  function searchGraph(q) {
+    q = (q || "").trim().toLowerCase();
+    if (!q) return [];
+    const res = [];
+    for (const n of (graph && graph._nodes) || []) {
+      for (const [fl, tx] of searchableFields(n)) {
+        if (String(tx).toLowerCase().includes(q)) { res.push({ node: n, field: fl, text: String(tx) }); break; }
+      }
+      if (res.length >= 300) break;
+    }
+    for (const g of groupDefs || []) {
+      const tx = ((g.title || "") + " " + (g.desc || "")).toLowerCase();
+      if (tx.includes(q)) res.push({ group: g, field: "分组", text: g.title || "分组" });
+    }
+    return res;
+  }
+  function locateResult(r) {
+    if (r.node) locateNode(r.node);
+    else if (r.group) { const m = nodeByOurId((r.group.members || [])[0]); if (m) locateNode(m); }
+  }
+  function _searchSnippet(text, q) {
+    text = String(text); q = (q || "").trim();
+    const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+    if (i < 0) return text.length > 60 ? text.slice(0, 60) + "…" : text;
+    const s = Math.max(0, i - 18), e = Math.min(text.length, i + q.length + 30);
+    return (s > 0 ? "…" : "") + text.slice(s, e) + (e < text.length ? "…" : "");
+  }
+  let _searchSel = 0;
+  function openSearch() {
+    const existing = document.getElementById("graphsearch");
+    if (existing) { const i = existing.querySelector("input"); if (i) { i.focus(); i.select(); } return; }
+    const box = document.createElement("div");
+    box.id = "graphsearch";
+    box.style.cssText = "position:absolute;left:50%;top:8px;transform:translateX(-50%);width:min(520px,92vw);" +
+      "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:10px 12px;z-index:210;" +
+      "box-shadow:0 8px 30px #000a;font:13px/1.5 'Microsoft YaHei',sans-serif;";
+    box.innerHTML =
+      "<div style='display:flex;align-items:center;gap:8px'>" +
+      "<span style='color:#e6c07b;white-space:nowrap'>🔍 图内搜索</span>" +
+      "<input type='text' placeholder='类型/参数/显示名/说明/id 或分组名…' " +
+      "style='flex:1;background:#15171c;color:#dfe;border:1px solid #444;border-radius:5px;height:26px;padding:0 8px;font-size:13px'>" +
+      "<span id='gs_cnt' style='color:#8fb6e0;white-space:nowrap'></span>" +
+      "<span id='gs_x' style='color:#9aa3af;cursor:pointer;padding:0 2px' title='关闭(Esc)'>✕</span></div>" +
+      "<div id='gs_res' style='margin-top:8px;max-height:50vh;overflow:auto'></div>";
+    document.getElementById("wrap").appendChild(box);
+    const input = box.querySelector("input");
+    const resBox = box.querySelector("#gs_res");
+    const cnt = box.querySelector("#gs_cnt");
+    let results = [];
+    const close = () => { box.remove(); document.removeEventListener("keydown", onDocKey, true); };
+    const scrollSel = () => { const el = resBox.querySelector(".gs-row[data-i='" + _searchSel + "']"); if (el) el.scrollIntoView({ block: "nearest" }); };
+    function render() {
+      results = searchGraph(input.value);
+      if (_searchSel >= results.length) _searchSel = Math.max(0, results.length - 1);
+      cnt.textContent = input.value.trim() ? ("找到 " + results.length) : "";
+      if (!input.value.trim()) { resBox.innerHTML = "<div style='color:#7f8895;padding:6px 2px'>输入文字开始搜索（实时）。↑↓ 选择 · Enter 定位 · Esc 关闭。</div>"; return; }
+      if (!results.length) { resBox.innerHTML = "<div style='color:#7f8895;padding:6px 2px'>没有匹配。</div>"; return; }
+      resBox.innerHTML = results.map((r, i) => {
+        const name = r.node ? ((defByType[r.node._typeId] && defByType[r.node._typeId].title) || r.node._typeId) : ("分组「" + (r.group.title || "") + "」");
+        const idtag = r.node ? ("<span style='color:#6c727c'> · " + esc(r.node._id) + "</span>") : "";
+        const sel = i === _searchSel ? "background:#2d3848;border-color:#3f5f88;" : "";
+        return "<div class='gs-row' data-i='" + i + "' style='" + sel + "padding:5px 8px;border:1px solid #2c323c;border-radius:6px;margin:3px 0;cursor:pointer'>" +
+          "<div style='color:#cdd6e2'>" + esc(name) + idtag + "</div>" +
+          "<div style='color:#8b929e;font-size:12px'>" + esc(r.field) + "：" + esc(_searchSnippet(r.text, input.value)) + "</div></div>";
+      }).join("");
+      resBox.querySelectorAll(".gs-row").forEach((row) => {
+        row.onclick = () => { _searchSel = +row.getAttribute("data-i"); locateResult(results[_searchSel]); render(); };
+      });
+    }
+    input.addEventListener("input", () => { _searchSel = 0; render(); });
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();   // 别触发画布快捷键（Ctrl+A/Delete…）
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); if (results.length) { _searchSel = (_searchSel + 1) % results.length; render(); scrollSel(); } }
+      else if (e.key === "ArrowUp") { e.preventDefault(); if (results.length) { _searchSel = (_searchSel - 1 + results.length) % results.length; render(); scrollSel(); } }
+      else if (e.key === "Enter") { e.preventDefault(); if (results[_searchSel]) locateResult(results[_searchSel]); }
+    });
+    box.querySelector("#gs_x").onclick = close;
+    const onDocKey = (e) => { if (e.key === "Escape") { close(); } };
+    document.addEventListener("keydown", onDocKey, true);
+    render();
+    setTimeout(() => input.focus(), 0);
+  }
+
   function setPanelValue(node, key, val) {
     const w = (node.widgets || []).find((x) => x._key === key);
     if (!w) return;
@@ -3110,6 +3212,7 @@ const ED = (function () {
       } catch (err) { showError("自动排版失败：" + (err.stack || err)); }
     },
     fit,
+    search: openSearch,
     help: toggleHelp,
   };
 
@@ -3700,7 +3803,7 @@ const ED = (function () {
       "· 单击参数输入框：直接编辑，<b>实时生效</b>（无需确认按钮）<br>" +
       "· 右键连线（线上任意处）：删除连线<br>" +
       "· <b>快捷键</b>：<b>Ctrl+S</b> 保存（弹改动详情预览）　<b>Ctrl+Shift+S</b> 另存为　<b>Ctrl+Z</b> 撤销　<b>Ctrl+Y</b> / <b>Ctrl+Shift+Z</b> 重做　<b>Ctrl+C</b> 复制　<b>Ctrl+V</b> 粘贴　" +
-      "<b>Ctrl+D</b> 再制（选中组则克隆整组）　<b>Ctrl+A</b> 全选节点　<b>Delete</b> 删除（选中组＝解散该组）<br>" +
+      "<b>Ctrl+D</b> 再制（选中组则克隆整组）　<b>Ctrl+A</b> 全选节点　<b>Ctrl+F</b> 图内搜索（找节点/分组并定位）　<b>Delete</b> 删除（选中组＝解散该组）<br>" +
       "<span style='color:#7f8895'>　复制/再制会连同选区内部连线、参数、说明、暴露设置一起带走；再制保留原分组归属，粘贴为自由节点。</span><br>" +
       "· 顶部按钮：自动排版（重新理顺布局）/ 适应窗口 / 保存（都会先弹「修改变化详情」窗口预览要保存的改动）/ <b>📁 定位</b>（在文件浏览器中显示当前流程文件）<br>" +
       "· 选中节点→右下角说明里勾选「显示到控制面板」，把常用开关/数值置顶到顶部面板，" +
@@ -4079,6 +4182,7 @@ const ED = (function () {
         if (k === "z" && !e.shiftKey) { take(); undo(); return; }
         if (k === "y" || (k === "z" && e.shiftKey)) { take(); redo(); return; }
         if (k === "s") { take(); if (e.shiftKey) self.saveAs(); else self.save(); return; }   // Ctrl+S 保存 / Ctrl+Shift+S 另存为
+        if (k === "f") { take(); openSearch(); return; }   // Ctrl+F 图内搜索（只读安全，使用模式也可用）
         if (simpleMode) return;   // 以下均为“改图”操作：只读（使用）模式不接管
         if (k === "c") {   // 选中了文字（如日志）→ 让系统复制文字；否则复制选中的节点
           const hasTextSel = !!(window.getSelection && String(window.getSelection() || ""));
