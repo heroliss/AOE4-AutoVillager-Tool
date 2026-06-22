@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 from ..core import ControlNode, DataNode, ParamSpec, DataType, exec_in, exec_out, data_in, data_out, register
 
@@ -174,4 +175,73 @@ class Delay(ControlNode):
         s = self.values["seconds"]
         if s > 0 and not ctx.dry_run:
             time.sleep(s)
+        return {}, "out"
+
+
+@register
+class DisableSwitch(ControlNode):
+    """关闭开关：把【另一个开关(布尔)节点】自动置为「关」，并提示一条日志。总是放行执行流。
+
+    典型用法：识别到“前提不成立”就自动停掉对应生产——例如按 J 选市场后没数到市场，
+    就关掉「出商人」开关；下一帧门控即不再进入商人段（也不再反复按 J 骚扰玩家）。
+    被关掉的开关在编辑器里会真的显示成「关」，可保存为永久。
+
+    用法：把它接在某判断的“否定”路径上（无条件关）；或接一个「保持开启?」条件（为真才保持、为假才关）。"""
+    type_id = "control.disable_switch"
+    category = "控制"
+    title = "关闭开关"
+    inputs = [
+        exec_in("in"),
+        data_in("keep_on", DataType.BOOL, label="保持开启?",
+                help="连入一个条件：为真→保持目标开关不动；为假或不接→把它关掉。"
+                     "例：接「选中建筑计数·成功」——有市场就保持，没市场就自动关闭「出商人」。"),
+    ]
+    outputs = [exec_out("out")]
+    params = [
+        ParamSpec("target", "目标开关", "str", default="",
+                  help="要关闭的【开关(布尔)节点】的 id（或它在控制面板里的显示名）。如 sw_cart 或 出商人(市场)。"),
+        ParamSpec("reason", "原因(提示语)", "str", default="",
+                  help="关闭时在日志里说明原因，如「未检测到市场」。"),
+    ]
+
+    def _resolve_target(self, g) -> Optional[str]:
+        """把 target 参数解析成节点 id：先按 id，再按控制面板显示名/自定义显示名反查。"""
+        nodes = getattr(g, "nodes", {})
+        tgt = (self.values.get("target") or "").strip()
+        if not tgt:
+            return None
+        if tgt in nodes:
+            return tgt
+        for entry in getattr(g, "panel", []) or []:
+            if len(entry) >= 3 and entry[2] == tgt and entry[0] in nodes:
+                return entry[0]
+        for k, name in (getattr(g, "labels", {}) or {}).items():
+            if name == tgt and "|" in k and k.split("|", 1)[0] in nodes:
+                return k.split("|", 1)[0]
+        return None
+
+    def _label_of(self, g, node_id: str) -> str:
+        labels = getattr(g, "labels", {}) or {}
+        if f"{node_id}|on" in labels:
+            return labels[f"{node_id}|on"]
+        for entry in getattr(g, "panel", []) or []:
+            if len(entry) >= 3 and entry[0] == node_id and entry[1] == "on":
+                return entry[2]
+        node = getattr(g, "nodes", {}).get(node_id)
+        return getattr(node, "title", None) or node_id
+
+    def execute(self, ctx, inputs):
+        if inputs.get("keep_on"):
+            return {}, "out"           # 条件成立(如有市场) → 保持开启、什么都不做
+        g = ctx.graph
+        node_id = self._resolve_target(g) if g is not None else None
+        if node_id is None:
+            return {}, "out"           # 目标找不到(干跑无图/拼错 id)：安静放行
+        node = g.nodes.get(node_id)
+        if node is None or not bool(node.values.get("on", True)):
+            return {}, "out"           # 已经是关的：不重复关、不重复提示
+        ctx.write_param(node_id, "on", False)
+        reason = (self.values.get("reason") or "").strip()
+        msg = f"已自动关闭开关「{self._label_of(g, node_id)}」" + (f"（{reason}）" if reason else "")
+        ctx.log("WARN", msg, node_id)
         return {}, "out"

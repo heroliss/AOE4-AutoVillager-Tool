@@ -551,6 +551,9 @@ class Api:
                             b64 = getattr(node, "live", None) and node.live.get("preview")
                             if b64:
                                 previews[nid] = b64
+                    # 运行时被节点改写过的别人参数（如「关闭开关」自动关掉某开关）：推给前端，让界面控件也显示成新值
+                    pwrites = {nid: dict(kv) for nid, kv in self._run_ctx.param_writes.items()} \
+                        if self._run_ctx.param_writes else None
                     path = list(self._run_exec.trace_path)
                     ports = dict(self._run_exec.trace_ports)
                     # 断点 / 运行到此节点：本帧路径命中即自停
@@ -563,7 +566,8 @@ class Api:
                                 hit = nid
                                 break
                 with self._snap_lock:        # 出 _run_lock 后再短暂占快照锁发布（轮询绝不阻塞跑帧）
-                    self._latest = {"tick": tick, "path": path, "ports": ports, "data": data, "times": times, "previews": previews}
+                    self._latest = {"tick": tick, "path": path, "ports": ports, "data": data,
+                                    "times": times, "previews": previews, "param_writes": pwrites}
                     self._pending_logs.extend(new_logs)
                     if len(self._pending_logs) > _RUN_LOG_CAP:   # 前端长时间不取（窗口最小化时 rAF 暂停）也不无限堆积
                         del self._pending_logs[: len(self._pending_logs) - _RUN_LOG_CAP]

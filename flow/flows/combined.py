@@ -30,6 +30,16 @@ TC = {
     "single_template": "templates/tc_single.png",
     "numbered_templates": [f"templates/tc_number_{i}.png" for i in range(1, 7)],
 }
+# 市场计数：与 TC 完全同一套算法/区域（选中后弹同样的数量面板）。模板文件名即实际数量：
+#   market_single.png=1个，market_num_2..9.png=2..9个（按数量升序填入 numbered_templates，列表第N张=1+N个）。
+#   截图区域默认沿用 TC 的（用户确认位置一致）；若市场面板位置不同，用「🖼预览」核对后再调。
+MARKET = {
+    "building_name": "市场",
+    "icon_region": [444, 1212, 492, 1259],
+    "single_region": [300, 1140, 354, 1194],
+    "single_template": "templates/market_single.png",
+    "numbered_templates": [f"templates/market_num_{i}.png" for i in range(2, 10)],
+}
 
 
 def build_combined_graph() -> Graph:
@@ -64,7 +74,6 @@ def build_combined_graph() -> Graph:
     add("gold", "sense.ocr_number", {"region": GOLD_REGION, "regex": r"(\d+)"})
     add("wood", "sense.ocr_number", {"region": WOOD_REGION, "regex": r"(\d+)"})  # 木头：默认不参与限制（成本0），仅在某单位需要木头时启用
     add("tc", "game.building_count", TC)
-    add("c_one", "data.const_number", {"value": 1})
 
     # ============ 生产门控（前置短路）============
     # 操作区（抢锁/屏蔽输入/Ctrl+0 存编组/0 恢复/Ctrl+Alt+0 解散）对整批只做一次，
@@ -145,6 +154,9 @@ def build_combined_graph() -> Graph:
         {"region": QUEUE_REGION, "templates": ["templates/businessman.png"], "threshold": 0.6, "transition_guard": True})
     add("if_qcart", "control.if")
     add("sel_market", "action.press_key", {"key": "j"})     # 选中所有市场（默认绑定 J）
+    add("market", "game.building_count", MARKET)            # 数市场（与 TC 同套算法）：没市场→ok=False、count=0
+    add("disable_cart", "control.disable_switch",           # 没市场就自动关掉「出商人」开关并提示
+        {"target": "sw_cart", "reason": "未检测到市场"})
     add("c_per_cart", "data.const_number", {"value": 2})
     add("plan_cart", "math.arith", {"op": "*"})
     add("prod_cart", "game.produce_count", {"cost_per_unit": 60, "cap": -1})   # 成本由 c_cost_cart 喂入(下方连线)，此为兜底
@@ -196,8 +208,8 @@ def build_combined_graph() -> Graph:
          "members": ["sw_xq", "if_sw_xq", "q_xq", "if_qxq", "sel_tc_x",
                      "c_per_x", "plan_x", "prod_x", "queue_x"]},
         {"title": "商人段（市场）", "color": "#a5793a",
-         "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market",
-                     "c_per_cart", "c_one", "plan_cart", "prod_cart", "queue_cart"]},
+         "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market", "market", "disable_cart",
+                     "c_per_cart", "plan_cart", "prod_cart", "queue_cart"]},
         {"title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#7a6a4a",
          "members": ["c_zero", "pre_sw_vill", "pre_q_vill",
                      "pre_sw_xq", "pre_q_xq",
@@ -228,7 +240,6 @@ def build_combined_graph() -> Graph:
         "gold": "识别当前黄金存量（约束乡骑/商人产量）。",
         "wood": "识别当前木头存量。默认不参与限制（商人木头成本=0）；某单位需要木头时，把对应成本设为实际值并把本区域设对即可启用。",
         "tc": "统计当前有几个城镇中心(TC)，用于“每个TC各排一批”。",
-        "c_one": "常量 1：商人按“市场数=1”计划（一般只一个市场）。",
         "lock": "抢占操作锁：多开/多脚本时避免同时抢操作。占用中则本帧结束。",
         "block_begin": "开始屏蔽鼠标键盘：操作期间防止人为误触打断。",
         "save_sel": "Ctrl+0：把当前选中的单位暂存为编组 0，操作完再恢复。",
@@ -260,7 +271,7 @@ def build_combined_graph() -> Graph:
         "q_vill": "检测生产队列里是否已经有村民（避免重复排队）。",
         "if_qvill": "队列已有村民则跳过本段。",
         "sel_tc_v": "按 H 选中所有城镇中心。⚠必须在游戏里把“选所有TC”绑定到 H。"
-                    "按完不必再放延时——下游「多TC计数」节点会在面板刷新出来前自动重试重截。",
+                    "按完不必再放延时——下游「选中建筑计数」节点会在面板刷新出来前自动重试重截。",
         "c_per_v": "每个城镇中心一次排几个村民。",
         "plan_v": "计划数 = 每TC数量 × TC个数。",
         "prod_v": "实际产量 = min(计划, 人口空位, 食物÷单价)。并把“用剩的人口空位”结转给乡骑段——多段共享人口池、逐段扣减，避免同帧重复占用。村民这帧没真生产(关/已在造)时产0、空位原样传下去。",
@@ -269,7 +280,7 @@ def build_combined_graph() -> Graph:
         "if_sw_xq": "乡骑开关：开→进入乡骑段；关→跳到商人段。",
         "q_xq": "检测队列里是否已有乡骑。",
         "if_qxq": "队列已有乡骑则跳过本段。",
-        "sel_tc_x": "按 H 选中所有城镇中心。按完不必再放延时——「多TC计数」节点会自动重试重截。",
+        "sel_tc_x": "按 H 选中所有城镇中心。按完不必再放延时——「选中建筑计数」节点会自动重试重截。",
         "c_per_x": "每个城镇中心一次排几个乡骑。",
         "plan_x": "计划数 = 每TC数量 × TC个数。",
         "prod_x": "实际产量 = min(计划, 剩余空位, 剩余食物÷食物单价, 黄金÷黄金单价)。乡骑同时吃食物+黄金：食物从村民段结转(共用食物池)、黄金为黄金链起点；再把用剩的空位/黄金结转给商人段。乡骑没真生产时产0、预算透传。",
@@ -278,9 +289,14 @@ def build_combined_graph() -> Graph:
         "if_sw_cart": "商人开关：开→进入商人段；关→进入收尾。",
         "q_cart": "检测队列里是否已有商人。",
         "if_qcart": "队列已有商人则跳过本段。",
-        "sel_market": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。",
+        "sel_market": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。按完不必再放延时——"
+                      "下游「数市场」节点会在面板刷新出来前自动重试重截。",
+        "market": "数当前有几个市场（与城镇中心计数同套算法）。没数到市场→「成功」=否、「数量」=0："
+                  "用它驱动『没市场就自动关掉出商人开关』，并把“每市场×市场数”作为商人计划数。",
+        "disable_cart": "关闭开关：接「数市场·成功」——有市场就保持；按 J 后【没数到市场】就自动把「出商人」开关置为关"
+                        "并在日志提示（下一帧门控即跳过商人段、不再反复按 J）。开关在编辑器里会真的显示成关，可保存。",
         "c_per_cart": "每个市场一次排几个商人。",
-        "plan_cart": "计划数 = 每市场数量 × 市场个数(此处常量1)。",
+        "plan_cart": "计划数 = 每市场数量 × 市场个数（来自「数市场」；没市场则=0，自然不排）。",
         "prod_cart": "实际产量 = min(计划, 剩余人口空位, 剩余黄金÷单价[, 木头÷木头单价])。空位/黄金均来自乡骑段结转——所以即使村民/乡骑同帧在产，商人仍按“真正剩下的”池子独立生产。木头默认不限制(成本0)。",
         "queue_cart": "按 Q 排队生产商人。",
         "restore": "按 0 恢复操作前暂存的编组选择。",
@@ -349,7 +365,8 @@ def build_combined_graph() -> Graph:
     g.connect_exec("if_sw_cart", "false", "restore", "in")
     g.connect_exec("if_qcart", "false", "sel_market", "in")
     g.connect_exec("if_qcart", "true", "restore", "in")
-    g.connect_exec("sel_market", "out", "queue_cart", "in")
+    g.connect_exec("sel_market", "out", "disable_cart", "in")   # 按J后先判市场：没有就关掉「出商人」开关
+    g.connect_exec("disable_cart", "out", "queue_cart", "in")   # 再排队（没市场则产量0、press_key自然不按）
     g.connect_exec("queue_cart", "out", "restore", "in")
 
     # 收尾
@@ -409,11 +426,12 @@ def build_combined_graph() -> Graph:
     g.connect_data("q_xq", "found", "prod_x", "busy")
     g.connect_data("prod_x", "count", "queue_x", "count")
 
-    # 商人段数据（市场数按 1 计；空位与黄金从乡骑段结转；可选再吃木头）
+    # 商人段数据（市场数由「数市场」实测；空位与黄金从乡骑段结转；可选再吃木头）
     g.connect_data("sw_cart", "value", "if_sw_cart", "cond")
     g.connect_data("q_cart", "found", "if_qcart", "cond")
+    g.connect_data("market", "ok", "disable_cart", "keep_on")    # 有市场→保持开启；没市场→关掉「出商人」
     g.connect_data("c_per_cart", "value", "plan_cart", "a")
-    g.connect_data("c_one", "value", "plan_cart", "b")
+    g.connect_data("market", "count", "plan_cart", "b")          # 计划=每市场数×市场个数（没市场=0）
     g.connect_data("plan_cart", "value", "prod_cart", "planned")
     g.connect_data("prod_x", "slots_left", "prod_cart", "available_slots")   # 空位 = 乡骑用剩的（=村民也用剩的）
     g.connect_data("prod_x", "gold_left", "prod_cart", "gold")               # 黄金 = 乡骑用剩的

@@ -69,6 +69,7 @@ class Executor:
 
     # ==================== 执行流：单帧 ====================
     def run_tick(self, ctx: ExecutionContext, dt: float = 0.0) -> None:
+        ctx.graph = self.graph   # 少数节点需触达兄弟节点（如「关闭开关」改写另一个开关）
         ctx.begin_tick(dt)
         try:
             self._walk(ctx)

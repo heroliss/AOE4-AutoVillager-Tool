@@ -40,6 +40,12 @@ class ExecutionContext:
         self.cancel: bool = False
         self.dry_run: bool = dry_run            # True 时操作节点只记日志
 
+        # 执行器在每帧把自己的图挂上来，少数节点需要触达兄弟节点（如「关闭开关」改写另一个开关）。
+        self.graph = None
+        # 节点在运行时改写了【别的节点参数】时登记在此（node_id -> {param_key: value}），跨帧累积。
+        # 运行循环把它放进快照推给编辑器，让界面上那个开关也真的显示成新值（可保存为永久）。
+        self.param_writes: dict[str, dict[str, Any]] = {}
+
         self._memo: dict[tuple, Any] = {}       # 按帧：节点输出缓存 (node_id, port) -> value
         self._region_cache: dict[tuple, Any] = {}
         self._full_frame = None                 # 按帧：整屏截图缓存
@@ -130,6 +136,24 @@ class ExecutionContext:
     def profile_snapshot(self) -> dict:
         """本帧各节点耗时 node_id -> [self_ms, cum_ms] 的拷贝（供编辑器叠加显示）。"""
         return {k: list(v) for k, v in self._node_times.items()}
+
+    # ==================== 运行时改写别的节点参数 ====================
+    def write_param(self, node_id: str, key: str, value: Any) -> bool:
+        """运行时把【另一个节点】的参数改成新值（如「关闭开关」节点把某开关置为关）。
+
+        立即作用于本次运行的图（下一帧门控就按新值短路），并登记到 param_writes，
+        由运行循环推给编辑器，让界面上那个控件也显示成新值、可被用户保存为永久。
+        干跑(无图挂载或目标不存在)时安静跳过、只返回 False。"""
+        g = self.graph
+        node = getattr(g, "nodes", {}).get(node_id) if g is not None else None
+        if node is None:
+            return False
+        try:
+            node.values[key] = value
+        except Exception:
+            return False
+        self.param_writes.setdefault(node_id, {})[key] = value
+        return True
 
     # ==================== 日志 / 实时状态 ====================
     def log(self, level: str, message: str, node_id: Optional[str] = None) -> None:

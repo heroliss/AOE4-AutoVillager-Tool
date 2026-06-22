@@ -159,8 +159,9 @@
         "q_cart",
         "if_qcart",
         "sel_market",
+        "market",
+        "disable_cart",
         "c_per_cart",
-        "c_one",
         "plan_cart",
         "prod_cart",
         "queue_cart"
@@ -466,18 +467,6 @@
         "retry_interval": 0.02
       },
       "note": "统计当前有几个城镇中心(TC)，用于“每个TC各排一批”。"
-    },
-    {
-      "id": "c_one",
-      "type": "data.const_number",
-      "pos": [
-        9318.5,
-        592.0
-      ],
-      "params": {
-        "value": 1
-      },
-      "note": "常量 1：商人按“市场数=1”计划（一般只一个市场）。"
     },
     {
       "id": "c_zero",
@@ -833,7 +822,7 @@
         "modifiers": "",
         "repeat": 1
       },
-      "note": "按 H 选中所有城镇中心。⚠必须在游戏里把“选所有TC”绑定到 H。按完不必再放延时——下游「多TC计数」节点会在面板刷新出来前自动重试重截。"
+      "note": "按 H 选中所有城镇中心。⚠必须在游戏里把“选所有TC”绑定到 H。按完不必再放延时——下游「选中建筑计数」节点会在面板刷新出来前自动重试重截。"
     },
     {
       "id": "c_per_v",
@@ -956,7 +945,7 @@
         "modifiers": "",
         "repeat": 1
       },
-      "note": "按 H 选中所有城镇中心。按完不必再放延时——「多TC计数」节点会自动重试重截。"
+      "note": "按 H 选中所有城镇中心。按完不必再放延时——「选中建筑计数」节点会自动重试重截。"
     },
     {
       "id": "c_per_x",
@@ -1018,7 +1007,7 @@
       "type": "data.switch",
       "pos": [
         9318.5,
-        412.0
+        232.0
       ],
       "params": {
         "on": false
@@ -1040,7 +1029,7 @@
       "type": "sense.template_match",
       "pos": [
         9284.0,
-        908.0
+        532.0
       ],
       "params": {
         "region": [
@@ -1061,7 +1050,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        9706.5,
+        9741.0,
         40.0
       ],
       "params": {},
@@ -1071,7 +1060,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        10007.0,
+        10059.0,
         40.0
       ],
       "params": {
@@ -1079,14 +1068,67 @@
         "modifiers": "",
         "repeat": 1
       },
-      "note": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。"
+      "note": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。按完不必再放延时——下游「数市场」节点会在面板刷新出来前自动重试重截。"
+    },
+    {
+      "id": "market",
+      "type": "game.building_count",
+      "pos": [
+        9663.0,
+        336.0
+      ],
+      "params": {
+        "building_name": "市场",
+        "icon_region": [
+          444,
+          1212,
+          492,
+          1259
+        ],
+        "single_region": [
+          300,
+          1140,
+          354,
+          1194
+        ],
+        "single_template": "templates/market_single.png",
+        "numbered_templates": [
+          "templates/market_num_2.png",
+          "templates/market_num_3.png",
+          "templates/market_num_4.png",
+          "templates/market_num_5.png",
+          "templates/market_num_6.png",
+          "templates/market_num_7.png",
+          "templates/market_num_8.png",
+          "templates/market_num_9.png"
+        ],
+        "threshold": 0.7,
+        "crop_size": 20,
+        "early_exit": 0.95,
+        "retry_max": 8,
+        "retry_interval": 0.02
+      },
+      "note": "数当前有几个市场（与城镇中心计数同套算法）。没数到市场→「成功」=否、「数量」=0：用它驱动『没市场就自动关掉出商人开关』，并把“每市场×市场数”作为商人计划数。"
+    },
+    {
+      "id": "disable_cart",
+      "type": "control.disable_switch",
+      "pos": [
+        10403.0,
+        40.0
+      ],
+      "params": {
+        "target": "sw_cart",
+        "reason": "未检测到市场"
+      },
+      "note": "关闭开关：接「数市场·成功」——有市场就保持；按 J 后【没数到市场】就自动把「出商人」开关置为关并在日志提示（下一帧门控即跳过商人段、不再反复按 J）。开关在编辑器里会真的显示成关，可保存。"
     },
     {
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        9318.5,
-        232.0
+        9706.0,
+        1050.0
       ],
       "params": {
         "value": 2
@@ -1097,20 +1139,20 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        9663.0,
-        216.0
+        10067.5,
+        392.0
       ],
       "params": {
         "op": "*"
       },
-      "note": "计划数 = 每市场数量 × 市场个数(此处常量1)。"
+      "note": "计划数 = 每市场数量 × 市场个数（来自「数市场」；没市场则=0，自然不排）。"
     },
     {
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        9990.0,
-        344.0
+        10403.5,
+        336.0
       ],
       "params": {
         "food_cost": 0.0,
@@ -1126,7 +1168,7 @@
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        10368.0,
+        10782.0,
         40.0
       ],
       "params": {
@@ -1140,7 +1182,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        10712.0,
+        11126.0,
         40.0
       ],
       "params": {
@@ -1154,7 +1196,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        11056.0,
+        11470.0,
         40.0
       ],
       "params": {
@@ -1168,7 +1210,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        11400.0,
+        11814.0,
         40.0
       ],
       "params": {},
@@ -1178,7 +1220,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        11640.0,
+        12054.0,
         40.0
       ],
       "params": {},
@@ -1188,7 +1230,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        11880.0,
+        12294.0,
         40.0
       ],
       "params": {
@@ -1200,7 +1242,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        12173.0,
+        12587.0,
         40.0
       ],
       "params": {},
@@ -1469,6 +1511,12 @@
     [
       "sel_market",
       "out",
+      "disable_cart",
+      "in"
+    ],
+    [
+      "disable_cart",
+      "out",
       "queue_cart",
       "in"
     ],
@@ -1715,14 +1763,20 @@
       "cond"
     ],
     [
+      "market",
+      "ok",
+      "disable_cart",
+      "keep_on"
+    ],
+    [
       "c_per_cart",
       "value",
       "plan_cart",
       "a"
     ],
     [
-      "c_one",
-      "value",
+      "market",
+      "count",
       "plan_cart",
       "b"
     ],

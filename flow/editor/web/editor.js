@@ -2251,6 +2251,22 @@ const ED = (function () {
     scheduleSnap(); refreshDirty();
   }
   function restoreLabel(id, key, name) { setPinLabel(id, key, name); }   // 空=清除显示名（回落默认）
+  // 运行中节点自动改写了别的参数（如「关闭开关」把某开关关掉）：回写到编辑器里的对应控件，
+  // 让界面也显示成新值、并记为一处可保存/可恢复的改动。按 (节点|参数) 去重，避免每帧重复套用。
+  let _appliedPW = {};
+  function applyRunParamWrites(pw) {
+    for (const nid in pw) {
+      const kv = pw[nid] || {};
+      for (const key in kv) {
+        const sig = nid + "|" + key, val = kv[key];
+        if (_appliedPW[sig] === val) continue;     // 已套用且未变 → 跳过(免每帧重复 scheduleSnap)
+        const n = nodeByOurId(nid); if (!n) continue;
+        _appliedPW[sig] = val;
+        restoreParam(nid, key, val);               // 复用：回写 widget+properties，记为改动(可在「查看修改」里恢复)
+        try { flashLocate(n, key); } catch (e) {}  // 高亮一下，提醒用户“这个开关被自动关了”
+      }
+    }
+  }
   // —— 结构性改动的单条恢复（位置移动 / 节点增删 / 连线增删）——
   function _afterEdit() { if (canvas) canvas.setDirty(true, true); scheduleSnap(); refreshDirty(); }
   function restorePos(id, x, y) { const n = nodeByOurId(id); if (n) n.pos = [x, y]; _afterEdit(); }
@@ -3092,7 +3108,7 @@ const ED = (function () {
     try {
       const r = await api().run_begin(collect(), realRun);
       runSession = !!(r && r.ok);
-      runLogs = []; _lastRunStatus = ""; _lastTick = 0; renderLog();
+      runLogs = []; _lastRunStatus = ""; _lastTick = 0; _appliedPW = {}; renderLog();
       if (runSession) {
         startRunAnim();                                  // 启动脉冲/流动动画
         try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {}   // 把断点同步给引擎
@@ -3149,6 +3165,7 @@ const ED = (function () {
       runTimes = t.times || (profileOn ? runTimes : {});   // 仅在“性能监控”开启时引擎才附带耗时
       if (t.previews) runPreviews = t.previews;             // 截图预览：各感知节点截到的区域图(base64)
       else if (!previewOn) runPreviews = {};
+      if (t.param_writes && realRun) applyRunParamWrites(t.param_writes);   // 仅正式运行才把自动改写(如关开关)落到编辑器；试运行不动用户配置
       _lastTick = t.tick;
     }
     const ts = nowHMS();
