@@ -98,8 +98,8 @@ def main() -> None:
     ok &= check("TC失败后仍释放了操作锁", ctx._lock_held is False)
     ok &= check("TC失败后仍解除了输入屏蔽", ctx._block_active is False)
 
-    # ==================== 市场出商队 ====================
-    print("== 市场出商队：正常路径（黄金充足，单一市场）==")
+    # ==================== 市场出商人 ====================
+    print("== 市场出商人：正常路径（黄金充足，单一市场）==")
     tc_stub = {
         "win": {"active": True, "pixel_ok": True},
         "occ": {"blocked": False, "in_transition": False, "clear": True, "confidence": 0.02},
@@ -109,7 +109,7 @@ def main() -> None:
     }
     logs, _ = run_with_stubs(build_trade_cart_graph, tc_stub)
     q = [m for m in logs if "按键 q" in m]
-    ok &= check("触发出商队", len(q) == 1)
+    ok &= check("触发出商人", len(q) == 1)
     ok &= check("数量 = min(5, 150, 600//100=6) = 5", q and "x5" in q[0])
     ok &= check("选中市场(G键)", any("按键 g" in m for m in logs))
 
@@ -145,18 +145,18 @@ def main() -> None:
         "gold": {"value": 800, "value2": None, "ok": True},
         "tc": {"count": 1, "ok": True},
     }
-    print("== 统一生产：默认(村民开/乡骑关/商队关) -> 只出村民 ==")
+    print("== 统一生产：默认(村民开/乡骑关/商人关) -> 只出村民 ==")
     logs, _ = run_with_stubs(build_combined_graph, COMBINED)
     ok &= check("出村民 q x3 = min(3*1,150,300//50=6)", any("按键 q x3" in m for m in logs))
     ok &= check("不出乡骑(无W键)", not any("按键 w" in m for m in logs))
-    ok &= check("不选市场(无J键，商队段关闭)", not any("按键 j" in m for m in logs))
+    ok &= check("不选市场(无J键，商人段关闭)", not any("按键 j" in m for m in logs))
 
-    print("== 统一生产：三段全开 -> 村民+乡骑+商队都出 ==")
+    print("== 统一生产：三段全开 -> 村民+乡骑+商人都出 ==")
     logs, _ = run_with_stubs(build_combined_graph,
                              {**COMBINED, "sw_xq": {"value": True}, "sw_cart": {"value": True}})
     ok &= check("出乡骑 w x2 = min(2*1,150,800//80=10)", any("按键 w x2" in m for m in logs))
-    ok &= check("选市场 J 键(商队段开启)", any("按键 j" in m for m in logs))
-    ok &= check("出商队 q x5 = min(5*1,150,800//100=8)", any("按键 q x5" in m for m in logs))
+    ok &= check("选市场 J 键(商人段开启)", any("按键 j" in m for m in logs))
+    ok &= check("出商人 q x5 = min(5*1,150,800//60=13)", any("按键 q x5" in m for m in logs))
     ok &= check("出村民 q x3", any("按键 q x3" in m for m in logs))
 
     print("== 统一生产：关闭村民段 -> 该段被跳过 ==")
@@ -169,7 +169,7 @@ def main() -> None:
                              {**COMBINED, "q_vill": {"found": True, "in_transition": False, "which": 0},
                               "sw_cart": {"value": True}})
     ok &= check("队列已有村民则不再出村民", not any("按键 q x3" in m for m in logs))
-    ok &= check("但商队段仍正常(选市场J)", any("按键 j" in m for m in logs))
+    ok &= check("但商人段仍正常(选市场J)", any("按键 j" in m for m in logs))
 
     print("== 统一生产：食物不足(买不起1个) -> 跳过整个操作区(不抢锁/不按H/不排队) ==")
     logs, ctx = run_with_stubs(build_combined_graph,
@@ -187,7 +187,7 @@ def main() -> None:
 
     print("== 自动排版：主线横向铺开、支线左上汇入、无重叠 ==")
     from flow.layout import mainline_layout, no_overlaps, estimate_size
-    for name, build in (("出农", build_villager_graph), ("出商队", build_trade_cart_graph),
+    for name, build in (("出农", build_villager_graph), ("出商人", build_trade_cart_graph),
                         ("金朝", build_jin_graph), ("统一", build_combined_graph)):
         gg = build()
         mainline_layout(gg)
@@ -207,7 +207,7 @@ def main() -> None:
     ok &= check("往返结构一致", g2.to_dict() == data)
     ok &= check(f"节点数 {len(g.nodes)} / 执行连线 {len(g.exec_edges)} / 数据连线 {len(g.data_edges)}", True)
 
-    # 只落盘一个内置流程：统一生产（村民/乡骑/商队三段，用内部开关启停各段）。
+    # 只落盘一个内置流程：统一生产（村民/乡骑/商人三段，用内部开关启停各段）。
     # 其余 villager/trade_cart/jin 仅作为上面的引擎逻辑单元测试用例，不再作为内置流程分发。
     from flow.layout import mainline_layout
     os.makedirs("flows", exist_ok=True)

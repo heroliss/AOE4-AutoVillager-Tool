@@ -235,6 +235,9 @@ class ProduceCount(DataNode):
                 help="可用资源量（食物/黄金…）。产量再受 资源÷单位成本 限制。不接=不受资源限制。"),
         data_in("current_count", DataType.NUMBER, label="当前数量", advanced=True,
                 help="已有数量，配合“数量上限”用（产量不超过 上限−当前）。一般不接。"),
+        data_in("cost", DataType.NUMBER, label="单位成本",
+                help="造 1 个的资源成本。接了就用它（覆盖下方“单位资源成本”参数）——这样成本可由一个常量节点"
+                     "同时喂给本节点和门控的“资源够不够”比较，只在一处设置、还能放到控制面板按国家调。"),
     ]
     outputs = [data_out("count", DataType.NUMBER, label="数量",
                         help="实际可生产数 = min(计划, 空位, 资源÷成本, 上限−当前)，取整且 ≥0。接到“按键”的“数量”即排这么多次。")]
@@ -250,8 +253,10 @@ class ProduceCount(DataNode):
         if slots is not None:
             count = min(count, slots)
         resource = inputs.get("resource")
-        cost = self.values["cost_per_unit"]
-        if resource is not None and cost > 0:
+        cost = inputs.get("cost")          # 接了“单位成本”就用它，否则回落到参数
+        if cost is None:
+            cost = self.values["cost_per_unit"]
+        if resource is not None and cost and cost > 0:
             count = min(count, int(resource // cost))
         cap = self.values["cap"]
         current = inputs.get("current_count")
