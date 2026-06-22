@@ -181,7 +181,7 @@ def _drag_rect(on_confirm_label: str, initial=None):
 
     state = {"box": box0, "mode": None, "press": None, "orig": None,
              "rid": None, "tid": None, "hids": [], "confirmed": False}
-    HND, TOL = 6, 10   # 手柄半边长 / 命中容差（像素）
+    HND, TOL = 3, 12   # 手柄半边长(小一点，少挡内容) / 命中容差(放大一点，照样好抓)（像素）
     _CURS = {"nw": "size_nw_se", "se": "size_nw_se", "ne": "size_ne_sw", "sw": "size_ne_sw",
              "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
              "e": "sb_h_double_arrow", "w": "sb_h_double_arrow", "move": "fleur"}

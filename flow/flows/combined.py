@@ -134,7 +134,7 @@ def build_combined_graph() -> Graph:
     add("q_cart", "sense.template_match",
         {"region": QUEUE_REGION, "templates": ["templates/trade_cart.png"], "threshold": 0.6, "transition_guard": True})
     add("if_qcart", "control.if")
-    add("sel_market", "action.press_key", {"key": "g"})     # 选中市场
+    add("sel_market", "action.press_key", {"key": "j"})     # 选中所有市场（默认绑定 J）
     add("c_per_cart", "data.const_number", {"value": 5})
     add("plan_cart", "math.arith", {"op": "*"})
     add("prod_cart", "game.produce_count", {"cost_per_unit": 100, "cap": -1})
@@ -257,7 +257,7 @@ def build_combined_graph() -> Graph:
         "if_sw_cart": "商队开关：开→进入商队段；关→进入收尾。",
         "q_cart": "检测队列里是否已有商队。",
         "if_qcart": "队列已有商队则跳过本段。",
-        "sel_market": "按 G 选中市场。",
+        "sel_market": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。",
         "c_per_cart": "每个市场一次排几个商队。",
         "plan_cart": "计划数 = 每市场数量 × 市场个数(此处常量1)。",
         "prod_cart": "实际产量 = min(计划, 人口空位, 黄金÷单价)。",

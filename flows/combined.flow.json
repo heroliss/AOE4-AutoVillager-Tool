@@ -970,11 +970,11 @@
         40.0
       ],
       "params": {
-        "key": "g",
+        "key": "j",
         "modifiers": "",
         "repeat": 1
       },
-      "note": "按 G 选中市场。"
+      "note": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。"
     },
     {
       "id": "c_per_cart",
@@ -1005,7 +1005,7 @@
       "type": "game.produce_count",
       "pos": [
         9610.0,
-        328.0
+        344.0
       ],
       "params": {
         "cost_per_unit": 100,

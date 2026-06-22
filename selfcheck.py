@@ -149,13 +149,13 @@ def main() -> None:
     logs, _ = run_with_stubs(build_combined_graph, COMBINED)
     ok &= check("出村民 q x3 = min(3*1,150,300//50=6)", any("按键 q x3" in m for m in logs))
     ok &= check("不出乡骑(无W键)", not any("按键 w" in m for m in logs))
-    ok &= check("不选市场(无G键，商队段关闭)", not any("按键 g" in m for m in logs))
+    ok &= check("不选市场(无J键，商队段关闭)", not any("按键 j" in m for m in logs))
 
     print("== 统一生产：三段全开 -> 村民+乡骑+商队都出 ==")
     logs, _ = run_with_stubs(build_combined_graph,
                              {**COMBINED, "sw_xq": {"value": True}, "sw_cart": {"value": True}})
     ok &= check("出乡骑 w x2 = min(2*1,150,800//80=10)", any("按键 w x2" in m for m in logs))
-    ok &= check("选市场 G 键(商队段开启)", any("按键 g" in m for m in logs))
+    ok &= check("选市场 J 键(商队段开启)", any("按键 j" in m for m in logs))
     ok &= check("出商队 q x5 = min(5*1,150,800//100=8)", any("按键 q x5" in m for m in logs))
     ok &= check("出村民 q x3", any("按键 q x3" in m for m in logs))
 
@@ -169,7 +169,7 @@ def main() -> None:
                              {**COMBINED, "q_vill": {"found": True, "in_transition": False, "which": 0},
                               "sw_cart": {"value": True}})
     ok &= check("队列已有村民则不再出村民", not any("按键 q x3" in m for m in logs))
-    ok &= check("但商队段仍正常(选市场G)", any("按键 g" in m for m in logs))
+    ok &= check("但商队段仍正常(选市场J)", any("按键 j" in m for m in logs))
 
     print("== 统一生产：食物不足(买不起1个) -> 跳过整个操作区(不抢锁/不按H/不排队) ==")
     logs, ctx = run_with_stubs(build_combined_graph,

@@ -470,7 +470,7 @@ const ED = (function () {
         }
       }));
     } else if (p.ptype === "key") {
-      mkBtn("捕获按键…", () => defer("请按下按键…（Esc 取消）", () => api().pick_key(), (k) => {
+      mkBtn("捕获按键…", () => captureKey().then((k) => {   // 编辑器内部小窗捕获，不再弹独立窗口/不重复弹
         if (!k) { setStatus("已取消捕获"); return; }
         apply(k, "已捕获按键：" + k);
       }));
@@ -519,6 +519,48 @@ const ED = (function () {
     box.querySelectorAll("[data-k]").forEach((b) =>
       b.onclick = () => { box.remove(); onPick(b.getAttribute("data-k")); });
     box.querySelector("#speckcancel").onclick = () => box.remove();
+  }
+
+  // 把浏览器 keydown 事件映射成引擎用的按键名（与 capture.py / pydirectinput 对齐）。
+  // 返回 null=单独的修饰键(忽略)；"__cancel__"=Esc 取消。
+  function jsKeyToName(e) {
+    const k = e.key;
+    if (k === "Escape") return "__cancel__";
+    if (["Shift", "Control", "Alt", "Meta", "CapsLock", "AltGraph"].includes(k)) return null;
+    const MAP = { " ": "space", "Enter": "enter", "Tab": "tab", "Backspace": "backspace",
+      "Delete": "delete", "Insert": "insert", "Home": "home", "End": "end",
+      "PageUp": "pageup", "PageDown": "pagedown",
+      "ArrowUp": "up", "ArrowDown": "down", "ArrowLeft": "left", "ArrowRight": "right" };
+    if (MAP[k]) return MAP[k];
+    if (/^F\d{1,2}$/.test(k)) return k.toLowerCase();   // F1..F12
+    if (k.length === 1) return k.toLowerCase();          // 字母/数字/符号
+    return null;
+  }
+  // 在编辑器【内部】弹一个小窗捕获一次按键（取代原来的独立 Tk 窗口：不再弹多个、也不用最小化编辑器）。
+  // 返回 Promise<按键名 | null(取消)>。多次点击只保留一个窗口（已开就忽略后续调用）。
+  function captureKey() {
+    if (document.getElementById("keycapdlg")) return Promise.resolve(null);   // 已有捕获窗 → 不再叠开
+    return new Promise((resolve) => {
+      const box = document.createElement("div");
+      box.id = "keycapdlg"; box.className = "popdlg";
+      box.style.cssText = "position:absolute;left:50%;top:46px;transform:translateX(-50%);min-width:260px;text-align:center;" +
+        "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:18px 22px;z-index:240;" +
+        "box-shadow:0 8px 30px #000a;font:13px/1.6 'Microsoft YaHei',sans-serif;";
+      box.innerHTML = "<b style='color:#e6c07b;font-size:15px'>请按下要捕获的按键…</b>" +
+        "<div style='color:#7f8895;margin-top:8px'>（Esc 取消；单独按修饰键无效）</div>";
+      document.body.appendChild(box);
+      const finish = (k) => { window.removeEventListener("keydown", onKey, true); box.remove(); resolve(k); };
+      // 用 window 捕获阶段：先于 document 上的快捷键监听(Ctrl+S/Delete…)，并 stopImmediatePropagation 拦下，
+      // 这样捕获“S”时不会同时触发保存等快捷键。
+      const onKey = (e) => {
+        e.preventDefault(); e.stopImmediatePropagation();
+        const name = jsKeyToName(e);
+        if (name === "__cancel__") return finish(null);
+        if (name === null) return;   // 单独修饰键：忽略，继续等
+        finish(name);
+      };
+      window.addEventListener("keydown", onKey, true);
+    });
   }
 
   // ---- 模板缩略图：本地文件不让网页直接读，由 Python 读成 data URL 回传，这里缓存 ----
@@ -2149,7 +2191,7 @@ const ED = (function () {
     };
     const apply = (v) => { setPanelValue(node, key, v); refresh(); };
     if (pt === "key") {
-      mkb("捕获", () => { setStatus("请按下按键…（Esc 取消）"); Promise.resolve(api().pick_key()).then((k) => { if (k) apply(k); }).catch((e) => showError("捕获失败：" + e)); });
+      mkb("捕获", () => { captureKey().then((k) => { if (k) apply(k); }); });   // 编辑器内部小窗捕获
       mkb("特殊键", () => specialKeyMenu((name) => apply(name)));
     } else if (pt === "region") {
       mkb("框选", () => { setStatus("框选区域…（拖动/移动/拖边角微调，Enter 确认 / Esc 取消）"); Promise.resolve(api().pick_region(parseBox(node.properties && node.properties[key]))).then((b) => { if (b) apply(b.join(",")); }).catch((e) => showError("采集失败：" + e)); });
@@ -3651,8 +3693,9 @@ const ED = (function () {
       "· <b>框选区域…</b>：会<b>预显示该参数当前的框</b>，可<b>框内拖动=移动</b>、<b>拖边/角手柄=改大小</b>、空白拖动=重画，Enter 确认（区域参数）<br>" +
       "· <b>取点…/吸色…</b>：移动有放大镜，点一下取坐标/颜色（吸色会顺带回填配套坐标）<br>" +
       "· <b>截取模板…</b>：框选游戏画面裁出小图存为模板（图片参数）<br>" +
-      "· <b>选择图片…</b>：从已有图片文件选模板　· <b>捕获按键…</b>：按一下记下按键<br>" +
-      "<span style='color:#7f8895'>点按钮后编辑器会自动最小化让开、截到游戏画面，采完自动恢复；Esc 取消。</span></div>";
+      "· <b>选择图片…</b>：从已有图片文件选模板<br>" +
+      "· <b>捕获按键…</b>：在编辑器内弹小窗，按一下记下按键（Esc 取消；不会最小化窗口、也不会弹多个）<br>" +
+      "<span style='color:#7f8895'>截图类（框选/取点/吸色/截模板）点按钮后编辑器会自动最小化让开、截到游戏画面，采完自动恢复；Esc 取消。</span></div>";
     document.body.appendChild(helpModal);
   }
 
