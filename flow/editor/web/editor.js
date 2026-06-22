@@ -1956,6 +1956,9 @@ const ED = (function () {
     el.innerHTML = "📄 " + esc(flowMeta.name) + tag;
     el.title = (flowMeta.readonly ? "内置流程（只读）：保存会另存到「我的流程」。\n\n" : "") +
                (flowMeta.desc || "（暂无流程说明，点顶部「流程信息…」添加）");
+    // 📁定位 仅对「我的流程」(真实独立文件) 有意义：内置流程打包后会被塞进 exe、没有独立文件可定位；未保存的也无文件。
+    const lb = document.getElementById("locatebtn");
+    if (lb) lb.style.display = (flowMeta.path && !flowMeta.readonly) ? "" : "none";
     selectCurrentInList();   // 下拉同步显示当前流程
   }
 
