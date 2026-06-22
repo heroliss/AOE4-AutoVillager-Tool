@@ -2179,14 +2179,23 @@ const ED = (function () {
   // 点结果即调用 locateNode 选中并居中。图一大时不必肉眼翻找。
   function searchableFields(n) {
     const out = [];
-    const def = defByType[n._typeId];
-    out.push(["类型", (def && def.title) || n._typeId]);
-    if ((n._note || "").trim()) out.push(["说明", n._note]);
+    const def = defByType[n._typeId] || {};
+    out.push(["类型", def.title || n._typeId]);
+    const doc = def.doc || def.help || "";
+    if (doc) out.push(["节点说明", doc]);
+    if ((n._note || "").trim()) out.push(["描述", n._note]);
+    const pmeta = {}; for (const p of (def.params || [])) pmeta[p.key] = p;
     for (const key in (n.properties || {})) {
       const v = n.properties[key];
-      out.push(["参数·" + paramLabelByType(n._typeId, key), String(v == null ? "" : v)]);
+      const p = pmeta[key];
+      out.push(["参数·" + ((p && p.label) || key), String(v == null ? "" : v)]);
+      if (p && p.help) out.push(["参数说明·" + (p.label || key), p.help]);
       const cl = customLabel(n._id, key);
       if (cl) out.push(["显示名", cl]);
+    }
+    for (const io of [].concat(def.inputs || [], def.outputs || [])) {   // 端口名/端口说明也一并搜
+      if (io && (io.label || io.name)) out.push(["端口", io.label || io.name]);
+      if (io && io.help) out.push(["端口说明", io.help]);
     }
     out.push(["id", n._id]);
     return out;
@@ -2211,12 +2220,28 @@ const ED = (function () {
     if (r.node) locateNode(r.node);
     else if (r.group) { const m = nodeByOurId((r.group.members || [])[0]); if (m) locateNode(m); }
   }
-  function _searchSnippet(text, q) {
+  // 返回【已转义的 HTML】：以匹配处为中心截一段，并把段内所有匹配处套上 .gs-hit 高亮底色。
+  function _searchHilite(text, q) {
     text = String(text); q = (q || "").trim();
-    const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
-    if (i < 0) return text.length > 60 ? text.slice(0, 60) + "…" : text;
-    const s = Math.max(0, i - 18), e = Math.min(text.length, i + q.length + 30);
-    return (s > 0 ? "…" : "") + text.slice(s, e) + (e < text.length ? "…" : "");
+    const low = text.toLowerCase(), ql = q.toLowerCase();
+    const first = ql ? low.indexOf(ql) : -1;
+    let s = 0, e = text.length, pre = "", suf = "";
+    if (first >= 0) {
+      s = Math.max(0, first - 20); e = Math.min(text.length, first + ql.length + 40);
+    } else {
+      e = Math.min(text.length, 80);
+    }
+    pre = s > 0 ? "…" : ""; suf = e < text.length ? "…" : "";
+    const seg = text.slice(s, e), segLow = seg.toLowerCase();
+    if (!ql) return pre + esc(seg) + suf;
+    let html = "", i = 0;
+    for (;;) {
+      const j = segLow.indexOf(ql, i);
+      if (j < 0) { html += esc(seg.slice(i)); break; }
+      html += esc(seg.slice(i, j)) + "<span class='gs-hit'>" + esc(seg.slice(j, j + ql.length)) + "</span>";
+      i = j + ql.length;
+    }
+    return pre + html + suf;
   }
   let _searchSel = 0;
   function openSearch() {
@@ -2228,6 +2253,8 @@ const ED = (function () {
       "background:#23272f;color:#cfd3da;border:1px solid #3a404a;border-radius:8px;padding:10px 12px;z-index:210;" +
       "box-shadow:0 8px 30px #000a;font:13px/1.5 'Microsoft YaHei',sans-serif;";
     box.innerHTML =
+      "<style>#graphsearch .gs-hit{background:#6a5300;color:#ffe08a;border-radius:2px;padding:0 1px}" +
+      "#graphsearch .gs-row.sel{background:#2d3848;border-color:#3f5f88}</style>" +
       "<div style='display:flex;align-items:center;gap:8px'>" +
       "<span style='color:#e6c07b;white-space:nowrap'>🔍 图内搜索</span>" +
       "<input type='text' placeholder='类型/参数/显示名/说明/id 或分组名…' " +
@@ -2251,10 +2278,9 @@ const ED = (function () {
       resBox.innerHTML = results.map((r, i) => {
         const name = r.node ? ((defByType[r.node._typeId] && defByType[r.node._typeId].title) || r.node._typeId) : ("分组「" + (r.group.title || "") + "」");
         const idtag = r.node ? ("<span style='color:#6c727c'> · " + esc(r.node._id) + "</span>") : "";
-        const sel = i === _searchSel ? "background:#2d3848;border-color:#3f5f88;" : "";
-        return "<div class='gs-row' data-i='" + i + "' style='" + sel + "padding:5px 8px;border:1px solid #2c323c;border-radius:6px;margin:3px 0;cursor:pointer'>" +
+        return "<div class='gs-row" + (i === _searchSel ? " sel" : "") + "' data-i='" + i + "' style='padding:5px 8px;border:1px solid #2c323c;border-radius:6px;margin:3px 0;cursor:pointer'>" +
           "<div style='color:#cdd6e2'>" + esc(name) + idtag + "</div>" +
-          "<div style='color:#8b929e;font-size:12px'>" + esc(r.field) + "：" + esc(_searchSnippet(r.text, input.value)) + "</div></div>";
+          "<div style='color:#8b929e;font-size:12px'>" + esc(r.field) + "：" + _searchHilite(r.text, input.value) + "</div></div>";
       }).join("");
       resBox.querySelectorAll(".gs-row").forEach((row) => {
         row.onclick = () => { _searchSel = +row.getAttribute("data-i"); locateResult(results[_searchSel]); render(); };
