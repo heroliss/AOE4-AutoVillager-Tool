@@ -300,6 +300,7 @@ class Api:
         self._run_bps: set = set()           # 断点节点 id 集（命中即自停，精确不依赖前端轮询）
         self._run_until: Optional[str] = None  # “运行到此节点”一次性目标
         self._run_profile = False            # 性能监控：开启后每帧附带各节点「自身/累计」耗时
+        self._run_preview = False            # 截图预览：开启后每帧附带各感知节点「截到的区域图」(base64 PNG)
         self._latest: Optional[dict] = None  # 最近一帧轨迹快照（path/ports/data/tick）
         self._pending_logs: list = []        # 自上次轮询以来的新日志（取走即清）
         self._bp_hit: Optional[str] = None   # 本次暂停命中的断点节点（供前端提示）
@@ -497,6 +498,7 @@ class Api:
 
             self._run_ctx = ExecutionContext(on_log=_log, dry_run=(not real))
             self._run_ctx.profile_enabled = self._run_profile   # 沿用当前「性能监控」开关
+            self._run_ctx.preview_enabled = self._run_preview   # 沿用当前「截图预览」开关
             self._run_exec = TraceExecutor(self._run_graph)
             begin = {"level": "INFO", "tick": 0,
                      "msg": ("开始运行：执行流程并向游戏发送按键/鼠标操作" if real
@@ -542,6 +544,13 @@ class Api:
                     if self._run_ctx.profile_enabled:   # 性能监控开启时附带各节点 [自身ms, 累计ms]
                         times = {nid: [round(s, 2), round(c, 2)]
                                  for nid, (s, c) in self._run_ctx.profile_snapshot().items()}
+                    previews = None
+                    if self._run_ctx.preview_enabled:   # 截图预览开启时附带各感知节点「截到的区域图」
+                        previews = {}
+                        for nid, node in self._run_graph.nodes.items():
+                            b64 = getattr(node, "live", None) and node.live.get("preview")
+                            if b64:
+                                previews[nid] = b64
                     path = list(self._run_exec.trace_path)
                     ports = dict(self._run_exec.trace_ports)
                     # 断点 / 运行到此节点：本帧路径命中即自停
@@ -554,7 +563,7 @@ class Api:
                                 hit = nid
                                 break
                 with self._snap_lock:        # 出 _run_lock 后再短暂占快照锁发布（轮询绝不阻塞跑帧）
-                    self._latest = {"tick": tick, "path": path, "ports": ports, "data": data, "times": times}
+                    self._latest = {"tick": tick, "path": path, "ports": ports, "data": data, "times": times, "previews": previews}
                     self._pending_logs.extend(new_logs)
                     if len(self._pending_logs) > _RUN_LOG_CAP:   # 前端长时间不取（窗口最小化时 rAF 暂停）也不无限堆积
                         del self._pending_logs[: len(self._pending_logs) - _RUN_LOG_CAP]
@@ -613,6 +622,16 @@ class Api:
         ctx = self._run_ctx
         if ctx is not None:
             ctx.profile_enabled = self._run_profile   # 简单 bool 写入，引擎线程下一帧即生效
+        return True
+
+    def run_set_preview(self, on=True):
+        """前端切换「截图预览」开关。开启后感知节点把截到的区域图(base64 PNG)写进 live，
+        引擎每帧在快照里附带各节点的预览图，前端画到节点上——一眼看出“它到底截到了什么”。
+        仅编码开销（关闭时零开销）；可在运行/试运行中随时开关。"""
+        self._run_preview = bool(on)
+        ctx = self._run_ctx
+        if ctx is not None:
+            ctx.preview_enabled = self._run_preview
         return True
 
     def run_update(self, payload):

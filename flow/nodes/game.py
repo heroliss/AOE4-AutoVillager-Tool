@@ -108,6 +108,8 @@ class Occlusion(DataNode):
 
         clear = not blocked and not in_transition
         self.live = {"confidence": conf, "state": status}
+        if ctx.preview_enabled:
+            self.live["preview"] = _imaging.encode_preview(img)
         return {"blocked": blocked, "in_transition": in_transition,
                 "clear": clear, "confidence": conf, "state": status}
 
@@ -215,6 +217,8 @@ class TcCount(DataNode):
                 tries += 1
 
         self.live = {"count": out["count"], "path": path, "tries": tries}
+        if ctx.preview_enabled:   # 预览 TC 图标区域（刚在 _detect_once 截过、走帧缓存，开销很小）
+            self.live["preview"] = _imaging.encode_preview(ctx.capture_region(self.values["icon_region"]))
         return out
 
 

@@ -48,6 +48,7 @@ class ExecutionContext:
 
         # —— 性能监控（默认关）：开启后记录每个节点本帧的「自身耗时 / 帧内累计耗时」，供编辑器叠加显示 ——
         self.profile_enabled = False
+        self.preview_enabled = False            # True 时感知节点把“截到的区域图”编码进 self.live['preview']，供编辑器节点上预览
         self._tick_t0 = 0.0                      # 本帧起点（perf_counter 秒）
         self._node_times: dict[str, list] = {}   # node_id -> [self_ms, cum_ms]
 

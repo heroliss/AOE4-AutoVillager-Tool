@@ -74,3 +74,23 @@ def resize_to(tmpl_gray, width: int, height: int):
         return tmpl_gray
     import cv2
     return cv2.resize(tmpl_gray, (width, height))
+
+
+def encode_preview(img, max_dim: int = 220) -> str:
+    """把 BGR numpy 图编码为 base64 PNG（仅 data 部分），供编辑器在节点上预览“它看到的画面”。
+    下采样到最长边 ≤ max_dim 控制体积；灰度图也兼容；失败返回空串。"""
+    if img is None:
+        return ""
+    try:
+        import cv2
+        import base64
+        h, w = img.shape[:2]
+        if max(h, w) > max_dim and max(h, w) > 0:
+            s = max_dim / float(max(h, w))
+            img = cv2.resize(img, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".png", img)
+        if not ok:
+            return ""
+        return base64.b64encode(buf.tobytes()).decode("ascii")
+    except Exception:
+        return ""

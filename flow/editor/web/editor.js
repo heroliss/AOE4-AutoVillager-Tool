@@ -41,6 +41,8 @@ const ED = (function () {
   let runPath = new Set(), runPathArr = [], runPorts = {}, runData = {}, runLogs = [];
   let runDataNodes = new Set();                 // 本帧产生过数据的节点（用于高亮/不被压暗）
   let profileOn = false, runTimes = {};         // 性能监控：开关 + 本帧各节点 [自身ms, 累计ms]
+  let previewOn = false, runPreviews = {};      // 截图预览：开关 + 各感知节点截到的区域图(base64 PNG)
+  const _previewImgCache = {};                  // nodeId -> {b64, img}：解码后的 Image 缓存，避免每帧重建
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
   let bpHitId = null;                           // 当前“因命中断点而暂停”停在的节点 ourId（用于醒目高亮+居中；继续/停止后清空）
   let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
@@ -1402,8 +1404,36 @@ const ED = (function () {
   }
 
   // 在节点上画：①已改参数的橙色小点；②节点下方“附属卡片”（描述 📝 + 模板缩略图网格）。
+  // 截图预览：把节点的 base64 PNG 解码成 Image 并缓存（按 b64 失效），onload 触发一次重绘。
+  function getPreviewImg(id, b64) {
+    let c = _previewImgCache[id];
+    if (!c || c.b64 !== b64) {
+      const img = new Image();
+      img.onload = () => { if (canvas) canvas.setDirty(true, false); };
+      img.src = "data:image/png;base64," + b64;
+      c = _previewImgCache[id] = { b64, img };
+    }
+    return c.img;
+  }
   function nodeDrawForeground(ctx) {
     if (this.flags && this.flags.collapsed) return;
+    // 截图预览：在节点【上方】画“它实际截到的区域图”，用于核对截图范围是否对准了目标。
+    if (previewOn && runPreviews[this._id]) {
+      const img = getPreviewImg(this._id, runPreviews[this._id]);
+      if (img && img.complete && img.naturalWidth) {
+        const maxW = Math.max(72, this.size[0]);
+        const sc = Math.min(maxW / img.naturalWidth, 96 / img.naturalHeight);
+        const dw = Math.max(1, img.naturalWidth * sc), dh = Math.max(1, img.naturalHeight * sc);
+        const th = LiteGraph.NODE_TITLE_HEIGHT || 20, y = -th - dh - 17;
+        ctx.save();
+        ctx.fillStyle = "#0b0d11"; ctx.fillRect(-2, y - 2, dw + 4, dh + 17);
+        ctx.strokeStyle = "#5a93d4"; ctx.lineWidth = 1; ctx.strokeRect(-2, y - 2, dw + 4, dh + 4);
+        try { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, 0, y, dw, dh); } catch (e) {}
+        ctx.fillStyle = "#8fb6e0"; ctx.font = "10px 'Microsoft YaHei',sans-serif";
+        ctx.fillText("🖼 实时截图", 0, y + dh + 11);
+        ctx.restore();
+      }
+    }
     // ⓪ 搜索/面板「定位」高亮：被定位的节点画脉冲外框；若指定了参数，再在该参数控件行画高亮条。
     if (this === _flashNode && performance.now() < _flashUntil) {
       const a = 0.45 + 0.45 * Math.abs(Math.cos(performance.now() / 320));   // 脉冲透明度
@@ -2070,7 +2100,7 @@ const ED = (function () {
     if (runSession && !(opts && opts.keepHistory)) {
       running = false; stopPoll(); stopRunAnim();
       try { api().run_end(); } catch (e) {}
-      runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; setRunUI();
+      runSession = false; runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; setRunUI();
     }
     const clean = !opts || opts.clean !== false;   // 打开/内置=干净基线；自动排版=保留原基线(版面变了仍算未保存)
     const keepHistory = !!(opts && opts.keepHistory);   // 自动排版：保留撤销历史（这样排版可被 Ctrl+Z 撤销）
@@ -3062,6 +3092,7 @@ const ED = (function () {
         startRunAnim();                                  // 启动脉冲/流动动画
         try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {}   // 把断点同步给引擎
         try { api().run_set_profile(profileOn); } catch (e) {}   // 把「性能监控」开关同步给引擎
+        try { api().run_set_preview(previewOn); } catch (e) {}   // 把「截图预览」开关同步给引擎
       }
       return runSession;
     } catch (e) { showError("启动运行失败：" + (e && (e.stack || e.message) || e)); return false; }
@@ -3111,6 +3142,8 @@ const ED = (function () {
       runData = t.data || runData;       // 无人观看时引擎可能略过 data；保留上次，避免标签闪烁
       runDataNodes = new Set(Object.keys(runData).map((k) => k.split(RUNSEP)[0]));
       runTimes = t.times || (profileOn ? runTimes : {});   // 仅在“性能监控”开启时引擎才附带耗时
+      if (t.previews) runPreviews = t.previews;             // 截图预览：各感知节点截到的区域图(base64)
+      else if (!previewOn) runPreviews = {};
       _lastTick = t.tick;
     }
     const ts = nowHMS();
@@ -3175,7 +3208,7 @@ const ED = (function () {
   async function stopRun() {
     running = false; stopPoll(); stopRunAnim(); bpHitId = null;
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
-    runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {};
+    runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {};
     setRunUI();
     if (canvas) canvas.setDirty(true, true);
     setStatus("已停止运行");
@@ -3189,6 +3222,16 @@ const ED = (function () {
     if (runSession) { try { api().run_set_profile(profileOn); } catch (e) {} }
     if (canvas) canvas.setDirty(true, false);
     setStatus(profileOn ? "已开启性能监控：运行时每个节点显示「本节点ms · Σ累计ms」" : "已关闭性能监控");
+  }
+  // 截图预览开关：开启后运行/试运行时，感知节点(模板匹配/识别数字·文本/遮挡/多TC)在节点上显示“它截到的区域图”。
+  function togglePreview() {
+    previewOn = !previewOn;
+    const b = document.getElementById("prevbtn");
+    if (b) b.classList.toggle("on", previewOn);
+    if (!previewOn) runPreviews = {};
+    if (runSession) { try { api().run_set_preview(previewOn); } catch (e) {} }
+    if (canvas) canvas.setDirty(true, true);
+    setStatus(previewOn ? "已开启截图预览：运行/试运行时感知节点上显示“它截到的区域图”（用于核对截图范围）" : "已关闭截图预览");
   }
 
   // ============ 资源监控小窗：右上角常驻迷你曲线 + 数字，点开看详情/改采样配置 ============
@@ -3273,7 +3316,7 @@ const ED = (function () {
   }
 
   const self = {
-    toggleRun, dryRun, stopRun, toggleProfile, toggleSimple, toggleSysMon,
+    toggleRun, dryRun, stopRun, toggleProfile, togglePreview, toggleSimple, toggleSysMon,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {
@@ -3945,6 +3988,7 @@ const ED = (function () {
       "　- <b>折叠 ⊟ / 展开 ⊞</b>：把一个组收成紧凑“子图节点”——隐藏内部、跨边界连线汇成箱体端口；单击标题右端图标或双击切换。<br>" +
       "　- <b>逐级暴露参数</b>：子节点说明里勾「暴露给所在组」→该参数出现在本组折叠箱里；选中组再勾「暴露给父组」才会往上一层显示（不冒泡，像函数封装）。<br>" +
       "　- 顶部/组标题右键「<b>分组管理</b>」窗口：按嵌套缩进总览所有组，可改名/折叠/归入/解散、新建空组。<br>" +
+      "· <b>🖼 预览</b>：开启后运行/试运行时，感知节点(模板匹配/识别数字·文本/遮挡/多TC)上方显示「它实际截到的区域图」——一眼核对截图范围对没对准（如黄金/食物数字框歪了立刻看出来）<br>" +
       "· 顶部「流程信息」查看名称/说明/统计，点其中「编辑」可改名称与说明<br>" +
       "· <b>使用模式</b>（顶部按钮切换）：把画布转为<b>只读</b>——仍可拖动查看、运行、用控制面板调参，但不能增删改节点/连线/参数；" +
       "其中的调参与拖动都是临时的，<b>不会改动已保存的流程</b>，回到编辑模式即还原（适合“只想用”的场景）</div>" +
