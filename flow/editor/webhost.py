@@ -324,7 +324,7 @@ class Api:
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
         self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度/穿透）
         self._overlay_cfg_shown = False      # 设置窗当前是否可见（复用 hide/show、避免每次重建闪烁）
-        self._overlay_bg_alpha = 0           # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=不着色、纯靠模糊，默认最透）
+        self._overlay_bg_alpha = 20          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=不着色纯靠模糊；默认20=很淡的一点着色）
         self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
         self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认轻
         self._overlay_passthrough = True     # 鼠标穿透(自动)：光标不在窄条上时让窗口对鼠标透明→游戏照常贴边移镜
@@ -637,6 +637,30 @@ class Api:
             self._set_clickthrough(False)
         return True
 
+    def _shutdown_overlay(self):
+        """关闭程序前优雅收尾覆盖层——【顺序很关键】，否则会触发那个 pythonnet 关闭崩溃：
+        ① 先置 _closing：此后任何 _form_invoke 都短路，不再发起新的 BeginInvoke；
+        ② 停 hover 线程并【join】等它真正退出：消除“它刚过了 _closing 检查、正要 BeginInvoke 时窗体被销毁”的竞态
+           （BeginInvoke 撞上销毁中的窗体会抛 InvalidAsynchronousStateException，而 pythonnet 转这异常时自身崩，try 都接不住）；
+        ③ 这时才销毁设置窗 / 覆盖窗。"""
+        self._closing = True
+        self._overlay_stop_hover = True
+        th = self._overlay_hover_thread
+        if th is not None and th.is_alive() and th is not threading.current_thread():
+            try:
+                th.join(timeout=0.4)
+            except Exception:
+                pass
+        self._overlay_hover_thread = None
+        for attr in ("_overlay_cfg_window", "_overlay_window"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
     def toggle_overlay(self):
         """开/关游戏内覆盖层窗口；返回 {open: bool}。"""
         if self._overlay_window is not None:
@@ -659,9 +683,10 @@ class Api:
         self._overlay_screen = [sw, sh]
         self._overlay_user_moved = False
         # 顶端居中；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)并重新居中。高度做成和按钮一样窄。
-        # ⚠ 必须给 min_size 很小，否则 pywebview 默认最小高(100)会让 26px 的窄条根本压不下去。
-        w0, h0 = 360, 30
-        x0, y0 = max(0, (sw - w0) // 2), 0
+        # ⚠ 必须给 min_size 很小，否则 pywebview 默认最小高(100)会让 30px 的窄条根本压不下去。
+        # ⚠ 离屏幕顶边留 8px 缝隙：保证“贴屏顶移镜”的触发区(y≈0)永远是游戏区，移镜 100% 不被窄条挡（比鼠标穿透更可靠）。
+        w0, h0, gap = 360, 30, 8
+        x0, y0 = max(0, (sw - w0) // 2), gap
         self._overlay_rect = [x0, y0, w0, h0]
         kw = dict(width=w0, height=h0, x=x0, y=y0, js_api=self,
                   on_top=True, frameless=True, easy_drag=False, transparent=True,
@@ -1318,9 +1343,8 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
 
     # 关闭窗口时，若有未保存修改则弹原生确认（返回 False 取消关闭）。前端通过 set_dirty 同步脏标记。
     def _confirm_close():
-        def _proceed():   # 确定要关：立刻置关闭标志 + 停 hover 线程，让后续一切原生投递都短路（防关闭崩溃）
-            api._closing = True
-            api._overlay_stop_hover = True
+        def _proceed():   # 确定要关：先优雅收尾覆盖层(置标志+join hover+销毁窗)，再放行主窗关闭，杜绝关闭崩溃
+            api._shutdown_overlay()
             return True
         if not getattr(api, "_dirty", False):
             return _proceed()
