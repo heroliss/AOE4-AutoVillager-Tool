@@ -369,6 +369,8 @@ class Api:
         self._overlay_rect = [0, 0, 240, 30] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
         self._overlay_screen = [1920, 1080]  # 屏幕逻辑尺寸（拖拽钳制用）
         self._overlay_user_moved = False     # 用户是否手动拖过；没拖过则自适应缩放时保持顶端居中
+        self._overlay_mon_rect = [0, 0, 340, 30]  # 资源条几何（与开关条一样：JS 拖拽时后端钳制不出屏，避免与维护循环互怼闪烁）
+        self._overlay_mon_user_moved = False
 
     def get_defs(self):
         return node_defs()
@@ -725,6 +727,7 @@ class Api:
         u.MonitorFromWindow.restype = wintypes.HMONITOR
         u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
         u.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
+        u.GetAsyncKeyState.argtypes = [ctypes.c_int]; u.GetAsyncKeyState.restype = ctypes.c_short
         g = u.GetWindowLongPtrW; g.restype = ctypes.c_ssize_t; g.argtypes = [wintypes.HWND, ctypes.c_int]
         s = u.SetWindowLongPtrW; s.restype = ctypes.c_ssize_t
         s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
@@ -746,6 +749,7 @@ class Api:
         while not self._overlay_stop_hover and self._overlay_window is not None and not self._closing:
             try:
                 u.GetCursorPos(ctypes.byref(pt))
+                lbtn_down = bool(u.GetAsyncKeyState(0x01) & 0x8000)   # 左键按下中（多半正在拖某个窗）
                 for native, is_bar in self._managed_overlays():
                     try:
                         hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
@@ -765,7 +769,9 @@ class Api:
                     if ny < T + 1: ny = T + 1
                     if nx + w > R - 1: nx = R - 1 - w
                     if ny + h > B - 1: ny = B - 1 - h
-                    if nx != rc.left or ny != rc.top:
+                    # 正被拖动的窗（左键按下且光标在窗内）这一拍不强拉——避免与原生拖动互怼闪烁；松手后下一拍归位。
+                    dragging_this = lbtn_down and (rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom)
+                    if not dragging_this and (nx != rc.left or ny != rc.top):
                         u.SetWindowPos(hwnd, None, int(nx), int(ny), 0, 0, SWP)
                     through = (is_bar and self._overlay_passthrough
                                and not (nx <= pt.x <= nx + w and ny <= pt.y <= ny + h))
@@ -999,6 +1005,8 @@ class Api:
         sx, sy, sw0, _sh0 = self._overlay_rect
         x = max(1, min(sx + sw0 + 4, self._overlay_screen[0] - w0 - 1))
         y = max(1, min(sy, self._overlay_screen[1] - 30 - 1))
+        self._overlay_mon_rect = [x, y, w0, 30]
+        self._overlay_mon_user_moved = False
         kw = dict(width=w0, height=30, x=x, y=y, js_api=self, on_top=True,
                   frameless=True, easy_drag=False, transparent=True,
                   min_size=(80, 20), background_color="#0B0E14")
@@ -1025,15 +1033,48 @@ class Api:
         self._overlay_mon_shown = False
 
     def overlay_mon_resize(self, w, h):
-        """资源监控长条按内容自适应宽度（和开关条一样）。"""
+        """资源监控长条按内容自适应宽度（和开关条一样）。返回当前几何，供前端初始化拖拽基准。"""
         win = self._overlay_mon_window
         if win is None:
             return False
         try:
-            win.resize(max(80, int(w)), int(h))
-            return True
+            w = max(80, min(int(w), int(self._overlay_screen[0])))
+            h = max(20, min(int(h), 200))
         except Exception:
             return False
+        r = self._overlay_mon_rect
+        x = max(1, min(r[0], self._overlay_screen[0] - w - 1))   # 变宽后保证不出屏右/下，仍各留 1px
+        y = max(1, min(r[1], self._overlay_screen[1] - h - 1))
+        self._overlay_mon_rect = [x, y, w, h]
+        def _do():
+            try:
+                win.resize(w, h); win.move(x, y)
+            except Exception:
+                pass
+        self._form_invoke(getattr(win, "native", None), _do)
+        return {"x": x, "y": y, "w": w, "h": h}
+
+    def overlay_mon_move(self, x, y):
+        """资源条拖拽：与开关条同款——后端把目标位置钳制在屏内(各边留1px)再移动，所以不会与维护循环互怼闪烁。"""
+        win = self._overlay_mon_window
+        if win is None:
+            return False
+        try:
+            w, h = self._overlay_mon_rect[2], self._overlay_mon_rect[3]
+            sw, sh = self._overlay_screen
+            x = max(1, min(int(x), sw - w - 1))
+            y = max(1, min(int(y), sh - h - 1))
+        except Exception:
+            return False
+        self._overlay_mon_rect[0] = x; self._overlay_mon_rect[1] = y
+        self._overlay_mon_user_moved = True
+        def _do():
+            try:
+                win.move(x, y)
+            except Exception:
+                pass
+        self._form_invoke(getattr(win, "native", None), _do)
+        return {"x": x, "y": y}
 
     def overlay_data(self):
         """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。

@@ -34,7 +34,7 @@
 </head>
 <body>
   <div id="bar">
-    <div id="grip" class="pywebview-drag-region" title="按住拖动可移动">⠿</div>
+    <div id="grip" title="按住拖动可移动（限制在屏幕内）">⠿</div>
     <span class="grp v-cpu"><span class="ico">🔧</span><span class="m">CPU <span class="nv pct" id="tc">--</span>%</span></span>
     <span class="grp v-mem"><span class="m">内存 <span class="nv mb" id="tm">--</span>M</span></span>
     <span class="sep"></span>
@@ -65,11 +65,29 @@
   }
 
   // 内容自适应宽度：把窗口收成贴合内容（和开关条同样的做法，玻璃只覆盖内容大小）。高固定 30。
+  // overlay_mon_resize 返回当前几何 → 用它初始化/同步拖拽基准 winX/winY/winW。
   function fitToContent() {
     const bar = document.getElementById("bar");
     const w = Math.max(120, Math.ceil(Math.max(bar.scrollWidth, bar.offsetWidth, bar.getBoundingClientRect().width)) + 2);
-    if (Math.abs(w - lastFitW) >= 3) { lastFitW = w; try { api().overlay_mon_resize(w, 30); } catch (e) {} }
+    if (Math.abs(w - lastFitW) >= 3) {
+      lastFitW = w;
+      try { Promise.resolve(api().overlay_mon_resize(w, 30)).then(syncGeom).catch(() => {}); } catch (e) {}
+    }
   }
+  // —— 拖拽：和开关条同款（JS 端按屏幕坐标算位移、后端钳制在屏内），杜绝原生拖动越界后被维护循环拉回的闪烁 ——
+  let winX = 1, winY = 1, winW = 120, dragging = false, sX = 0, sY = 0, aX = 0, aY = 0, pX = 0, pY = 0, raf = false;
+  function syncGeom(r) { if (r && typeof r.x === "number") { winX = r.x; winY = r.y; if (r.w) winW = r.w; } }
+  function flushMove() {
+    raf = false;
+    try { Promise.resolve(api().overlay_mon_move(pX, pY)).then(syncGeom).catch(() => {}); } catch (e) {}
+  }
+  function moveTo(nx, ny) { pX = nx; pY = ny; if (!raf) { raf = true; requestAnimationFrame(flushMove); } }
+  (function wireDrag() {
+    const grip = document.getElementById("grip");
+    grip.addEventListener("mousedown", (e) => { dragging = true; sX = e.screenX; sY = e.screenY; aX = winX; aY = winY; e.preventDefault(); });
+    window.addEventListener("mousemove", (e) => { if (dragging) moveTo(aX + (e.screenX - sX), aY + (e.screenY - sY)); });
+    window.addEventListener("mouseup", () => { dragging = false; });
+  })();
 
   function render(s) {
     set("tc", pct(s.tool_cpu));
