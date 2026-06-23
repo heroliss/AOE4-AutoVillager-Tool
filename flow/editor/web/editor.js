@@ -2703,6 +2703,8 @@ const ED = (function () {
       applySimpleMode();
       if (simpleMode) simpleEntrySig = JSON.stringify(collect());   // 开机即处于使用模式：记下“退出时还原”的基线
       startSysMon();       // 启动右下角资源监控小窗（轮询后端 sys_stats）
+      startRunStateSync(); // 常驻同步运行态：覆盖层启停 ↔ 主界面按钮保持一致
+      try { api().set_run_payload(collect()); } catch (e) {}    // 开机即登记当前图，覆盖层可立刻「启动」
       try { if (!overlayOpen) toggleOverlay(); } catch (e) {}   // 启动即默认打开游戏内覆盖层（可在工具栏 🎮 关掉）
     } catch (err) {
       showError("启动失败：\n" + (err && (err.stack || err.message) || err));
@@ -3303,13 +3305,43 @@ const ED = (function () {
   function stopPoll() { if (pollTimer) cancelAnimationFrame(pollTimer); pollTimer = null; }
   async function startRun() {
     if (running) return;
+    _runActionAt = Date.now();
     bpHitId = null;                                  // 继续/开始跑：清掉“停在断点”的高亮
     if (!(await ensureRunSession())) return;
     try { await api().run_resume(); } catch (e) {}   // 让后台引擎线程开始/继续跑
     running = true; setRunUI();
     startPoll();
   }
-  function pauseRun() { running = false; stopPoll(); try { api().run_pause(); } catch (e) {} setRunUI(); }
+  function pauseRun() { _runActionAt = Date.now(); running = false; stopPoll(); try { api().run_pause(); } catch (e) {} setRunUI(); }
+
+  // ——— 运行态常驻同步：后端引擎是“运行/暂停”的唯一真相，主界面据此对齐按钮与轮询。———
+  // 这样【覆盖层】发起的 启动/暂停/继续 会实时反映到主界面（反之亦然）；也能“认领”从覆盖层冷启动的会话并显示其轨迹。
+  let _runActionAt = 0;                 // 本界面刚发起过运行操作的时刻：短暂内不被同步覆盖，避免与后端结算赛跑
+  function reconcileRunState(s) {
+    if (!s || Date.now() - _runActionAt < 800) return;   // 本地动作 800ms 内让位，等后端结算稳定
+    if (s.alive) {
+      if (!runSession) {                // 引擎在跑但本界面还没认领（多半来自覆盖层「启动」）→ 认领该会话
+        runSession = true; realRun = !!s.real;
+        runLogs = []; _lastRunStatus = ""; _lastTick = 0; _appliedPW = {}; renderLog();
+        startRunAnim();
+        try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {}
+        try { api().run_set_profile(profileOn); } catch (e) {}
+        try { api().run_set_preview(previewOn); } catch (e) {}
+      }
+      if (s.paused) { if (running) { running = false; stopPoll(); } setRunUI(); }
+      else if (!running) { running = true; setRunUI(); startPoll(); }   // 引擎在跑且未暂停 → 开始/恢复轮询轨迹
+    } else if (runSession) {            // 引擎已停（外部 stop / 自然结束）→ 收尾，按钮回到「运行」
+      running = false; stopPoll(); stopRunAnim(); runSession = false; bpHitId = null;
+      runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; runPreviewLabels = {};
+      setRunUI(); if (canvas) canvas.setDirty(true, true);
+    }
+  }
+  function startRunStateSync() {
+    setInterval(async () => {
+      let s = null; try { s = await api().run_state(); } catch (e) {}
+      if (s) reconcileRunState(s);
+    }, 400);
+  }
   function toggleBreakpoint(id) {
     if (breakpoints.has(id)) breakpoints.delete(id); else breakpoints.add(id);
     if (bpHitId === id && !breakpoints.has(id)) bpHitId = null;   // 取消了正停在的那个断点：撤掉暂停高亮
@@ -3328,6 +3360,7 @@ const ED = (function () {
     startRun();
   }
   async function stopRun() {
+    _runActionAt = Date.now();
     running = false; stopPoll(); stopRunAnim(); bpHitId = null;
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
     runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; runPreviewLabels = {};
@@ -4148,6 +4181,7 @@ const ED = (function () {
   // ---- 撤销/重做（对整图做 JSON 快照；buildGraph/applySnapshot 期间抑制）----
   function snapshotNow() {
     if (suppressSnap || building || !graph) return;
+    try { api().set_run_payload(collect()); } catch (e) {}   // 当前图实时登记到后端：覆盖层「启动」直接跑当前图（含未保存改动）
     // 使用模式：不入撤销栈、不计“未保存”（运行/调参是临时操作）；但运行中仍把改动热更新给引擎、并刷新面板。
     if (simpleMode) {
       renderPanel();

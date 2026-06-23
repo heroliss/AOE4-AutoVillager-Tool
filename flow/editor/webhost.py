@@ -1281,11 +1281,28 @@ class Api:
                 return {"running": True, "paused": False}
             self.run_pause()
             return {"running": False, "paused": True}
-        if self._last_payload is None:
-            return {"running": False, "paused": False, "reason": "请先在主界面点一次「运行」"}
-        self.run_begin(self._last_payload, real=True)
+        payload = self._last_payload
+        if payload is None and self._graph is not None:
+            payload = self._payload(self._graph)     # 没运行过也能直接跑：退回到当前已载入的流程
+        if payload is None:
+            return {"running": False, "paused": False, "reason": "还没有可运行的流程"}
+        self.run_begin(payload, real=True)
         self.run_resume()
         return {"running": True, "paused": False}
+
+    def set_run_payload(self, payload):
+        """编辑器把当前图实时登记到后端——这样覆盖层「启动」直接跑【当前图】(含未保存改动)，无需先在主界面运行。"""
+        self._last_payload = payload
+        return True
+
+    def run_state(self):
+        """轻量运行态查询（不消费日志/断点）——主界面常驻同步用，让运行按钮始终反映引擎真相
+        （含【覆盖层】发起的 启动/暂停/继续，两边按钮一致）。"""
+        alive = bool(self._run_thread and self._run_thread.is_alive())
+        with self._snap_lock:
+            paused = self._run_paused
+        return {"alive": alive, "running": alive and not paused,
+                "paused": alive and paused, "real": bool(self._run_real)}
 
     def run_set_breakpoints(self, bps=None, run_until=None):
         """前端切换断点 / “运行到此节点” 时同步给引擎线程（引擎据此精确自停）。"""
