@@ -17,9 +17,14 @@
   /* 文字/按钮全透明：直接把玻璃背景露出来，只有文字本身（带描边增强可读性）。 */
   #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 12px; padding: 0 1px; line-height: 1; }
   #chips { display: inline-flex; align-items: center; gap: 7px; }
+  /* 开关芯片：可点击切换。整片有一层很淡的描边/底，开=偏绿、关=偏红，点一下就翻。 */
   .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; line-height: 1;
-    opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
-  .chip .k { color: #dfe5ee; }
+    opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.6); cursor: pointer; padding: 2px 7px; border-radius: 11px;
+    border: 1px solid rgba(255,255,255,0.16); transition: background .12s; }
+  .chip:hover { background: rgba(255,255,255,0.14); }
+  .chip.on  { border-color: rgba(110,240,150,0.5);  background: rgba(70,200,110,0.14); }
+  .chip.off { border-color: rgba(255,130,130,0.45); background: rgba(220,80,80,0.12); }
+  .chip .k { color: #eef2f8; }
   .chip .v { font-weight: 700; }
   .chip .v.on  { color: #7bf0a2; }
   .chip .v.off { color: #ff9a9a; }
@@ -51,17 +56,20 @@
   let pinned = true, ready = false;
   let winX = 0, winY = 0, winW = 240, winH = 30, screenW = 1920, screenH = 1080, lastFitW = 0;
 
-  function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  const switchState = {};   // id -> 当前开关态（点击时据此翻转 + 乐观更新）
 
   function render(d) {
     let html = "";
     for (const it of (d.items || [])) {
       const on = (it.value === true || it.value === "true" || it.value === 1);
-      html += "<span class='chip'><span class='k'>" + esc(it.label) + "</span>" +
+      switchState[it.id] = on;
+      html += "<span class='chip " + (on ? "on" : "off") + "' data-id='" + esc(it.id) + "' title='点击切换'>" +
+              "<span class='k'>" + esc(it.label) + "</span>" +
               "<span class='v " + (on ? "on" : "off") + "'>" + (on ? "开" : "关") + "</span></span>";
     }
     document.getElementById("chips").innerHTML =
-      html || "<span class='chip'><span class='k'>（未选择要显示的开关）</span></span>";
+      html || "<span class='chip' style='cursor:default;border:0;background:none'><span class='k'>（未选择要显示的开关）</span></span>";
     const al = document.getElementById("alert");
     if (d.bp_hit || d.paused) { al.style.display = "inline-flex"; al.textContent = "⏸ " + (d.bp_hit ? ("命中断点：" + d.bp_hit) : "已暂停"); }
     else { al.style.display = "none"; }
@@ -77,6 +85,19 @@
   }
 
   function toggleCfg() { try { api().toggle_overlay_cfg(); } catch (e) {} }
+
+  // 点开关芯片：乐观翻转 UI(不等 500ms 轮询) + 通知后端实时启停该段
+  function applyChipUI(chip, on) {
+    chip.classList.toggle("on", on); chip.classList.toggle("off", !on);
+    const v = chip.querySelector(".v");
+    if (v) { v.textContent = on ? "开" : "关"; v.className = "v " + (on ? "on" : "off"); }
+  }
+  document.getElementById("chips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip[data-id]"); if (!chip) return;
+    const id = chip.dataset.id, on = !switchState[id];
+    switchState[id] = on; applyChipUI(chip, on);
+    try { api().overlay_set_switch(id, on); } catch (err) {}
+  });
   function togglePin() {
     pinned = !pinned;
     try { api().overlay_set_on_top(pinned); } catch (e) {}

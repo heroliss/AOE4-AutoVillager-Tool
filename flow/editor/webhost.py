@@ -637,6 +637,33 @@ class Api:
             self._set_clickthrough(False)
         return True
 
+    def overlay_set_switch(self, nid, on):
+        """覆盖层点开关：实时启停某生产段。
+        运行中→直接改运行图的开关(下一帧门控即按新值)，并登记 param_writes 让编辑器节点/面板同步显示；
+        没运行→尽力改后端图(仅供覆盖层自身显示，真正起效仍以编辑器为准)。"""
+        on = bool(on)
+        rg, rctx = self._run_graph, self._run_ctx
+        running = (rg is not None and rctx is not None and nid in rg.nodes
+                   and getattr(rg.nodes[nid], "type_id", "") == "data.switch")
+        if running:
+            try:
+                rg.nodes[nid].values["on"] = on        # 标量写：原子、立即生效(下一帧)，无需持锁
+            except Exception:
+                pass
+            with self._run_lock:                       # param_writes 要与运行循环读取互斥(避免迭代时改 dict)
+                try:
+                    rctx.param_writes.setdefault(nid, {})["on"] = on
+                except Exception:
+                    pass
+        else:
+            g = self._graph
+            if g is not None and nid in g.nodes and getattr(g.nodes[nid], "type_id", "") == "data.switch":
+                try:
+                    g.nodes[nid].values["on"] = on
+                except Exception:
+                    pass
+        return {"ok": True, "on": on, "running": running}
+
     def _shutdown_overlay(self):
         """关闭程序前优雅收尾覆盖层——【顺序很关键】，否则会触发那个 pythonnet 关闭崩溃：
         ① 先置 _closing：此后任何 _form_invoke 都短路，不再发起新的 BeginInvoke；
