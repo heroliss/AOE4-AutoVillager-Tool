@@ -3436,7 +3436,7 @@ const ED = (function () {
       const r = await api().toggle_overlay();
       overlayOpen = !!(r && r.open);
       const b = document.getElementById("overlaybtn");
-      if (b) b.classList.toggle("active", overlayOpen);
+      if (b) b.classList.toggle("on", overlayOpen);   // 与 ⏱耗时/🖼预览 一致：开启时蓝底高亮
       if (r && r.open === false && r.reason) showError("打开覆盖层失败：" + r.reason);
     } catch (e) { showError("打开覆盖层失败：" + (e && (e.stack || e.message) || e)); }
   }
