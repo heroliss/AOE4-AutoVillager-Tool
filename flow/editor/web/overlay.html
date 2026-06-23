@@ -12,13 +12,13 @@
 
   /* 很窄、很透的玻璃条：自身几乎不画背景（背景全靠系统玻璃），只留极细边框勾出轮廓。 */
   #bar { display: inline-flex; align-items: center; gap: 6px; width: max-content; height: 100%; box-sizing: border-box;
-    padding: 0 6px; background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; }
+    padding: 0 6px; background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; }
 
   /* 文字/按钮全透明：直接把玻璃背景露出来，只有文字本身（带描边增强可读性）。 */
-  #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 12px; padding: 0 1px; line-height: 1; }
+  #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 11px; padding: 0 1px; line-height: 1; }
   #chips { display: inline-flex; align-items: center; gap: 5px; }
-  .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; line-height: 1.1;
-    opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
+  .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 11.5px; line-height: 1;
+    opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
   .chip .k { color: #dfe5ee; }
   .chip .v { font-weight: 700; }
   .chip .v.on  { color: #7bf0a2; }

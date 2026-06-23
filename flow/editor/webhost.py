@@ -326,8 +326,9 @@ class Api:
         self._overlay_bg_alpha = 55          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透；以透明为主故默认很淡）
         self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
         self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认只一点点
-        self._overlay_rect = [0, 0, 200, 26] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
+        self._overlay_rect = [0, 0, 200, 22] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
         self._overlay_screen = [1920, 1080]  # 屏幕逻辑尺寸（拖拽钳制用）
+        self._overlay_user_moved = False     # 用户是否手动拖过；没拖过则自适应缩放时保持顶端居中
 
     def get_defs(self):
         return node_defs()
@@ -535,15 +536,20 @@ class Api:
         except Exception:
             return False
 
-    _FROST_STATE = {0: 2, 1: 3, 2: 4}   # 毛度→AccentState: 0无=透明渐变 1轻=模糊 2重=亚克力
+    # 毛度→AccentState：0无=透明渐变(2)，1轻/2重=亚克力(4)。
+    # 注意：故意【不用】状态3(ACCENT_ENABLE_BLURBEHIND)——它在 Win10/11 上会把背景渲染成黑色（已知坑）。
+    _FROST_STATE = {0: 2, 1: 4, 2: 4}
 
     def _glass(self, win, frost, alpha):
-        """给任意覆盖窗上玻璃：frost 决定模糊档（轻=模糊/重=亚克力/无=只着色），alpha=背景着色不透明度。"""
+        """给任意覆盖窗上玻璃：frost 决定档（无=只透明着色 / 轻·重=亚克力），alpha=背景着色不透明度。
+        重档把着色调实一些（亚克力本身模糊半径由系统定、不可调，用着色浓淡区分轻/重）。"""
         if win is None:
             return
         native = getattr(win, "native", None)
-        state = self._FROST_STATE.get(int(frost), 3)
-        tint = ((int(alpha) & 0xFF) << 24) | 0x35435C   # 中性蓝灰着色（偏淡、不发黑）
+        frost = int(frost)
+        state = self._FROST_STATE.get(frost, 4)
+        a = max(int(alpha), 140) if frost == 2 else int(alpha)   # 重：着色更浓、更“毛”
+        tint = ((a & 0xFF) << 24) | 0x35435C   # 中性蓝灰着色（偏淡、不发黑）
         self._form_invoke(native, lambda: self._apply_acrylic(native, state, tint))
 
     def _overlay_glass(self):
@@ -569,12 +575,15 @@ class Api:
         except Exception:
             sw, sh = 1920, 1080
         self._overlay_screen = [sw, sh]
-        # 初始摆到左1/8处、贴顶；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)。高度做成和按钮一样窄。
-        x0, y0, w0, h0 = sw // 8, 8, 360, 26
+        self._overlay_user_moved = False
+        # 顶端居中；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)并重新居中。高度做成和按钮一样窄。
+        # ⚠ 必须给 min_size 很小，否则 pywebview 默认最小高(100)会让 26px 的窄条根本压不下去。
+        w0, h0 = 360, 22
+        x0, y0 = max(0, (sw - w0) // 2), 0
         self._overlay_rect = [x0, y0, w0, h0]
         kw = dict(width=w0, height=h0, x=x0, y=y0, js_api=self,
                   on_top=True, frameless=True, easy_drag=False, transparent=True,
-                  background_color="#0B0E14")
+                  min_size=(80, 20), background_color="#0B0E14")
         try:
             self._overlay_window = webview.create_window("AOE4 Overlay", url=page, **kw)
             try:
@@ -644,8 +653,10 @@ class Api:
         page = os.path.join(WEB_DIR, "overlay_cfg.html")
         x = max(0, min(self._overlay_rect[0], self._overlay_screen[0] - 230))
         y = min(self._overlay_rect[1] + 34, self._overlay_screen[1] - 170)
+        # easy_drag=False：否则拖滑杆时整窗也跟着被拖；只让标题栏(带 pywebview-drag-region)拖动。
         kw = dict(width=224, height=158, x=x, y=y, js_api=self, on_top=True,
-                  frameless=True, easy_drag=True, transparent=True, background_color="#0B0E14")
+                  frameless=True, easy_drag=False, transparent=True,
+                  min_size=(120, 80), background_color="#0B0E14")
         try:
             self._overlay_cfg_window = webview.create_window("AOE4 Overlay 设置", url=page, **kw)
             try:
@@ -701,11 +712,13 @@ class Api:
             return False
         try:
             w = max(80, min(int(w), int(self._overlay_screen[0])))
-            h = max(24, min(int(h), 200))
+            h = max(20, min(int(h), 200))
         except Exception:
             return False
         x, y = self._overlay_rect[0], self._overlay_rect[1]
-        x = max(0, min(x, self._overlay_screen[0] - w))   # 收窄后若越界则拉回屏内
+        if not self._overlay_user_moved:        # 没手动拖过 → 自适应后保持顶端居中
+            x = max(0, (self._overlay_screen[0] - w) // 2)
+        x = max(0, min(x, self._overlay_screen[0] - w))   # 越界则拉回屏内
         y = max(0, min(y, self._overlay_screen[1] - h))
         self._overlay_rect = [x, y, w, h]
         def _do():
@@ -728,6 +741,7 @@ class Api:
             y = max(0, min(int(y), sh - h))
         except Exception:
             return False
+        self._overlay_user_moved = True         # 用户手动拖过 → 之后自适应不再强行居中
         self._overlay_rect[0] = x; self._overlay_rect[1] = y
         def _do():
             try:
