@@ -2922,10 +2922,11 @@ const ED = (function () {
     const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
     return [a * p0[0] + b * c0[0] + c * c1[0] + d * p1[0], a * p0[1] + b * c0[1] + c * c1[1] + d * p1[1]];
   }
-  function _drawDirArrow(ctx, pa, pb, color) {
-    const cc = linkCtrlPts(pa, pb);
-    const m = _bezAt(pa, cc[0], cc[1], pb, 0.5);
-    const a0 = _bezAt(pa, cc[0], cc[1], pb, 0.44), a1 = _bezAt(pa, cc[0], cc[1], pb, 0.56);
+  function _drawDirArrow(ctx, pa, pb, color, bow) {
+    const cc = linkCtrlPts(pa, pb), b = bow || 0;
+    const c0 = [cc[0][0], cc[0][1] + b], c1 = [cc[1][0], cc[1][1] + b];   // 随汇入线的“交错弯曲”一起偏移，箭头才落在曲线上
+    const m = _bezAt(pa, c0, c1, pb, 0.5);
+    const a0 = _bezAt(pa, c0, c1, pb, 0.44), a1 = _bezAt(pa, c0, c1, pb, 0.56);
     ctx.save(); ctx.translate(m[0], m[1]); ctx.rotate(Math.atan2(a1[1] - a0[1], a1[0] - a0[0]));
     ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
     ctx.restore();
@@ -2937,12 +2938,26 @@ const ED = (function () {
     for (const s of Object.values((canvas && canvas.selected_nodes) || {})) ids.add(s._id);   // 选中(可多选)，与悬停并集
     if (!ids.size) return;
     const links = graph.links || {}, hot = [], cold = [];
+    // 复刻 drawExtraExecLinks 的“汇入线分组 + 交错弯曲(bow)”：聚焦曲线必须与底层【补画的弯曲汇入线】完全重合，
+    // 否则会画出与真实连线错位、形状一致的“幽灵线”（用户看到的暗黑/白色多余连线）。LiteGraph 直接画的那条 bow=0。
+    const byTarget = {};
+    for (const k in links) {
+      const l = links[k];
+      if (!l || l.type !== "exec") continue;
+      const b = graph.getNodeById(l.target_id);
+      if (!b || !b.inputs || !b.inputs[l.target_slot]) continue;
+      if (b.inputs[l.target_slot].link === l.id) continue;       // 这条是 LiteGraph 自己画的直线（canonical）
+      const key = l.target_id + "" + l.target_slot;
+      (byTarget[key] = byTarget[key] || []).push(l);
+    }
+    const bowOf = {};
+    for (const key in byTarget) byTarget[key].forEach((l, j) => { bowOf[l.id] = ((j % 2 === 0) ? 1 : -1) * (Math.floor(j / 2) + 1) * 24; });
     for (const k in links) {
       const l = links[k]; if (!l) continue;
       const A = graph.getNodeById(l.origin_id), B = graph.getNodeById(l.target_id);
       if (!A || !B || foldHidden.has(A._id) || foldHidden.has(B._id)) continue;
       const pa = A.getConnectionPos(false, l.origin_slot, _t0), pb = B.getConnectionPos(true, l.target_slot, _t1);
-      const rec = { pa: [pa[0], pa[1]], pb: [pb[0], pb[1]], col: _linkColor(A, l) };
+      const rec = { pa: [pa[0], pa[1]], pb: [pb[0], pb[1]], col: _linkColor(A, l), bow: bowOf[l.id] || 0 };
       (ids.has(A._id) || ids.has(B._id) ? hot : cold).push(rec);
     }
     if (!hot.length) return;          // 焦点节点没连线就别打扰（也别凭空压暗整图）
@@ -2952,14 +2967,14 @@ const ED = (function () {
     ctx.lineCap = "butt"; ctx.strokeStyle = "rgba(24,27,33,0.6)"; ctx.lineWidth = (canvas.connections_width || 3);
     for (const r of cold) {
       const cc = linkCtrlPts(r.pa, r.pb);
-      ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], r.pb[0], r.pb[1]); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1] + r.bow, cc[1][0], cc[1][1] + r.bow, r.pb[0], r.pb[1]); ctx.stroke();
     }
     ctx.lineCap = "round";
     for (const r of hot) {            // ② 点亮焦点连线（类型色、加粗、发光）+ 方向箭头
       const cc = linkCtrlPts(r.pa, r.pb);
       ctx.strokeStyle = r.col; ctx.lineWidth = 3.5; ctx.shadowColor = r.col; ctx.shadowBlur = 8;
-      ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1], cc[1][0], cc[1][1], r.pb[0], r.pb[1]); ctx.stroke();
-      ctx.shadowBlur = 0; _drawDirArrow(ctx, r.pa, r.pb, r.col);
+      ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1] + r.bow, cc[1][0], cc[1][1] + r.bow, r.pb[0], r.pb[1]); ctx.stroke();
+      ctx.shadowBlur = 0; _drawDirArrow(ctx, r.pa, r.pb, r.col, r.bow);
     }
     ctx.restore();
   }
