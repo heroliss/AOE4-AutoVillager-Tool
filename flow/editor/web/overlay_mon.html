@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>覆盖层资源监控</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+    font-family: "Microsoft YaHei", system-ui, sans-serif; -webkit-user-select: none; user-select: none; color: #eaeff6; }
+  /* 同款很透的玻璃卡片：背景靠系统玻璃，自己只留细边框 */
+  #card { box-sizing: border-box; height: 100%; padding: 5px 9px; border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 8px; background: transparent; }
+  #hd { display: flex; align-items: center; font-size: 12px; font-weight: 700; height: 16px; cursor: move;
+    text-shadow: 0 1px 2px #0008; }
+  #hd .x { margin-left: auto; cursor: pointer; opacity: 0.8; padding: 0 3px; }
+  #hd .x:hover { opacity: 1; }
+  .row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; margin: 3px 0; text-shadow: 0 1px 2px #0008; }
+  .row .tag { width: 30px; color: #c6cedb; }
+  .row b { font-weight: 700; }
+  .cpu { color: #7fd0ff; } .mem { color: #ffd45e; } .off { color: #ff9a9a; }
+  #spark { display: block; width: 100%; height: 26px; margin-top: 3px; }
+</style>
+</head>
+<body>
+  <div id="card">
+    <div id="hd" class="pywebview-drag-region">资源监控<span class="x" onclick="closeWin()">✕</span></div>
+    <div class="row"><span class="tag">工具</span><span>CPU <b class="cpu" id="tc">--</b>%</span><span>· <b class="mem" id="tm">--</b> MB</span></div>
+    <div class="row"><span class="tag">游戏</span><span id="gwrap">CPU <b class="cpu" id="gc">--</b>%　· <b class="mem" id="gm">--</b> MB</span></div>
+    <canvas id="spark" width="178" height="26"></canvas>
+  </div>
+<script>
+  function api() { return (window.pywebview && window.pywebview.api) || null; }
+  function closeWin() { try { api().toggle_overlay_mon(); } catch (e) {} }
+  const histT = [], histG = [], CAP = 60;   // 工具/游戏 CPU 历史（画迷你曲线）
+
+  function draw() {
+    const c = document.getElementById("spark"), ctx = c.getContext("2d");
+    const W = c.width, H = c.height; ctx.clearRect(0, 0, W, H);
+    const grid = (y) => { ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); };
+    grid(H * 0.5); grid(H - 0.5);
+    const line = (hist, color) => {
+      if (hist.length < 2) return;
+      ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
+      for (let i = 0; i < hist.length; i++) {
+        const x = W * i / (CAP - 1), y = H - Math.max(0, Math.min(100, hist[i])) / 100 * H;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+    };
+    line(histT, "#7fd0ff"); line(histG, "#ff9a5e");
+  }
+
+  function poll() {
+    const a = api();
+    if (!a) { setTimeout(poll, 200); return; }
+    Promise.resolve(a.sys_stats()).then(s => {
+      if (s && s.ok) {
+        document.getElementById("tc").textContent = s.tool_cpu;
+        document.getElementById("tm").textContent = Math.round(s.tool_mem);
+        if (s.game_running) {
+          document.getElementById("gwrap").innerHTML =
+            "CPU <b class='cpu' id='gc'>" + s.game_cpu + "</b>%　· <b class='mem' id='gm'>" + Math.round(s.game_mem) + "</b> MB";
+        } else {
+          document.getElementById("gwrap").innerHTML = "<b class='off'>未检测到游戏进程</b>";
+        }
+        histT.push(s.tool_cpu); if (histT.length > CAP) histT.shift();
+        histG.push(s.game_running ? s.game_cpu : 0); if (histG.length > CAP) histG.shift();
+        draw();
+      }
+    }).catch(() => {}).finally(() => setTimeout(poll, 1000));
+  }
+  poll();
+</script>
+</body>
+</html>

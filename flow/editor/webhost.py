@@ -324,6 +324,8 @@ class Api:
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
         self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度/穿透）
         self._overlay_cfg_shown = False      # 设置窗当前是否可见（复用 hide/show、避免每次重建闪烁）
+        self._overlay_mon_window = None      # 覆盖层【资源监控】小窗（同款玻璃；CPU/内存/曲线，复用 sys_stats）
+        self._overlay_mon_shown = False
         self._overlay_bg_alpha = 20          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=不着色纯靠模糊；默认20=很淡的一点着色）
         self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
         self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认轻
@@ -682,7 +684,7 @@ class Api:
             except Exception:
                 pass
         self._overlay_hover_thread = None
-        for attr in ("_overlay_cfg_window", "_overlay_window"):
+        for attr in ("_overlay_cfg_window", "_overlay_mon_window", "_overlay_window"):
             w = getattr(self, attr, None)
             if w is not None:
                 try:
@@ -739,12 +741,14 @@ class Api:
     def _on_overlay_closed(self):
         self._overlay_stop_hover = True
         self._overlay_window = None
-        if self._overlay_cfg_window is not None:   # 主窄条没了，孤儿设置窗也关掉
-            try:
-                self._overlay_cfg_window.destroy()
-            except Exception:
-                pass
-            self._overlay_cfg_window = None
+        for attr in ("_overlay_cfg_window", "_overlay_mon_window"):   # 主窄条没了，孤儿设置/监控窗也关掉
+            w = getattr(self, attr, None)
+            if w is not None:
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
 
     def overlay_set_on_top(self, flag):
         w = self._overlay_window
@@ -826,6 +830,49 @@ class Api:
         """设置窗读取当前值，初始化滑杆。"""
         return {"bg": self._overlay_bg_alpha, "content": self._overlay_content_alpha,
                 "frost": self._overlay_frost, "passthrough": self._overlay_passthrough}
+
+    # ---------- 覆盖层【资源监控】小窗：同款玻璃，CPU/内存/曲线（复用 sys_stats）----------
+    def toggle_overlay_mon(self):
+        if self._overlay_window is None:
+            return {"open": False, "reason": "先打开覆盖层"}
+        if self._overlay_mon_window is not None:
+            try:
+                if self._overlay_mon_shown:
+                    self._overlay_mon_window.hide(); self._overlay_mon_shown = False
+                    return {"open": False}
+                self._overlay_mon_window.show(); self._overlay_mon_shown = True
+                return {"open": True}
+            except Exception:
+                self._overlay_mon_window = None
+        import webview
+        page = os.path.join(WEB_DIR, "overlay_mon.html")
+        x = max(1, min(self._overlay_rect[0], self._overlay_screen[0] - 210))
+        y = min(self._overlay_rect[1] + 34, self._overlay_screen[1] - 130)
+        kw = dict(width=196, height=112, x=x, y=y, js_api=self, on_top=True,
+                  frameless=True, easy_drag=False, transparent=True,
+                  min_size=(120, 70), background_color="#0B0E14")
+        try:
+            self._overlay_mon_window = webview.create_window("AOE4 Overlay 监控", url=page, **kw)
+            self._overlay_mon_shown = True
+            try:
+                self._overlay_mon_window.events.closed += self._on_overlay_mon_closed
+            except Exception:
+                pass
+            try:    # 移出任务栏(先) + 与窄条同款玻璃(跟随当前背景/毛度，统一观感)
+                def _mon_shown():
+                    self._form_set(getattr(self._overlay_mon_window, "native", None), "ShowInTaskbar", False)
+                    self._glass(self._overlay_mon_window, self._overlay_frost, max(self._overlay_bg_alpha, 30))
+                self._overlay_mon_window.events.shown += _mon_shown
+            except Exception:
+                pass
+            return {"open": True}
+        except Exception as e:
+            self._overlay_mon_window = None
+            return {"open": False, "reason": str(e)}
+
+    def _on_overlay_mon_closed(self):
+        self._overlay_mon_window = None
+        self._overlay_mon_shown = False
 
     def overlay_data(self):
         """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。
@@ -1401,7 +1448,7 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     def _close_monitor():           # 主编辑器关掉时，连带关掉独立浮窗（资源监控 / 覆盖层 / 覆盖层设置），否则它们会让进程不退出
         api._closing = True          # 先置关闭标志：此后 _form_invoke/_form_set 一律不再投递到已销毁窗体（防关闭崩溃）
         api._overlay_stop_hover = True
-        for attr in ("_mon_window", "_overlay_window", "_overlay_cfg_window"):
+        for attr in ("_mon_window", "_overlay_window", "_overlay_cfg_window", "_overlay_mon_window"):
             w = getattr(api, attr, None)
             if w is not None:
                 try:

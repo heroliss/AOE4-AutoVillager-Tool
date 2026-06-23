@@ -46,6 +46,7 @@
     <div id="chips"></div>
     <div id="alert"></div>
     <div id="tools">
+      <span class="tbtn" id="monbtn" title="资源监控（CPU/内存/曲线，独立玻璃小窗）" onclick="toggleMon()">📊</span>
       <span class="tbtn" id="cfgbtn" title="设置（背景/内容透明度·毛度·穿透）" onclick="toggleCfg()">⚙</span>
     </div>
   </div>
@@ -83,6 +84,7 @@
   }
 
   function toggleCfg() { try { api().toggle_overlay_cfg(); } catch (e) {} }
+  function toggleMon() { try { api().toggle_overlay_mon(); } catch (e) {} }
 
   // 点开关芯片：乐观翻转 UI(不等 500ms 轮询) + 通知后端实时启停该段
   function applyChipUI(chip, on) {
