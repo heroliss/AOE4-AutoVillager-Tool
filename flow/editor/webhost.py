@@ -322,10 +322,15 @@ class Api:
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
         self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
-        self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度）
-        self._overlay_bg_alpha = 55          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透；以透明为主故默认很淡）
+        self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度/穿透）
+        self._overlay_cfg_shown = False      # 设置窗当前是否可见（复用 hide/show、避免每次重建闪烁）
+        self._overlay_bg_alpha = 0           # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=不着色、纯靠模糊，默认最透）
         self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
-        self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认只一点点
+        self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认轻
+        self._overlay_passthrough = True     # 鼠标穿透(自动)：光标不在窄条上时让窗口对鼠标透明→游戏照常贴边移镜
+        self._overlay_stop_hover = False     # 停止 hover 轮询线程标志
+        self._overlay_hover_thread = None    # 光标 hover 轮询线程（自动切换穿透/可点击）
+        self._closing = False                # 程序正在关闭：此后一律不再 BeginInvoke 原生窗体（防关闭崩溃）
         self._overlay_rect = [0, 0, 240, 30] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
         self._overlay_screen = [1920, 1080]  # 屏幕逻辑尺寸（拖拽钳制用）
         self._overlay_user_moved = False     # 用户是否手动拖过；没拖过则自适应缩放时保持顶端居中
@@ -403,14 +408,24 @@ class Api:
         return True
 
     @staticmethod
-    def _form_set(native, attr, value):
+    def _native_dead(native):
+        """控件是否已销毁/正在销毁——此时绝不能 BeginInvoke：会抛 InvalidAsynchronousStateException，
+        而 pythonnet 转这种异常类型时自身又会崩(NullReference)，表现为关闭程序时一堆未处理异常。"""
+        if native is None or not hasattr(native, "InvokeRequired"):
+            return True
+        try:
+            return bool(getattr(native, "IsDisposed", False) or getattr(native, "Disposing", False))
+        except Exception:
+            return True
+
+    def _form_set(self, native, attr, value):
         """跨线程安全地设置原生 WinForms 窗体属性（TopMost / Opacity 等）——投递到 UI 线程执行。
 
         ⚠ js_api 处理器跑在【工作线程】上（pywebview 每次调用新开线程）。直接在工作线程上写
         .NET 控件属性（如 Form.TopMost）会触发窗口句柄重建、与 WebView2 消息循环互等死锁——
         表现就是「点一下就卡死」。pywebview 自带的 set_on_top 恰恰没切回 UI 线程，故这里统一用
         原生 Form.BeginInvoke 把改动异步投递到 UI 线程（立即返回、不阻塞工作线程）。"""
-        if native is None or not hasattr(native, "InvokeRequired"):
+        if self._closing or self._native_dead(native):
             return False
         try:
             from System import Action
@@ -486,14 +501,9 @@ class Api:
     # 无边框 + 透明 + 置顶 + Windows 亚克力毛玻璃的独立系统窗口，悬在游戏上方。
     # 背景透明度 = 亚克力 tint 的 alpha；内容透明度由页面 CSS 单独控制（两者独立）。
     # 默认摆成贴屏幕顶边的窄条（左1/8~右7/8、高≤40px），中间主视野不被遮挡。
-    @staticmethod
-    def _form_invoke(native, fn):
+    def _form_invoke(self, native, fn):
         """把任意函数投递到原生窗体的 UI 线程执行（亚克力等 Win32 调用需在创建窗口的线程上做）。"""
-        if native is None or not hasattr(native, "InvokeRequired"):
-            try:
-                fn()
-            except Exception:
-                pass
+        if self._closing or self._native_dead(native):
             return
         try:
             from System import Action
@@ -502,10 +512,7 @@ class Api:
             else:
                 fn()
         except Exception:
-            try:
-                fn()
-            except Exception:
-                pass
+            pass
 
     @staticmethod
     def _apply_acrylic(native, accent_state, tint_argb):
@@ -556,9 +563,84 @@ class Api:
         """主窄条上玻璃。窗口 shown 后调用（句柄已就绪）。"""
         self._glass(self._overlay_window, self._overlay_frost, self._overlay_bg_alpha)
 
+    def _overlay_on_shown(self):
+        """窄条显示后：上玻璃 + 启动光标 hover 轮询线程（自动切换鼠标穿透/可点击）。"""
+        self._overlay_glass()
+        self._overlay_stop_hover = False
+        if self._overlay_hover_thread is None or not self._overlay_hover_thread.is_alive():
+            self._overlay_hover_thread = threading.Thread(target=self._overlay_hover_loop,
+                                                          name="overlay-hover", daemon=True)
+            self._overlay_hover_thread.start()
+
+    # —— 鼠标穿透（解决覆盖层挡住游戏“贴屏边移镜”）——
+    # 自动模式：光标【不在】窄条矩形内时给窗口加 WS_EX_TRANSPARENT → 鼠标穿透到游戏(照常贴边移镜)；
+    #          光标【在】窄条上时去掉它 → 恢复可点击(能切开关)。用物理像素比对，规避 DPI 缩放误差。
+    def _set_clickthrough(self, on):
+        win = self._overlay_window
+        native = getattr(win, "native", None) if win else None
+        if self._closing or self._native_dead(native):
+            return
+
+        def _do():
+            try:
+                import ctypes
+                from ctypes import wintypes
+                u = ctypes.windll.user32
+                hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
+                GWL_EXSTYLE, WS_EX_TRANSPARENT, WS_EX_LAYERED = -20, 0x20, 0x80000
+                g = u.GetWindowLongPtrW; g.restype = ctypes.c_ssize_t; g.argtypes = [wintypes.HWND, ctypes.c_int]
+                s = u.SetWindowLongPtrW; s.restype = ctypes.c_ssize_t
+                s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+                st = g(hwnd, GWL_EXSTYLE)
+                st = (st | WS_EX_TRANSPARENT | WS_EX_LAYERED) if on else (st & ~WS_EX_TRANSPARENT)
+                s(hwnd, GWL_EXSTYLE, st)
+            except Exception:
+                pass
+        self._form_invoke(native, _do)
+
+    def _overlay_hover_loop(self):
+        import ctypes, time
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        u.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+        u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        win = self._overlay_window
+        native = getattr(win, "native", None) if win else None
+        try:
+            hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
+        except Exception:
+            return
+        pt, rc, cur = wintypes.POINT(), wintypes.RECT(), None
+        while not self._overlay_stop_hover and self._overlay_window is not None and not self._closing:
+            try:
+                if not self._overlay_passthrough:
+                    through = False                  # 关闭自动穿透 → 始终可点击
+                else:
+                    u.GetCursorPos(ctypes.byref(pt)); u.GetWindowRect(hwnd, ctypes.byref(rc))
+                    over = rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom
+                    through = not over               # 光标不在窄条上 → 穿透；在 → 可点击
+                if through != cur:
+                    cur = through; self._set_clickthrough(through)
+            except Exception:
+                pass
+            time.sleep(0.06)
+        if not self._closing:                        # 退出时恢复可交互（窗口若还在）
+            try:
+                self._set_clickthrough(False)
+            except Exception:
+                pass
+
+    def overlay_set_passthrough(self, on):
+        """开/关“鼠标自动穿透”。关掉=窄条始终可点击（但会挡住其下的贴边移镜）。"""
+        self._overlay_passthrough = bool(on)
+        if not self._overlay_passthrough:
+            self._set_clickthrough(False)
+        return True
+
     def toggle_overlay(self):
         """开/关游戏内覆盖层窗口；返回 {open: bool}。"""
         if self._overlay_window is not None:
+            self._overlay_stop_hover = True
             try:
                 self._overlay_window.destroy()
             except Exception:
@@ -591,7 +673,7 @@ class Api:
             except Exception:
                 pass
             try:
-                self._overlay_window.events.shown += self._overlay_glass   # 显示后再上亚克力
+                self._overlay_window.events.shown += self._overlay_on_shown   # 显示后上玻璃 + 启动 hover 穿透
             except Exception:
                 pass
             return {"open": True}
@@ -600,6 +682,7 @@ class Api:
             return {"open": False, "reason": str(e)}
 
     def _on_overlay_closed(self):
+        self._overlay_stop_hover = True
         self._overlay_window = None
         if self._overlay_cfg_window is not None:   # 主窄条没了，孤儿设置窗也关掉
             try:
@@ -638,27 +721,32 @@ class Api:
         self._overlay_glass()
         return True
 
-    # ---------- 覆盖层【设置】小窗：同款玻璃，放调背景/内容透明度/毛度的滑杆（窄条太小放不下）----------
+    # ---------- 覆盖层【设置】小窗：同款玻璃，放调背景/内容透明度/毛度/穿透（窄条太小放不下）----------
+    # ⚠ 不每次 create/destroy——新建一个 WebView2 窗口要整段初始化(几百ms)，正是“弹出时闪烁卡顿”的原因。
+    #   改为首次创建后只 hide/show 复用：第二次起瞬开、无闪烁。
     def toggle_overlay_cfg(self):
-        if self._overlay_cfg_window is not None:
-            try:
-                self._overlay_cfg_window.destroy()
-            except Exception:
-                pass
-            self._overlay_cfg_window = None
-            return {"open": False}
         if self._overlay_window is None:
             return {"open": False, "reason": "先打开覆盖层"}
+        if self._overlay_cfg_window is not None:
+            try:
+                if self._overlay_cfg_shown:
+                    self._overlay_cfg_window.hide(); self._overlay_cfg_shown = False
+                    return {"open": False}
+                self._overlay_cfg_window.show(); self._overlay_cfg_shown = True
+                return {"open": True}
+            except Exception:
+                self._overlay_cfg_window = None   # 复用失败则下面重建
         import webview
         page = os.path.join(WEB_DIR, "overlay_cfg.html")
         x = max(0, min(self._overlay_rect[0], self._overlay_screen[0] - 230))
         y = min(self._overlay_rect[1] + 34, self._overlay_screen[1] - 170)
         # easy_drag=False：否则拖滑杆时整窗也跟着被拖；只让标题栏(带 pywebview-drag-region)拖动。
-        kw = dict(width=224, height=158, x=x, y=y, js_api=self, on_top=True,
+        kw = dict(width=224, height=176, x=x, y=y, js_api=self, on_top=True,
                   frameless=True, easy_drag=False, transparent=True,
                   min_size=(120, 80), background_color="#0B0E14")
         try:
             self._overlay_cfg_window = webview.create_window("AOE4 Overlay 设置", url=page, **kw)
+            self._overlay_cfg_shown = True
             try:
                 self._overlay_cfg_window.events.closed += self._on_overlay_cfg_closed
             except Exception:
@@ -674,10 +762,12 @@ class Api:
 
     def _on_overlay_cfg_closed(self):
         self._overlay_cfg_window = None
+        self._overlay_cfg_shown = False
 
     def overlay_cfg_state(self):
         """设置窗读取当前值，初始化滑杆。"""
-        return {"bg": self._overlay_bg_alpha, "content": self._overlay_content_alpha, "frost": self._overlay_frost}
+        return {"bg": self._overlay_bg_alpha, "content": self._overlay_content_alpha,
+                "frost": self._overlay_frost, "passthrough": self._overlay_passthrough}
 
     def overlay_data(self):
         """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。
@@ -1228,8 +1318,12 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
 
     # 关闭窗口时，若有未保存修改则弹原生确认（返回 False 取消关闭）。前端通过 set_dirty 同步脏标记。
     def _confirm_close():
-        if not getattr(api, "_dirty", False):
+        def _proceed():   # 确定要关：立刻置关闭标志 + 停 hover 线程，让后续一切原生投递都短路（防关闭崩溃）
+            api._closing = True
+            api._overlay_stop_hover = True
             return True
+        if not getattr(api, "_dirty", False):
+            return _proceed()
         try:
             base = "当前流程有未保存的修改，确定退出吗？\n（取消可返回编辑器再保存）"
             detail = (getattr(api, "_change_summary", "") or "").strip()
@@ -1237,15 +1331,19 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
                 if len(detail) > 1500:
                     detail = detail[:1500] + "\n…（更多省略）"
                 base += "\n\n本次改动：\n" + detail
-            return bool(api._window.create_confirmation_dialog("未保存的修改", base))
+            if bool(api._window.create_confirmation_dialog("未保存的修改", base)):
+                return _proceed()
+            return False   # 用户取消关闭——不置标志，覆盖层继续正常工作
         except Exception:
-            return True   # 对话框不可用就不阻拦关闭
+            return _proceed()   # 对话框不可用就不阻拦关闭
     try:
         api._window.events.closing += _confirm_close
     except Exception:
         pass
 
     def _close_monitor():           # 主编辑器关掉时，连带关掉独立浮窗（资源监控 / 覆盖层 / 覆盖层设置），否则它们会让进程不退出
+        api._closing = True          # 先置关闭标志：此后 _form_invoke/_form_set 一律不再投递到已销毁窗体（防关闭崩溃）
+        api._overlay_stop_hover = True
         for attr in ("_mon_window", "_overlay_window", "_overlay_cfg_window"):
             w = getattr(api, attr, None)
             if w is not None:
