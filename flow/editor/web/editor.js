@@ -4457,7 +4457,7 @@ const ED = (function () {
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）/ 折叠态画“子图箱体”
-      canvas.onDrawForeground = (ctx) => { drawLinkFocus(ctx); drawRunOverlay(ctx); };   // 节点之上：悬停聚焦连线 + “试运行”高亮/数据/流动
+      canvas.onDrawForeground = (ctx) => { drawRunOverlay(ctx); };   // 节点之上只放“试运行”高亮/数据/流动；连线(含悬停聚焦)一律画在节点【后面】
       // 悬停的节点变化时强制重绘前景，让“聚焦关联连线”实时跟手（选中变化 LiteGraph 本就会重绘）
       let _lastHoverId = null;
       canvas.canvas.addEventListener("mousemove", () => {
@@ -4467,8 +4467,9 @@ const ED = (function () {
       // 折叠子图：用自定义连线绘制——跳过组内连线、把跨边界连线改接到箱体端口；无折叠时走原版。
       const _origDrawConn = canvas.drawConnections;
       canvas.drawConnections = function (ctx) {
-        if (!foldHidden.size) return _origDrawConn.call(this, ctx);
-        drawFoldedConnections.call(this, ctx);
+        if (!foldHidden.size) _origDrawConn.call(this, ctx);
+        else drawFoldedConnections.call(this, ctx);
+        drawLinkFocus(ctx);   // 悬停/选中的“聚焦连线(点亮+压暗其余)”跟基础连线一起画在【节点后面】，绝不再盖住节点
       };
       setupHelpPanel();
       setupLogResize();
