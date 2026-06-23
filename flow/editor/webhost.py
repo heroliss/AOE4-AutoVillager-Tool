@@ -320,6 +320,9 @@ class Api:
         self._sysmon_proc = None             # 资源监控：缓存本进程的 psutil.Process（cpu_percent 需要复用同一对象建基准）
         self._sysmon_game = {}               # 游戏进程监控：pid -> psutil.Process（找到即缓存复用，省 process_iter）
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
+        self._game_fps = 0.0                 # 游戏帧率估算：0=不可用 / -1=测速暂停(自动化运行中) / >0=每秒变化帧数
+        self._fps_thread = None              # 帧率采样线程（仅在某个监控窗可见时运行，基于屏幕中央画面变化估算）
+        self._fps_stop = False               # 停止帧率采样标志
         self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
         self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度/穿透）
@@ -390,6 +393,7 @@ class Api:
                 "game_cpu": round(game_cpu, 1),
                 "game_mem": round(game_mem, 1),
                 "game_running": bool(alive),
+                "game_fps": (round(self._game_fps) if self._game_fps >= 0 else -1),
                 "sys_cpu": round(psutil.cpu_percent(None), 1),
                 "sys_used_pct": round(vm.percent, 1),
                 "sys_avail": round(vm.available / 1048576.0, 1),
@@ -397,6 +401,56 @@ class Api:
             }
         except Exception:
             return {"ok": False}
+
+    # ---------- 游戏帧率估算 ----------
+    # 外部进程拿不到游戏真实 FPS（需 PresentMon/ETW 或注入）。这里用「屏幕中央画面变化频率」做轻量估算：
+    # 短促连拍若干帧、数相邻帧的变化次数 / 用时 ≈ 每秒新帧数。AOE4 画面(水面/单位待机动画)几乎每帧都在动，
+    # 正常游玩时与刷新率接近；镜头完全静止时会偏低。为不和【自动化运行】抢 DWM 抓屏带宽，运行中暂停测速。
+    def _fps_ensure(self):
+        """有监控窗可见时确保帧率采样线程在跑（线程在所有监控窗关闭后自行退出）。"""
+        if self._fps_thread is not None and self._fps_thread.is_alive():
+            return
+        self._fps_stop = False
+        self._fps_thread = threading.Thread(target=self._fps_loop, name="game-fps", daemon=True)
+        self._fps_thread.start()
+
+    def _fps_loop(self):
+        try:
+            import mss
+            import zlib
+        except Exception:
+            self._game_fps = 0.0
+            self._fps_thread = None
+            return
+        sct = mss.mss()          # 线程本地：本采样线程独占，不跨线程共享 GDI DC
+        region = None
+        while not self._fps_stop and not self._closing:
+            if self._mon_window is None and not self._overlay_mon_shown:
+                break            # 没有监控窗在看了 → 退出，省资源
+            if self._run_real and not self._run_paused:
+                self._game_fps = -1.0   # 自动化运行中：暂停测速，避免和感知节点抢抓屏
+                time.sleep(0.4); continue
+            if not self._sysmon_game:
+                self._game_fps = 0.0    # 游戏没在跑
+                time.sleep(0.6); continue
+            try:
+                if region is None:
+                    mon = sct.monitors[1]
+                    cx = mon["left"] + mon["width"] // 2
+                    cy = mon["top"] + mon["height"] // 2
+                    region = {"left": cx - 70, "top": cy - 45, "width": 140, "height": 90}
+                samples = []
+                for _ in range(24):     # 连拍一小串(~190ms)，采样率≈125Hz → 可分辨到 ~60fps
+                    shot = sct.grab(region)
+                    samples.append((time.perf_counter(), zlib.crc32(shot.raw)))
+                elapsed = samples[-1][0] - samples[0][0]
+                changes = sum(1 for i in range(1, len(samples)) if samples[i][1] != samples[i - 1][1])
+                self._game_fps = max(0.0, min(240.0, changes / elapsed)) if elapsed > 0 else 0.0
+            except Exception:
+                self._game_fps = 0.0
+            time.sleep(0.7)
+        self._game_fps = 0.0
+        self._fps_thread = None
 
     def set_dirty(self, flag):
         """前端在 ●未保存 状态变化时调用，使关闭窗口能弹保存确认。"""
@@ -467,7 +521,10 @@ class Api:
     def _open_monitor(self):
         import webview
         page = os.path.join(WEB_DIR, "sysmon.html")
-        kw = dict(width=360, height=430, js_api=self, on_top=True, min_size=(260, 300))
+        # 统一玻璃风格：无边框 + 透明 + 亚克力（与覆盖层/设置窗一致）。默认【不置顶】(on_top=False)，
+        # 置顶交给窗内 📌 按钮（默认关）。窗内自带标题栏(拖动) + ✕ + 右下角缩放把手。
+        kw = dict(width=360, height=440, js_api=self, on_top=False, frameless=True,
+                  easy_drag=False, transparent=True, min_size=(260, 280), background_color="#0B0E14")
         try:                                   # 默认摆到主屏右上角
             scr = webview.screens[0]
             kw["x"] = max(0, int(scr.width) - 392)
@@ -480,11 +537,14 @@ class Api:
                 self._mon_window.events.closed += self._on_monitor_closed
             except Exception:
                 pass
-            try:    # 不在任务栏占一格（与覆盖层/设置窗一致——都是悬浮小窗，不算“额外窗口”）
-                self._mon_window.events.shown += (
-                    lambda: self._form_set(getattr(self._mon_window, "native", None), "ShowInTaskbar", False))
+            try:    # 移出任务栏 + 上同款玻璃——放到 loaded（WebView2 控制器已就绪），避免句柄重建撞上异步初始化(“没有注册类”)
+                def _mon_loaded():
+                    self._form_set(getattr(self._mon_window, "native", None), "ShowInTaskbar", False)
+                    self._glass(self._mon_window, 1, max(self._overlay_bg_alpha, 46))
+                self._mon_window.events.loaded += _mon_loaded
             except Exception:
                 pass
+            self._fps_ensure()
             return {"open": True}
         except Exception as e:
             self._mon_window = None
@@ -492,6 +552,17 @@ class Api:
 
     def _on_monitor_closed(self):
         self._mon_window = None
+
+    def mon_resize(self, w, h):
+        """大资源监控窗：窗内右下角把手拖拽缩放时调用（无边框窗没有系统缩放边）。"""
+        win = self._mon_window
+        if win is None:
+            return False
+        try:
+            win.resize(max(260, int(w)), max(280, int(h)))
+            return True
+        except Exception:
+            return False
 
     def mon_set_on_top(self, flag):
         """资源监控窗口自己的置顶开关（只影响它，不动主编辑器）。"""
@@ -570,9 +641,14 @@ class Api:
         """主窄条上玻璃。窗口 shown 后调用（句柄已就绪）。"""
         self._glass(self._overlay_window, self._overlay_frost, self._overlay_bg_alpha)
 
-    def _overlay_on_shown(self):
-        """窄条显示后：移出任务栏 + 上玻璃 + 启动光标 hover 轮询线程（自动切换鼠标穿透/可点击）。
-        ⚠ 顺序：先 ShowInTaskbar=False（会重建窗口句柄、会丢掉已上的玻璃/扩展样式），再上玻璃。"""
+    def _overlay_on_loaded(self):
+        """窄条【页面加载完成】后：移出任务栏 + 上玻璃 + 启动光标 hover 轮询线程（自动切换鼠标穿透/可点击）。
+        ⚠ 顺序：先 ShowInTaskbar=False（会重建窗口句柄、会丢掉已上的玻璃/扩展样式），再上玻璃。
+        ⚠ 必须挂在 loaded 而非 shown：ShowInTaskbar 触发句柄重建，若发生在 WebView2 控制器异步创建途中，
+          会把创建目标 HWND 弄失效→抛“没有注册类(REGDB_E_CLASSNOTREG)”。loaded 时控制器已就绪，重建才安全。"""
+        if getattr(self, "_overlay_setup_done", False):
+            return                          # loaded 理论只来一次；加幂等保险
+        self._overlay_setup_done = True
         self._form_set(getattr(self._overlay_window, "native", None), "ShowInTaskbar", False)
         self._overlay_glass()
         self._overlay_stop_hover = False
@@ -677,6 +753,7 @@ class Api:
         ③ 这时才销毁设置窗 / 覆盖窗。"""
         self._closing = True
         self._overlay_stop_hover = True
+        self._fps_stop = True
         th = self._overlay_hover_thread
         if th is not None and th.is_alive() and th is not threading.current_thread():
             try:
@@ -720,6 +797,7 @@ class Api:
         w0, h0, gap = 360, 30, 1
         x0, y0 = max(1, (sw - w0) // 2), gap
         self._overlay_rect = [x0, y0, w0, h0]
+        self._overlay_setup_done = False
         kw = dict(width=w0, height=h0, x=x0, y=y0, js_api=self,
                   on_top=True, frameless=True, easy_drag=False, transparent=True,
                   min_size=(80, 20), background_color="#0B0E14")
@@ -729,8 +807,8 @@ class Api:
                 self._overlay_window.events.closed += self._on_overlay_closed
             except Exception:
                 pass
-            try:
-                self._overlay_window.events.shown += self._overlay_on_shown   # 显示后上玻璃 + 启动 hover 穿透
+            try:    # 页面加载完成(WebView2 就绪)后上玻璃 + 启动 hover 穿透——挂 loaded 而非 shown，规避“没有注册类”
+                self._overlay_window.events.loaded += self._overlay_on_loaded
             except Exception:
                 pass
             return {"open": True}
@@ -811,10 +889,11 @@ class Api:
             except Exception:
                 pass
             try:    # 设置窗：移出任务栏(先) + 自身也上一层轻玻璃(后)，风格统一
-                def _cfg_shown():
+                # ⚠ 挂 loaded 而非 shown：ShowInTaskbar 触发的句柄重建若撞上 WebView2 异步初始化会抛“没有注册类”。
+                def _cfg_loaded():
                     self._form_set(getattr(self._overlay_cfg_window, "native", None), "ShowInTaskbar", False)
                     self._glass(self._overlay_cfg_window, 1, 130)
-                self._overlay_cfg_window.events.shown += _cfg_shown
+                self._overlay_cfg_window.events.loaded += _cfg_loaded
             except Exception:
                 pass
             return {"open": True}
@@ -841,16 +920,19 @@ class Api:
                     self._overlay_mon_window.hide(); self._overlay_mon_shown = False
                     return {"open": False}
                 self._overlay_mon_window.show(); self._overlay_mon_shown = True
+                self._fps_ensure()
                 return {"open": True}
             except Exception:
                 self._overlay_mon_window = None
         import webview
         page = os.path.join(WEB_DIR, "overlay_mon.html")
-        x = max(1, min(self._overlay_rect[0], self._overlay_screen[0] - 210))
-        y = min(self._overlay_rect[1] + 34, self._overlay_screen[1] - 130)
-        kw = dict(width=196, height=112, x=x, y=y, js_api=self, on_top=True,
+        # 资源监控做成和窄条同款的横向长条：宽度先给保守初值，页面按内容自适应收窄(overlay_mon_resize)。高 30，与开关条等高。
+        w0 = 340
+        x = max(1, min(self._overlay_rect[0], self._overlay_screen[0] - w0 - 1))
+        y = min(self._overlay_rect[1] + 38, self._overlay_screen[1] - 60)
+        kw = dict(width=w0, height=30, x=x, y=y, js_api=self, on_top=True,
                   frameless=True, easy_drag=False, transparent=True,
-                  min_size=(120, 70), background_color="#0B0E14")
+                  min_size=(80, 20), background_color="#0B0E14")
         try:
             self._overlay_mon_window = webview.create_window("AOE4 Overlay 监控", url=page, **kw)
             self._overlay_mon_shown = True
@@ -858,13 +940,14 @@ class Api:
                 self._overlay_mon_window.events.closed += self._on_overlay_mon_closed
             except Exception:
                 pass
-            try:    # 移出任务栏(先) + 与窄条同款玻璃(跟随当前背景/毛度，统一观感)
-                def _mon_shown():
+            try:    # 移出任务栏(先) + 与窄条同款玻璃(跟随当前背景/毛度，统一观感)；挂 loaded 规避“没有注册类”
+                def _mon_loaded():
                     self._form_set(getattr(self._overlay_mon_window, "native", None), "ShowInTaskbar", False)
                     self._glass(self._overlay_mon_window, self._overlay_frost, max(self._overlay_bg_alpha, 30))
-                self._overlay_mon_window.events.shown += _mon_shown
+                self._overlay_mon_window.events.loaded += _mon_loaded
             except Exception:
                 pass
+            self._fps_ensure()
             return {"open": True}
         except Exception as e:
             self._overlay_mon_window = None
@@ -873,6 +956,17 @@ class Api:
     def _on_overlay_mon_closed(self):
         self._overlay_mon_window = None
         self._overlay_mon_shown = False
+
+    def overlay_mon_resize(self, w, h):
+        """资源监控长条按内容自适应宽度（和开关条一样）。"""
+        win = self._overlay_mon_window
+        if win is None:
+            return False
+        try:
+            win.resize(max(80, int(w)), int(h))
+            return True
+        except Exception:
+            return False
 
     def overlay_data(self):
         """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。
@@ -1448,6 +1542,7 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     def _close_monitor():           # 主编辑器关掉时，连带关掉独立浮窗（资源监控 / 覆盖层 / 覆盖层设置），否则它们会让进程不退出
         api._closing = True          # 先置关闭标志：此后 _form_invoke/_form_set 一律不再投递到已销毁窗体（防关闭崩溃）
         api._overlay_stop_hover = True
+        api._fps_stop = True
         for attr in ("_mon_window", "_overlay_window", "_overlay_cfg_window", "_overlay_mon_window"):
             w = getattr(api, attr, None)
             if w is not None:

@@ -4,71 +4,92 @@
 <meta charset="utf-8" />
 <title>覆盖层资源监控</title>
 <style>
-  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
-    font-family: "Microsoft YaHei", system-ui, sans-serif; -webkit-user-select: none; user-select: none; color: #eaeff6; }
-  /* 同款很透的玻璃卡片：背景靠系统玻璃，自己只留细边框 */
-  #card { box-sizing: border-box; height: 100%; padding: 5px 9px; border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 8px; background: transparent; }
-  #hd { display: flex; align-items: center; font-size: 12px; font-weight: 700; height: 16px; cursor: move;
-    text-shadow: 0 1px 2px #0008; }
-  #hd .x { margin-left: auto; cursor: pointer; opacity: 0.8; padding: 0 3px; }
-  #hd .x:hover { opacity: 1; }
-  .row { display: flex; align-items: center; gap: 6px; font-size: 11.5px; margin: 3px 0; text-shadow: 0 1px 2px #0008; }
-  .row .tag { width: 30px; color: #c6cedb; }
-  .row b { font-weight: 700; }
-  .cpu { color: #7fd0ff; } .mem { color: #ffd45e; } .off { color: #ff9a9a; }
-  #spark { display: block; width: 100%; height: 26px; margin-top: 3px; }
+  /* 和开关条同款的很透玻璃【横向长条】：背景全靠系统玻璃，自身只留极细边框；内容横排。 */
+  html, body { margin: 0; height: 100%; width: max-content; background: transparent; overflow: hidden;
+    font-family: "Microsoft YaHei", system-ui, sans-serif; -webkit-user-select: none; user-select: none;
+    cursor: default; color: #eaeff6; }
+  :root { --ca: 1; }
+  #bar { display: inline-flex; align-items: center; gap: 9px; width: max-content; height: 100%; box-sizing: border-box;
+    padding: 0 9px; background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; }
+  #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 12px; padding: 0 1px; line-height: 1; }
+  /* 一组指标：图标 + 数值，横排，文字带描边便于在亮背景上看清 */
+  .grp { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; line-height: 1;
+    opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
+  .grp .ico { font-size: 12px; }
+  .grp .m { color: #dfe6f0; }
+  .grp .m b { font-weight: 700; font-family: Consolas, monospace; }
+  .v-cpu b { color: #7fd0ff; } .v-mem b { color: #ffd45e; } .v-fps b { color: #8effb0; }
+  .sep { width: 1px; height: 13px; background: rgba(255,255,255,0.16); }
+  .off { color: #ff9a9a; font-weight: 700; }
+  .dim { color: #c0c7d2; opacity: .8; }
+  #x { cursor: pointer; color: #cfd6e0; font-size: 12px; padding: 0 2px; border-radius: 4px; opacity: var(--ca); }
+  #x:hover { background: rgba(255,255,255,0.16); color: #fff; }
 </style>
 </head>
 <body>
-  <div id="card">
-    <div id="hd" class="pywebview-drag-region">资源监控<span class="x" onclick="closeWin()">✕</span></div>
-    <div class="row"><span class="tag">工具</span><span>CPU <b class="cpu" id="tc">--</b>%</span><span>· <b class="mem" id="tm">--</b> MB</span></div>
-    <div class="row"><span class="tag">游戏</span><span id="gwrap">CPU <b class="cpu" id="gc">--</b>%　· <b class="mem" id="gm">--</b> MB</span></div>
-    <canvas id="spark" width="178" height="26"></canvas>
+  <div id="bar">
+    <div id="grip" class="pywebview-drag-region" title="按住拖动可移动">⠿</div>
+    <span class="grp v-cpu"><span class="ico">🔧</span><span class="m">CPU <b id="tc">--</b>%</span></span>
+    <span class="grp v-mem"><span class="m">内存 <b id="tm">--</b>M</span></span>
+    <span class="sep"></span>
+    <span id="game">
+      <span class="grp v-cpu"><span class="ico">🎮</span><span class="m">CPU <b id="gc">--</b>%</span></span>
+      <span class="grp v-mem"><span class="m">内存 <b id="gm">--</b>M</span></span>
+      <span class="grp v-fps"><span class="m">帧率 <b id="gf">--</b></span></span>
+    </span>
+    <span id="x" title="关闭资源监控" onclick="closeWin()">✕</span>
   </div>
 <script>
   function api() { return (window.pywebview && window.pywebview.api) || null; }
   function closeWin() { try { api().toggle_overlay_mon(); } catch (e) {} }
-  const histT = [], histG = [], CAP = 60;   // 工具/游戏 CPU 历史（画迷你曲线）
+  let lastFitW = 0;
 
-  function draw() {
-    const c = document.getElementById("spark"), ctx = c.getContext("2d");
-    const W = c.width, H = c.height; ctx.clearRect(0, 0, W, H);
-    const grid = (y) => { ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); };
-    grid(H * 0.5); grid(H - 0.5);
-    const line = (hist, color) => {
-      if (hist.length < 2) return;
-      ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
-      for (let i = 0; i < hist.length; i++) {
-        const x = W * i / (CAP - 1), y = H - Math.max(0, Math.min(100, hist[i])) / 100 * H;
-        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-      }
-      ctx.stroke();
-    };
-    line(histT, "#7fd0ff"); line(histG, "#ff9a5e");
+  function set(id, t) { const e = document.getElementById(id); if (e) e.textContent = t; }
+  function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + "G" : Math.round(mb); }
+
+  // 内容自适应宽度：把窗口收成贴合内容（和开关条同样的做法，玻璃只覆盖内容大小）。高固定 30。
+  function fitToContent() {
+    const bar = document.getElementById("bar");
+    const w = Math.max(120, Math.ceil(Math.max(bar.scrollWidth, bar.offsetWidth, bar.getBoundingClientRect().width)) + 2);
+    if (Math.abs(w - lastFitW) >= 3) { lastFitW = w; try { api().overlay_mon_resize(w, 30); } catch (e) {} }
+  }
+
+  function fpsText(f) {
+    if (f === -1) return ["暂停", "自动化运行中暂停测速(避免抢抓屏)"];
+    if (!f) return ["—", "镜头静止/未取到画面变化"];
+    return [String(f), "基于屏幕中央画面变化估算(镜头静止时偏低)"];
+  }
+  function render(s) {
+    set("tc", s.tool_cpu);
+    set("tm", fmtMB(s.tool_mem));
+    const g = document.getElementById("game");
+    if (s.game_running) {
+      const [ft, fh] = fpsText(s.game_fps);
+      g.innerHTML =
+        "<span class='grp v-cpu'><span class='ico'>🎮</span><span class='m'>CPU <b>" + s.game_cpu + "</b>%</span></span>" +
+        "<span class='grp v-mem'><span class='m'>内存 <b>" + fmtMB(s.game_mem) + "</b>M</span></span>" +
+        "<span class='grp v-fps'><span class='m'>帧率 <b title=\"" + fh + "\">" + ft + "</b></span></span>";
+    } else {
+      g.innerHTML = "<span class='grp'><span class='ico'>🎮</span><span class='off'>未运行</span></span>";
+    }
+    fitToContent();
   }
 
   function poll() {
     const a = api();
     if (!a) { setTimeout(poll, 200); return; }
-    Promise.resolve(a.sys_stats()).then(s => {
-      if (s && s.ok) {
-        document.getElementById("tc").textContent = s.tool_cpu;
-        document.getElementById("tm").textContent = Math.round(s.tool_mem);
-        if (s.game_running) {
-          document.getElementById("gwrap").innerHTML =
-            "CPU <b class='cpu' id='gc'>" + s.game_cpu + "</b>%　· <b class='mem' id='gm'>" + Math.round(s.game_mem) + "</b> MB";
-        } else {
-          document.getElementById("gwrap").innerHTML = "<b class='off'>未检测到游戏进程</b>";
-        }
-        histT.push(s.tool_cpu); if (histT.length > CAP) histT.shift();
-        histG.push(s.game_running ? s.game_cpu : 0); if (histG.length > CAP) histG.shift();
-        draw();
-      }
-    }).catch(() => {}).finally(() => setTimeout(poll, 1000));
+    Promise.resolve(a.sys_stats()).then(s => { if (s && s.ok) render(s); })
+      .catch(() => {}).finally(() => setTimeout(poll, 800));
+  }
+  // 跟随覆盖层内容透明度（统一观感）：轻量地从设置态读 content
+  function syncCa() {
+    const a = api(); if (!a) return;
+    Promise.resolve(a.overlay_cfg_state()).then(s => {
+      if (s && s.content != null) document.documentElement.style.setProperty("--ca", (s.content / 100).toFixed(2));
+    }).catch(() => {});
   }
   poll();
+  syncCa(); setInterval(syncCa, 1500);
 </script>
 </body>
 </html>
