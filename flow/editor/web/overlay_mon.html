@@ -12,16 +12,22 @@
   #bar { display: inline-flex; align-items: center; gap: 9px; width: max-content; height: 100%; box-sizing: border-box;
     padding: 0 9px; background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; }
   #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 12px; padding: 0 1px; line-height: 1; }
-  /* 一组指标：图标 + 数值，横排，文字带描边便于在亮背景上看清 */
   .grp { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; line-height: 1;
     opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
   .grp .ico { font-size: 12px; }
   .grp .m { color: #dfe6f0; }
-  .grp .m b { font-weight: 700; font-family: Consolas, monospace; }
-  .v-cpu b { color: #7fd0ff; } .v-mem b { color: #ffd45e; } .v-fps b { color: #8effb0; }
+  .grp .m b { font-weight: 700; }
+  /* 数值定宽右对齐：用等宽数字(tabular-nums) + 固定 min-width，值变化时不再左右晃 */
+  .nv { display: inline-block; text-align: right; font-variant-numeric: tabular-nums;
+        font-family: Consolas, "Cascadia Mono", monospace; font-weight: 700; }
+  .pct { min-width: 3.2em; } .mb { min-width: 2.7em; }
+  .v-cpu .nv { color: #7fd0ff; } .v-mem .nv { color: #ffd45e; }
   .sep { width: 1px; height: 13px; background: rgba(255,255,255,0.16); }
   .off { color: #ff9a9a; font-weight: 700; }
-  .dim { color: #c0c7d2; opacity: .8; }
+  .det { cursor: pointer; font-size: 11.5px; color: #cfe0f2; padding: 1px 6px; border-radius: 9px;
+         border: 1px solid rgba(255,255,255,0.18); opacity: var(--ca); text-shadow: 0 1px 2px #0007; }
+  .det:hover { background: rgba(255,255,255,0.14); }
+  .det.on { border-color: rgba(120,200,255,0.55); background: rgba(80,160,255,0.18); color: #eaf4ff; }
   #x { cursor: pointer; color: #cfd6e0; font-size: 12px; padding: 0 2px; border-radius: 4px; opacity: var(--ca); }
   #x:hover { background: rgba(255,255,255,0.16); color: #fff; }
 </style>
@@ -29,23 +35,34 @@
 <body>
   <div id="bar">
     <div id="grip" class="pywebview-drag-region" title="按住拖动可移动">⠿</div>
-    <span class="grp v-cpu"><span class="ico">🔧</span><span class="m">CPU <b id="tc">--</b>%</span></span>
-    <span class="grp v-mem"><span class="m">内存 <b id="tm">--</b>M</span></span>
+    <span class="grp v-cpu"><span class="ico">🔧</span><span class="m">CPU <span class="nv pct" id="tc">--</span>%</span></span>
+    <span class="grp v-mem"><span class="m">内存 <span class="nv mb" id="tm">--</span>M</span></span>
     <span class="sep"></span>
     <span id="game">
-      <span class="grp v-cpu"><span class="ico">🎮</span><span class="m">CPU <b id="gc">--</b>%</span></span>
-      <span class="grp v-mem"><span class="m">内存 <b id="gm">--</b>M</span></span>
-      <span class="grp v-fps"><span class="m">帧率 <b id="gf">--</b></span></span>
+      <span class="grp v-cpu"><span class="ico">🎮</span><span class="m">CPU <span class="nv pct" id="gc">--</span>%</span></span>
+      <span class="grp v-mem"><span class="m">内存 <span class="nv mb" id="gm">--</span>M</span></span>
     </span>
-    <span id="x" title="关闭资源监控" onclick="closeWin()">✕</span>
+    <span class="det" id="det" title="打开/关闭 资源监控大窗(曲线/详情)" onclick="toggleBig()">详情</span>
+    <span id="x" title="关闭资源监控条" onclick="closeWin()">✕</span>
   </div>
 <script>
   function api() { return (window.pywebview && window.pywebview.api) || null; }
   function closeWin() { try { api().toggle_overlay_mon(); } catch (e) {} }
-  let lastFitW = 0;
+  let lastFitW = 0, bigOpen = false;
 
   function set(id, t) { const e = document.getElementById(id); if (e) e.textContent = t; }
   function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + "G" : Math.round(mb); }
+  // 百分比恒定一位小数(如 5.0 / 12.3 / 100.0)，配合等宽数字+定宽右对齐 → 小数点对齐、不晃
+  function pct(v) { return (typeof v === "number" ? v : parseFloat(v) || 0).toFixed(1); }
+
+  function toggleBig() {
+    try {
+      Promise.resolve(api().toggle_monitor()).then(r => {
+        bigOpen = !!(r && r.open);
+        document.getElementById("det").classList.toggle("on", bigOpen);
+      }).catch(() => {});
+    } catch (e) {}
+  }
 
   // 内容自适应宽度：把窗口收成贴合内容（和开关条同样的做法，玻璃只覆盖内容大小）。高固定 30。
   function fitToContent() {
@@ -54,21 +71,14 @@
     if (Math.abs(w - lastFitW) >= 3) { lastFitW = w; try { api().overlay_mon_resize(w, 30); } catch (e) {} }
   }
 
-  function fpsText(f) {
-    if (f === -1) return ["暂停", "自动化运行中暂停测速(避免抢抓屏)"];
-    if (!f) return ["—", "镜头静止/未取到画面变化"];
-    return [String(f), "基于屏幕中央画面变化估算(镜头静止时偏低)"];
-  }
   function render(s) {
-    set("tc", s.tool_cpu);
+    set("tc", pct(s.tool_cpu));
     set("tm", fmtMB(s.tool_mem));
     const g = document.getElementById("game");
     if (s.game_running) {
-      const [ft, fh] = fpsText(s.game_fps);
       g.innerHTML =
-        "<span class='grp v-cpu'><span class='ico'>🎮</span><span class='m'>CPU <b>" + s.game_cpu + "</b>%</span></span>" +
-        "<span class='grp v-mem'><span class='m'>内存 <b>" + fmtMB(s.game_mem) + "</b>M</span></span>" +
-        "<span class='grp v-fps'><span class='m'>帧率 <b title=\"" + fh + "\">" + ft + "</b></span></span>";
+        "<span class='grp v-cpu'><span class='ico'>🎮</span><span class='m'>CPU <span class='nv pct'>" + pct(s.game_cpu) + "</span>%</span></span>" +
+        "<span class='grp v-mem'><span class='m'>内存 <span class='nv mb'>" + fmtMB(s.game_mem) + "</span>M</span></span>";
     } else {
       g.innerHTML = "<span class='grp'><span class='ico'>🎮</span><span class='off'>未运行</span></span>";
     }

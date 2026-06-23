@@ -44,7 +44,7 @@
     <div class="head">
       <span class="pywebview-drag-region" style="cursor:move">资源监控</span>
       <span class="spacer pywebview-drag-region"></span>
-      <span class="btn" id="pin" title="置顶：浮在最前（默认关，点击开启）">📌</span>
+      <span class="btn on" id="pin" title="置顶中（默认开，点击取消）">📌</span>
       <span class="btn" id="trans" title="半透明：不挡视线（100%→70%→40% 循环）">◐</span>
       <span class="btn" id="close" title="关闭">✕</span>
     </div>
@@ -52,7 +52,7 @@
     <canvas id="cpuchart"></canvas>
     <div class="row"><span style="color:#6fcf97">本工具 内存</span><span class="spacer"></span><b id="mem">--</b></div>
     <canvas id="memchart"></canvas>
-    <div class="row"><span style="color:#e6a06a">游戏 CPU / 内存 / 帧率</span><span class="spacer"></span><b id="game">--</b></div>
+    <div class="row"><span style="color:#e6a06a">游戏 CPU / 内存</span><span class="spacer"></span><b id="game">--</b></div>
     <div class="row"><span style="color:#8b929e">系统 CPU / 可用</span><span class="spacer"></span><b id="sys">--</b></div>
     <div class="cfg">
       采样间隔 <input id="iv" type="number" min="200" max="10000" step="100"> ms ·
@@ -71,7 +71,7 @@
   const hist = { cpu: [], mem: [], gcpu: [], gmem: [] };
   let last = null, timer = null;
   let view = { zoom: 1, center: 1 }, pan = null;
-  let pinned = false, transLvl = 0;   // 默认【不置顶】
+  let pinned = true, transLvl = 0;   // 默认【置顶】（窗口以 on_top=True 创建，点 📌 可取消）
 
   function loadCfg() {
     try {
@@ -83,7 +83,6 @@
   function saveCfg() { try { localStorage.setItem("flow.sysmon", JSON.stringify(cfg)); } catch (e) {} }
   function cap() { return Math.max(30, Math.round(cfg.minutes * 60000 / cfg.interval)); }
   function fmtMB(mb) { return mb >= 1024 ? (mb / 1024).toFixed(2) + " GB" : Math.round(mb) + " MB"; }
-  function fpsStr(f) { return f === -1 ? "测速暂停" : (!f ? "—" : f + " fps"); }
   function memMax() {
     let m = 256;
     for (const v of hist.mem) if (v > m) m = v;
@@ -139,7 +138,7 @@
     set("cpu", last.tool_cpu + "%  （整机 " + last.ncpu + " 核 · 蓝线）" + zt);
     set("mem", fmtMB(last.tool_mem) + "  （峰值上限 " + fmtMB(mm) + "）");
     set("game", last.game_running
-      ? (last.game_cpu + "%  /  " + fmtMB(last.game_mem) + "  /  " + fpsStr(last.game_fps) + "（橙线）")
+      ? (last.game_cpu + "%  /  " + fmtMB(last.game_mem) + "（橙线）")
       : "未运行");
     set("sys", last.sys_cpu + "%  /  " + fmtMB(last.sys_avail) + " 可用");
   }

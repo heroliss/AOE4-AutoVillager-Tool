@@ -83,8 +83,17 @@
     if (Math.abs(w - lastFitW) >= 3) { lastFitW = w; try { api().overlay_resize(w, 30); } catch (e) {} }
   }
 
-  function toggleCfg() { try { api().toggle_overlay_cfg(); } catch (e) {} }
-  function toggleMon() { try { api().toggle_overlay_mon(); } catch (e) {} }
+  // 📊/⚙ 都是开/关切换按钮：点一下开、再点关，并把按钮点亮(.act)反映当前开关状态。
+  function toggleBtn(btnId, fn) {
+    try {
+      Promise.resolve(fn()).then(r => {
+        const b = document.getElementById(btnId);
+        if (b) b.classList.toggle("act", !!(r && r.open));
+      }).catch(() => {});
+    } catch (e) {}
+  }
+  function toggleCfg() { toggleBtn("cfgbtn", () => api().toggle_overlay_cfg()); }
+  function toggleMon() { toggleBtn("monbtn", () => api().toggle_overlay_mon()); }
 
   // 点开关芯片：乐观翻转 UI(不等 500ms 轮询) + 通知后端实时启停该段
   function applyChipUI(chip, on) {

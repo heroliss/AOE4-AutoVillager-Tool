@@ -25,6 +25,38 @@ from ..core.context import ExecutionContext
 from ..core.executor import TraceExecutor
 
 
+def _quiet_pywebview_teardown_noise():
+    """关窗/切换小窗时，WebView2 可能已被释放，但 pywebview 内部仍会投递一次 evaluate_js →
+    抛 ObjectDisposedException。它【已被 pywebview 自己 try/except 捕获】、只是又 logger.exception 打了出来，
+    对我们纯属无害噪音（不是崩溃）。这里给 'pywebview' logger 装一个很窄的过滤器，只丢掉这类已释放/销毁中
+    的记录，其它日志照常。"""
+    import logging
+
+    _NOISE = ("Error occurred in script", "ObjectDisposedException",
+              "InvalidAsynchronousStateException", "已释放", "无法访问已释放的对象")
+
+    class _F(logging.Filter):
+        def filter(self, record):
+            try:
+                msg = record.getMessage()
+            except Exception:
+                msg = ""
+            if record.exc_info and record.exc_info[1] is not None:
+                try:
+                    msg += " " + repr(record.exc_info[1])
+                except Exception:
+                    pass
+            return not any(n in msg for n in _NOISE)
+
+    try:
+        logging.getLogger("pywebview").addFilter(_F())
+    except Exception:
+        pass
+
+
+_quiet_pywebview_teardown_noise()
+
+
 def _fmt_value(v):
     """把数据线上的值变成可在前端显示的简短形式（图像/大对象不直接传）。"""
     if v is None or isinstance(v, (bool, int, float)):
@@ -320,9 +352,6 @@ class Api:
         self._sysmon_proc = None             # 资源监控：缓存本进程的 psutil.Process（cpu_percent 需要复用同一对象建基准）
         self._sysmon_game = {}               # 游戏进程监控：pid -> psutil.Process（找到即缓存复用，省 process_iter）
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
-        self._game_fps = 0.0                 # 游戏帧率估算：0=不可用 / -1=测速暂停(自动化运行中) / >0=每秒变化帧数
-        self._fps_thread = None              # 帧率采样线程（仅在某个监控窗可见时运行，基于屏幕中央画面变化估算）
-        self._fps_stop = False               # 停止帧率采样标志
         self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
         self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度/穿透）
@@ -393,7 +422,6 @@ class Api:
                 "game_cpu": round(game_cpu, 1),
                 "game_mem": round(game_mem, 1),
                 "game_running": bool(alive),
-                "game_fps": (round(self._game_fps) if self._game_fps >= 0 else -1),
                 "sys_cpu": round(psutil.cpu_percent(None), 1),
                 "sys_used_pct": round(vm.percent, 1),
                 "sys_avail": round(vm.available / 1048576.0, 1),
@@ -401,56 +429,6 @@ class Api:
             }
         except Exception:
             return {"ok": False}
-
-    # ---------- 游戏帧率估算 ----------
-    # 外部进程拿不到游戏真实 FPS（需 PresentMon/ETW 或注入）。这里用「屏幕中央画面变化频率」做轻量估算：
-    # 短促连拍若干帧、数相邻帧的变化次数 / 用时 ≈ 每秒新帧数。AOE4 画面(水面/单位待机动画)几乎每帧都在动，
-    # 正常游玩时与刷新率接近；镜头完全静止时会偏低。为不和【自动化运行】抢 DWM 抓屏带宽，运行中暂停测速。
-    def _fps_ensure(self):
-        """有监控窗可见时确保帧率采样线程在跑（线程在所有监控窗关闭后自行退出）。"""
-        if self._fps_thread is not None and self._fps_thread.is_alive():
-            return
-        self._fps_stop = False
-        self._fps_thread = threading.Thread(target=self._fps_loop, name="game-fps", daemon=True)
-        self._fps_thread.start()
-
-    def _fps_loop(self):
-        try:
-            import mss
-            import zlib
-        except Exception:
-            self._game_fps = 0.0
-            self._fps_thread = None
-            return
-        sct = mss.mss()          # 线程本地：本采样线程独占，不跨线程共享 GDI DC
-        region = None
-        while not self._fps_stop and not self._closing:
-            if self._mon_window is None and not self._overlay_mon_shown:
-                break            # 没有监控窗在看了 → 退出，省资源
-            if self._run_real and not self._run_paused:
-                self._game_fps = -1.0   # 自动化运行中：暂停测速，避免和感知节点抢抓屏
-                time.sleep(0.4); continue
-            if not self._sysmon_game:
-                self._game_fps = 0.0    # 游戏没在跑
-                time.sleep(0.6); continue
-            try:
-                if region is None:
-                    mon = sct.monitors[1]
-                    cx = mon["left"] + mon["width"] // 2
-                    cy = mon["top"] + mon["height"] // 2
-                    region = {"left": cx - 70, "top": cy - 45, "width": 140, "height": 90}
-                samples = []
-                for _ in range(24):     # 连拍一小串(~190ms)，采样率≈125Hz → 可分辨到 ~60fps
-                    shot = sct.grab(region)
-                    samples.append((time.perf_counter(), zlib.crc32(shot.raw)))
-                elapsed = samples[-1][0] - samples[0][0]
-                changes = sum(1 for i in range(1, len(samples)) if samples[i][1] != samples[i - 1][1])
-                self._game_fps = max(0.0, min(240.0, changes / elapsed)) if elapsed > 0 else 0.0
-            except Exception:
-                self._game_fps = 0.0
-            time.sleep(0.7)
-        self._game_fps = 0.0
-        self._fps_thread = None
 
     def set_dirty(self, flag):
         """前端在 ●未保存 状态变化时调用，使关闭窗口能弹保存确认。"""
@@ -521,9 +499,9 @@ class Api:
     def _open_monitor(self):
         import webview
         page = os.path.join(WEB_DIR, "sysmon.html")
-        # 统一玻璃风格：无边框 + 透明 + 亚克力（与覆盖层/设置窗一致）。默认【不置顶】(on_top=False)，
-        # 置顶交给窗内 📌 按钮（默认关）。窗内自带标题栏(拖动) + ✕ + 右下角缩放把手。
-        kw = dict(width=360, height=440, js_api=self, on_top=False, frameless=True,
+        # 统一玻璃风格：无边框 + 透明 + 亚克力（与覆盖层/设置窗一致）。默认【置顶】(on_top=True)，
+        # 置顶可用窗内 📌 按钮取消（默认开）。窗内自带标题栏(拖动) + ✕ + 右下角缩放把手。
+        kw = dict(width=360, height=440, js_api=self, on_top=True, frameless=True,
                   easy_drag=False, transparent=True, min_size=(260, 280), background_color="#0B0E14")
         try:                                   # 默认摆到主屏右上角
             scr = webview.screens[0]
@@ -537,14 +515,12 @@ class Api:
                 self._mon_window.events.closed += self._on_monitor_closed
             except Exception:
                 pass
-            try:    # 移出任务栏 + 上同款玻璃——放到 loaded（WebView2 控制器已就绪），避免句柄重建撞上异步初始化(“没有注册类”)
-                def _mon_loaded():
-                    self._form_set(getattr(self._mon_window, "native", None), "ShowInTaskbar", False)
-                    self._glass(self._mon_window, 1, max(self._overlay_bg_alpha, 46))
-                self._mon_window.events.loaded += _mon_loaded
+            try:    # 移出任务栏 + 同款玻璃 + 移出 Alt+Tab——放到 loaded（控制器已就绪），避免句柄重建撞上异步初始化(“没有注册类”)
+                self._mon_window.events.loaded += (
+                    lambda: self._overlay_finalize(self._mon_window, self._overlay_frost,
+                                                   max(self._overlay_bg_alpha, 46)))
             except Exception:
                 pass
-            self._fps_ensure()
             return {"open": True}
         except Exception as e:
             self._mon_window = None
@@ -637,6 +613,59 @@ class Api:
         tint = ((a & 0xFF) << 24) | 0x35435C   # 中性蓝灰着色（偏淡、不发黑）
         self._form_invoke(native, lambda: self._apply_acrylic(native, state, tint))
 
+    @staticmethod
+    def _tool_window(native):
+        """给原生窗加 WS_EX_TOOLWINDOW（并去掉 WS_EX_APPWINDOW）→ 既不进任务栏、也【不在 Alt+Tab】里出现，
+        让这些悬浮小窗在系统里“融进主程序”，只剩主编辑器算一个独立窗口。须在窗口句柄就绪后调用。"""
+        if native is None:
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u = ctypes.windll.user32
+            hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
+            GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = -20, 0x80, 0x40000
+            g = u.GetWindowLongPtrW; g.restype = ctypes.c_ssize_t; g.argtypes = [wintypes.HWND, ctypes.c_int]
+            s = u.SetWindowLongPtrW; s.restype = ctypes.c_ssize_t
+            s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+            st = g(hwnd, GWL_EXSTYLE)
+            s(hwnd, GWL_EXSTYLE, (st | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW)
+        except Exception:
+            pass
+
+    def _overlay_finalize(self, win, frost, alpha):
+        """覆盖窗【页面加载完成(loaded)】后的统一收尾——在 UI 线程里【一次性、按序】做完：
+        ① ShowInTaskbar=False（移出任务栏，会同步重建句柄）→ ② 上玻璃 → ③ 设为工具窗(移出 Alt+Tab)。
+        三步同处一个 UI 线程委托里顺序执行：ShowInTaskbar 的句柄重建是同步的，返回后玻璃/工具窗都落在【新句柄】上，
+        不会像挂在 shown 时那样与 WebView2 控制器异步创建抢句柄（“没有注册类”）。"""
+        native = getattr(win, "native", None)
+        if self._closing or self._native_dead(native):
+            return
+
+        def _do():
+            try:
+                native.ShowInTaskbar = False
+            except Exception:
+                pass
+            try:
+                self._glass(win, frost, alpha)     # 已在 UI 线程 → _form_invoke 内联执行
+            except Exception:
+                pass
+            try:
+                self._tool_window(native)          # 新句柄上设 WS_EX_TOOLWINDOW
+            except Exception:
+                pass
+        self._form_invoke(native, _do)
+
+    def _reglass_all(self):
+        """把当前【背景/毛度】设置应用到所有可见的覆盖玻璃窗（开关条/资源条/大监控窗），使设置“对所有生效”。
+        设置窗自身保持固定可读玻璃（否则背景调到 0 时连设置面板都看不清，没法操作）。"""
+        self._glass(self._overlay_window, self._overlay_frost, self._overlay_bg_alpha)
+        if self._overlay_mon_window is not None and self._overlay_mon_shown:
+            self._glass(self._overlay_mon_window, self._overlay_frost, max(self._overlay_bg_alpha, 30))
+        if self._mon_window is not None:
+            self._glass(self._mon_window, self._overlay_frost, max(self._overlay_bg_alpha, 46))
+
     def _overlay_glass(self):
         """主窄条上玻璃。窗口 shown 后调用（句柄已就绪）。"""
         self._glass(self._overlay_window, self._overlay_frost, self._overlay_bg_alpha)
@@ -649,73 +678,114 @@ class Api:
         if getattr(self, "_overlay_setup_done", False):
             return                          # loaded 理论只来一次；加幂等保险
         self._overlay_setup_done = True
-        self._form_set(getattr(self._overlay_window, "native", None), "ShowInTaskbar", False)
-        self._overlay_glass()
+        self._overlay_finalize(self._overlay_window, self._overlay_frost, self._overlay_bg_alpha)
         self._overlay_stop_hover = False
         if self._overlay_hover_thread is None or not self._overlay_hover_thread.is_alive():
             self._overlay_hover_thread = threading.Thread(target=self._overlay_hover_loop,
-                                                          name="overlay-hover", daemon=True)
+                                                          name="overlay-maintain", daemon=True)
             self._overlay_hover_thread.start()
 
     # —— 鼠标穿透（解决覆盖层挡住游戏“贴屏边移镜”）——
     # 自动模式：光标【不在】窄条矩形内时给窗口加 WS_EX_TRANSPARENT → 鼠标穿透到游戏(照常贴边移镜)；
     #          光标【在】窄条上时去掉它 → 恢复可点击(能切开关)。用物理像素比对，规避 DPI 缩放误差。
-    def _set_clickthrough(self, on):
-        win = self._overlay_window
-        native = getattr(win, "native", None) if win else None
-        if self._closing or self._native_dead(native):
-            return
+    def _managed_overlays(self):
+        """维护循环要照看的【可见】覆盖玻璃窗：(native, is_bar)。
+        is_bar=True 的是悬在游戏上方的长条(开关条/资源条)——它们参与“鼠标自动穿透”；设置窗只参与“留缝防贴边”。
+        大监控窗不入列：它可脱离覆盖层独立存在(编辑器监控)、且是你主动摆放的交互窗，不该被强行拉离边缘。"""
+        out = []
+        for attr, is_bar, vis in (("_overlay_window", True, None),
+                                  ("_overlay_mon_window", True, "_overlay_mon_shown"),
+                                  ("_overlay_cfg_window", False, "_overlay_cfg_shown")):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            if vis is not None and not getattr(self, vis, False):
+                continue
+            native = getattr(w, "native", None)
+            if self._native_dead(native):
+                continue
+            out.append((native, is_bar))
+        return out
 
-        def _do():
-            try:
-                import ctypes
-                from ctypes import wintypes
-                u = ctypes.windll.user32
-                hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
-                GWL_EXSTYLE, WS_EX_TRANSPARENT, WS_EX_LAYERED = -20, 0x20, 0x80000
-                g = u.GetWindowLongPtrW; g.restype = ctypes.c_ssize_t; g.argtypes = [wintypes.HWND, ctypes.c_int]
-                s = u.SetWindowLongPtrW; s.restype = ctypes.c_ssize_t
-                s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
-                st = g(hwnd, GWL_EXSTYLE)
-                st = (st | WS_EX_TRANSPARENT | WS_EX_LAYERED) if on else (st & ~WS_EX_TRANSPARENT)
-                s(hwnd, GWL_EXSTYLE, st)
-            except Exception:
-                pass
-        self._form_invoke(native, _do)
-
+    # —— 统一维护循环：对所有悬浮小窗做 ①各边留1px(防贴边挡移镜) + ②鼠标自动穿透(仅长条) ——
+    # 全程用裸 Win32(GetWindowRect/SetWindowPos/SetWindowLongPtr)在后台线程直接做：这些按 hwnd 操作、可跨线程，
+    # 且【不走 .NET BeginInvoke】——天然避开关闭时 BeginInvoke 撞销毁窗体的 pythonnet 崩溃路径。读不到句柄就跳过。
     def _overlay_hover_loop(self):
-        import ctypes, time
+        import ctypes
+        import time as _t
         from ctypes import wintypes
         u = ctypes.windll.user32
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                        ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
         u.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
         u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-        pt, rc, cur = wintypes.POINT(), wintypes.RECT(), None
+        u.MonitorFromWindow.restype = wintypes.HMONITOR
+        u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        u.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
+        g = u.GetWindowLongPtrW; g.restype = ctypes.c_ssize_t; g.argtypes = [wintypes.HWND, ctypes.c_int]
+        s = u.SetWindowLongPtrW; s.restype = ctypes.c_ssize_t
+        s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+        GWL_EXSTYLE, WS_EX_TRANSPARENT, WS_EX_LAYERED = -20, 0x20, 0x80000
+        SWP = 0x1 | 0x4 | 0x10            # NOSIZE | NOZORDER | NOACTIVATE
+        pt, rc, mi = wintypes.POINT(), wintypes.RECT(), MONITORINFO()
+        through_state = {}               # id(native) -> 当前是否穿透（仅在变化时改样式）
+
+        def _clear_through():
+            for native, is_bar in self._managed_overlays():
+                if not is_bar:
+                    continue
+                try:
+                    hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
+                    s(hwnd, GWL_EXSTYLE, g(hwnd, GWL_EXSTYLE) & ~WS_EX_TRANSPARENT)
+                except Exception:
+                    pass
+
         while not self._overlay_stop_hover and self._overlay_window is not None and not self._closing:
             try:
-                if not self._overlay_passthrough:
-                    through = False                  # 关闭自动穿透 → 始终可点击
-                else:
-                    native = getattr(self._overlay_window, "native", None)
-                    hwnd = wintypes.HWND(int(native.Handle.ToInt64()))   # 每次重取：ShowInTaskbar 会重建句柄
-                    u.GetCursorPos(ctypes.byref(pt)); u.GetWindowRect(hwnd, ctypes.byref(rc))
-                    over = rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom
-                    through = not over               # 光标不在窄条上 → 穿透；在 → 可点击
-                if through != cur:
-                    cur = through; self._set_clickthrough(through)
+                u.GetCursorPos(ctypes.byref(pt))
+                for native, is_bar in self._managed_overlays():
+                    try:
+                        hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
+                    except Exception:
+                        continue
+                    if not u.GetWindowRect(hwnd, ctypes.byref(rc)):
+                        continue
+                    w, h = rc.right - rc.left, rc.bottom - rc.top
+                    # 该窗所在显示器的物理矩形（多屏正确：按各自所在屏留缝，而非总假定主屏）
+                    mi.cbSize = ctypes.sizeof(MONITORINFO)
+                    if u.GetMonitorInfoW(u.MonitorFromWindow(hwnd, 2), ctypes.byref(mi)):
+                        L, T, R, B = mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom
+                    else:
+                        L, T, R, B = 0, 0, u.GetSystemMetrics(0), u.GetSystemMetrics(1)
+                    nx, ny = rc.left, rc.top                  # 各边强制留 1px
+                    if nx < L + 1: nx = L + 1
+                    if ny < T + 1: ny = T + 1
+                    if nx + w > R - 1: nx = R - 1 - w
+                    if ny + h > B - 1: ny = B - 1 - h
+                    if nx != rc.left or ny != rc.top:
+                        u.SetWindowPos(hwnd, None, int(nx), int(ny), 0, 0, SWP)
+                    through = (is_bar and self._overlay_passthrough
+                               and not (nx <= pt.x <= nx + w and ny <= pt.y <= ny + h))
+                    k = id(native)
+                    if through_state.get(k) != through:
+                        through_state[k] = through
+                        st = g(hwnd, GWL_EXSTYLE)
+                        st = (st | WS_EX_TRANSPARENT | WS_EX_LAYERED) if through else (st & ~WS_EX_TRANSPARENT)
+                        s(hwnd, GWL_EXSTYLE, st)
             except Exception:
                 pass
-            time.sleep(0.06)
-        if not self._closing:                        # 退出时恢复可交互（窗口若还在）
+            _t.sleep(0.06)
+        if not self._closing:                                 # 退出时把长条恢复可点击
             try:
-                self._set_clickthrough(False)
+                _clear_through()
             except Exception:
                 pass
 
     def overlay_set_passthrough(self, on):
-        """开/关“鼠标自动穿透”。关掉=窄条始终可点击（但会挡住其下的贴边移镜）。"""
+        """开/关“鼠标自动穿透”。关掉=长条始终可点击（但会挡住其下的贴边移镜）。维护循环在 ≤60ms 内据此恢复可点击。"""
         self._overlay_passthrough = bool(on)
-        if not self._overlay_passthrough:
-            self._set_clickthrough(False)
         return True
 
     def overlay_set_switch(self, nid, on):
@@ -753,7 +823,6 @@ class Api:
         ③ 这时才销毁设置窗 / 覆盖窗。"""
         self._closing = True
         self._overlay_stop_hover = True
-        self._fps_stop = True
         th = self._overlay_hover_thread
         if th is not None and th.is_alive() and th is not threading.current_thread():
             try:
@@ -833,12 +902,12 @@ class Api:
         return self._form_set(getattr(w, "native", None), "TopMost", bool(flag)) if w else False
 
     def overlay_set_bg(self, alpha):
-        """调背景（毛玻璃）不透明度 0~255；0=背景全透明、只剩内容。立即重上玻璃。"""
+        """调背景（毛玻璃）不透明度 0~255；0=背景全透明、只剩内容。立即重上玻璃（对所有覆盖窗生效）。"""
         try:
             self._overlay_bg_alpha = max(0, min(255, int(alpha)))
         except Exception:
             return False
-        self._overlay_glass()
+        self._reglass_all()
         return True
 
     def overlay_set_content(self, alpha):
@@ -850,12 +919,12 @@ class Api:
             return False
 
     def overlay_set_frost(self, level):
-        """调毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)。立即重上玻璃。"""
+        """调毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)。立即重上玻璃（对所有覆盖窗生效）。"""
         try:
             self._overlay_frost = max(0, min(2, int(level)))
         except Exception:
             return False
-        self._overlay_glass()
+        self._reglass_all()
         return True
 
     # ---------- 覆盖层【设置】小窗：同款玻璃，放调背景/内容透明度/毛度/穿透（窄条太小放不下）----------
@@ -888,12 +957,10 @@ class Api:
                 self._overlay_cfg_window.events.closed += self._on_overlay_cfg_closed
             except Exception:
                 pass
-            try:    # 设置窗：移出任务栏(先) + 自身也上一层轻玻璃(后)，风格统一
-                # ⚠ 挂 loaded 而非 shown：ShowInTaskbar 触发的句柄重建若撞上 WebView2 异步初始化会抛“没有注册类”。
-                def _cfg_loaded():
-                    self._form_set(getattr(self._overlay_cfg_window, "native", None), "ShowInTaskbar", False)
-                    self._glass(self._overlay_cfg_window, 1, 130)
-                self._overlay_cfg_window.events.loaded += _cfg_loaded
+            try:    # 设置窗收尾：移出任务栏 + 固定可读玻璃 + 移出 Alt+Tab；挂 loaded 规避“没有注册类”
+                # 自身始终用固定档玻璃(不随背景设置变 0)，否则把背景调到全透明时连设置面板都看不清。
+                self._overlay_cfg_window.events.loaded += (
+                    lambda: self._overlay_finalize(self._overlay_cfg_window, 1, 130))
             except Exception:
                 pass
             return {"open": True}
@@ -920,16 +987,17 @@ class Api:
                     self._overlay_mon_window.hide(); self._overlay_mon_shown = False
                     return {"open": False}
                 self._overlay_mon_window.show(); self._overlay_mon_shown = True
-                self._fps_ensure()
                 return {"open": True}
             except Exception:
                 self._overlay_mon_window = None
         import webview
         page = os.path.join(WEB_DIR, "overlay_mon.html")
         # 资源监控做成和窄条同款的横向长条：宽度先给保守初值，页面按内容自适应收窄(overlay_mon_resize)。高 30，与开关条等高。
+        # 默认【紧贴开关条右侧】：x=开关条右缘+4，y=开关条同一行。
         w0 = 340
-        x = max(1, min(self._overlay_rect[0], self._overlay_screen[0] - w0 - 1))
-        y = min(self._overlay_rect[1] + 38, self._overlay_screen[1] - 60)
+        sx, sy, sw0, _sh0 = self._overlay_rect
+        x = max(1, min(sx + sw0 + 4, self._overlay_screen[0] - w0 - 1))
+        y = max(1, min(sy, self._overlay_screen[1] - 30 - 1))
         kw = dict(width=w0, height=30, x=x, y=y, js_api=self, on_top=True,
                   frameless=True, easy_drag=False, transparent=True,
                   min_size=(80, 20), background_color="#0B0E14")
@@ -940,14 +1008,12 @@ class Api:
                 self._overlay_mon_window.events.closed += self._on_overlay_mon_closed
             except Exception:
                 pass
-            try:    # 移出任务栏(先) + 与窄条同款玻璃(跟随当前背景/毛度，统一观感)；挂 loaded 规避“没有注册类”
-                def _mon_loaded():
-                    self._form_set(getattr(self._overlay_mon_window, "native", None), "ShowInTaskbar", False)
-                    self._glass(self._overlay_mon_window, self._overlay_frost, max(self._overlay_bg_alpha, 30))
-                self._overlay_mon_window.events.loaded += _mon_loaded
+            try:    # 移出任务栏 + 同款玻璃 + 移出Alt+Tab；挂 loaded(控制器已就绪)规避“没有注册类”的句柄重建竞态
+                self._overlay_mon_window.events.loaded += (
+                    lambda: self._overlay_finalize(self._overlay_mon_window,
+                                                   self._overlay_frost, max(self._overlay_bg_alpha, 30)))
             except Exception:
                 pass
-            self._fps_ensure()
             return {"open": True}
         except Exception as e:
             self._overlay_mon_window = None
@@ -1542,7 +1608,6 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     def _close_monitor():           # 主编辑器关掉时，连带关掉独立浮窗（资源监控 / 覆盖层 / 覆盖层设置），否则它们会让进程不退出
         api._closing = True          # 先置关闭标志：此后 _form_invoke/_form_set 一律不再投递到已销毁窗体（防关闭崩溃）
         api._overlay_stop_hover = True
-        api._fps_stop = True
         for attr in ("_mon_window", "_overlay_window", "_overlay_cfg_window", "_overlay_mon_window"):
             w = getattr(api, attr, None)
             if w is not None:
