@@ -46,14 +46,12 @@
     <div id="chips"></div>
     <div id="alert"></div>
     <div id="tools">
-      <span class="tbtn act" id="pinbtn" title="置顶" onclick="togglePin()">📌</span>
-      <span class="tbtn" id="cfgbtn" title="设置（背景/内容透明度·毛度）" onclick="toggleCfg()">⚙</span>
+      <span class="tbtn" id="cfgbtn" title="设置（背景/内容透明度·毛度·穿透）" onclick="toggleCfg()">⚙</span>
     </div>
   </div>
 
 <script>
   function api() { return (window.pywebview && window.pywebview.api) || null; }
-  let pinned = true, ready = false;
   let winX = 0, winY = 0, winW = 240, winH = 30, screenW = 1920, screenH = 1080, lastFitW = 0;
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -98,18 +96,13 @@
     switchState[id] = on; applyChipUI(chip, on);
     try { api().overlay_set_switch(id, on); } catch (err) {}
   });
-  function togglePin() {
-    pinned = !pinned;
-    try { api().overlay_set_on_top(pinned); } catch (e) {}
-    document.getElementById("pinbtn").classList.toggle("act", pinned);
-  }
-
   // —— 拖拽：用屏幕坐标(screenX/Y)做位移基准，本地+后端双重钳制在屏内 ——
   let dragging = false, sX = 0, sY = 0, aX = 0, aY = 0, pX = 0, pY = 0, raf = false;
   function flushMove() { raf = false; winX = pX; winY = pY; try { api().overlay_move(pX, pY); } catch (e) {} }
   function moveTo(nx, ny) {
-    pX = Math.max(0, Math.min(nx, screenW - winW));
-    pY = Math.max(0, Math.min(ny, screenH - winH));
+    // 各边都留 1px：保证四边的“贴边移镜”触发区永远是游戏画面，窄条不会完全贴边
+    pX = Math.max(1, Math.min(nx, screenW - winW - 1));
+    pY = Math.max(1, Math.min(ny, screenH - winH - 1));
     if (!raf) { raf = true; requestAnimationFrame(flushMove); }
   }
   document.getElementById("grip").addEventListener("mousedown", (e) => {
@@ -125,7 +118,6 @@
       if (!d) return;
       if (d.screen) { screenW = d.screen[0]; screenH = d.screen[1]; }
       if (d.rect) { winW = d.rect[2]; winH = d.rect[3]; if (!dragging) { winX = d.rect[0]; winY = d.rect[1]; } }
-      ready = true;
       render(d);
     }).catch(() => {}).finally(() => setTimeout(poll, 500));
   }

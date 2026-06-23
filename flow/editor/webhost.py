@@ -478,6 +478,11 @@ class Api:
                 self._mon_window.events.closed += self._on_monitor_closed
             except Exception:
                 pass
+            try:    # 不在任务栏占一格（与覆盖层/设置窗一致——都是悬浮小窗，不算“额外窗口”）
+                self._mon_window.events.shown += (
+                    lambda: self._form_set(getattr(self._mon_window, "native", None), "ShowInTaskbar", False))
+            except Exception:
+                pass
             return {"open": True}
         except Exception as e:
             self._mon_window = None
@@ -564,7 +569,9 @@ class Api:
         self._glass(self._overlay_window, self._overlay_frost, self._overlay_bg_alpha)
 
     def _overlay_on_shown(self):
-        """窄条显示后：上玻璃 + 启动光标 hover 轮询线程（自动切换鼠标穿透/可点击）。"""
+        """窄条显示后：移出任务栏 + 上玻璃 + 启动光标 hover 轮询线程（自动切换鼠标穿透/可点击）。
+        ⚠ 顺序：先 ShowInTaskbar=False（会重建窗口句柄、会丢掉已上的玻璃/扩展样式），再上玻璃。"""
+        self._form_set(getattr(self._overlay_window, "native", None), "ShowInTaskbar", False)
         self._overlay_glass()
         self._overlay_stop_hover = False
         if self._overlay_hover_thread is None or not self._overlay_hover_thread.is_alive():
@@ -604,18 +611,14 @@ class Api:
         u = ctypes.windll.user32
         u.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
         u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-        win = self._overlay_window
-        native = getattr(win, "native", None) if win else None
-        try:
-            hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
-        except Exception:
-            return
         pt, rc, cur = wintypes.POINT(), wintypes.RECT(), None
         while not self._overlay_stop_hover and self._overlay_window is not None and not self._closing:
             try:
                 if not self._overlay_passthrough:
                     through = False                  # 关闭自动穿透 → 始终可点击
                 else:
+                    native = getattr(self._overlay_window, "native", None)
+                    hwnd = wintypes.HWND(int(native.Handle.ToInt64()))   # 每次重取：ShowInTaskbar 会重建句柄
                     u.GetCursorPos(ctypes.byref(pt)); u.GetWindowRect(hwnd, ctypes.byref(rc))
                     over = rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom
                     through = not over               # 光标不在窄条上 → 穿透；在 → 可点击
@@ -711,9 +714,9 @@ class Api:
         self._overlay_user_moved = False
         # 顶端居中；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)并重新居中。高度做成和按钮一样窄。
         # ⚠ 必须给 min_size 很小，否则 pywebview 默认最小高(100)会让 30px 的窄条根本压不下去。
-        # ⚠ 离屏幕顶边留 8px 缝隙：保证“贴屏顶移镜”的触发区(y≈0)永远是游戏区，移镜 100% 不被窄条挡（比鼠标穿透更可靠）。
-        w0, h0, gap = 360, 30, 8
-        x0, y0 = max(0, (sw - w0) // 2), gap
+        # ⚠ 离屏幕顶边留 1px：保证“贴屏顶移镜”的触发区(y=0那一行)永远是游戏区，移镜不被窄条挡（比鼠标穿透更可靠）。
+        w0, h0, gap = 360, 30, 1
+        x0, y0 = max(1, (sw - w0) // 2), gap
         self._overlay_rect = [x0, y0, w0, h0]
         kw = dict(width=w0, height=h0, x=x0, y=y0, js_api=self,
                   on_top=True, frameless=True, easy_drag=False, transparent=True,
@@ -803,8 +806,11 @@ class Api:
                 self._overlay_cfg_window.events.closed += self._on_overlay_cfg_closed
             except Exception:
                 pass
-            try:    # 设置窗自身也上一层轻玻璃，风格统一
-                self._overlay_cfg_window.events.shown += (lambda: self._glass(self._overlay_cfg_window, 1, 130))
+            try:    # 设置窗：移出任务栏(先) + 自身也上一层轻玻璃(后)，风格统一
+                def _cfg_shown():
+                    self._form_set(getattr(self._overlay_cfg_window, "native", None), "ShowInTaskbar", False)
+                    self._glass(self._overlay_cfg_window, 1, 130)
+                self._overlay_cfg_window.events.shown += _cfg_shown
             except Exception:
                 pass
             return {"open": True}
@@ -859,9 +865,9 @@ class Api:
             return False
         x, y = self._overlay_rect[0], self._overlay_rect[1]
         if not self._overlay_user_moved:        # 没手动拖过 → 自适应后保持顶端居中
-            x = max(0, (self._overlay_screen[0] - w) // 2)
-        x = max(0, min(x, self._overlay_screen[0] - w))   # 越界则拉回屏内
-        y = max(0, min(y, self._overlay_screen[1] - h))
+            x = max(1, (self._overlay_screen[0] - w) // 2)
+        x = max(1, min(x, self._overlay_screen[0] - w - 1))   # 各边留 1px（越界拉回屏内、且不完全贴边）
+        y = max(1, min(y, self._overlay_screen[1] - h - 1))
         self._overlay_rect = [x, y, w, h]
         def _do():
             try:
@@ -879,8 +885,8 @@ class Api:
         try:
             w, h = self._overlay_rect[2], self._overlay_rect[3]
             sw, sh = self._overlay_screen
-            x = max(0, min(int(x), sw - w))
-            y = max(0, min(int(y), sh - h))
+            x = max(1, min(int(x), sw - w - 1))   # 各边强制留 1px：永不完全贴边，保贴边移镜
+            y = max(1, min(int(y), sh - h - 1))
         except Exception:
             return False
         self._overlay_user_moved = True         # 用户手动拖过 → 之后自适应不再强行居中
