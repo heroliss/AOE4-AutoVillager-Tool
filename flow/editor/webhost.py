@@ -635,29 +635,28 @@ class Api:
             s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
             st = g(hwnd, GWL_EXSTYLE)
             s(hwnd, GWL_EXSTYLE, (st | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW)
+            # 改了扩展样式后轻推一下让外壳重算窗框/任务栏归属（不移动/不缩放/不改Z序/不激活，也不重建句柄→无闪烁）
+            SWP = 0x1 | 0x2 | 0x4 | 0x10 | 0x20   # NOSIZE|NOMOVE|NOZORDER|NOACTIVATE|FRAMECHANGED
+            u.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP)
         except Exception:
             pass
 
     def _overlay_finalize(self, win, frost, alpha):
-        """覆盖窗【页面加载完成(loaded)】后的统一收尾——在 UI 线程里【一次性、按序】做完：
-        ① ShowInTaskbar=False（移出任务栏，会同步重建句柄）→ ② 上玻璃 → ③ 设为工具窗(移出 Alt+Tab)。
-        三步同处一个 UI 线程委托里顺序执行：ShowInTaskbar 的句柄重建是同步的，返回后玻璃/工具窗都落在【新句柄】上，
-        不会像挂在 shown 时那样与 WebView2 控制器异步创建抢句柄（“没有注册类”）。"""
+        """覆盖窗【页面加载完成(loaded)】后的统一收尾——在 UI 线程里按序做完：① 上玻璃 → ② 设为工具窗。
+        工具窗(WS_EX_TOOLWINDOW)本身就把窗口同时移出【任务栏 + Alt+Tab】，所以不再用 .NET 的 ShowInTaskbar=False——
+        后者会【强制重建窗口句柄】(RecreateHandle)，正是“小弹窗打开闪一秒多”的元凶；改用裸 Win32 改扩展样式，不重建、不闪。
+        仍挂在 loaded(控制器已就绪)以避免早期事件与 WebView2 控制器异步创建抢句柄（“没有注册类”）。"""
         native = getattr(win, "native", None)
         if self._closing or self._native_dead(native):
             return
 
         def _do():
             try:
-                native.ShowInTaskbar = False
-            except Exception:
-                pass
-            try:
                 self._glass(win, frost, alpha)     # 已在 UI 线程 → _form_invoke 内联执行
             except Exception:
                 pass
             try:
-                self._tool_window(native)          # 新句柄上设 WS_EX_TOOLWINDOW
+                self._tool_window(native)          # WS_EX_TOOLWINDOW：移出任务栏+Alt+Tab（不重建句柄）
             except Exception:
                 pass
         self._form_invoke(native, _do)
