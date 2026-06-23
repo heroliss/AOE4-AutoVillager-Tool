@@ -345,6 +345,8 @@ class Api:
         self._run_interval = 0.1             # 每帧间隔(秒)，取自流程「每帧触发」节点；run_update 时刷新
         self._run_bps: set = set()           # 断点节点 id 集（命中即自停，精确不依赖前端轮询）
         self._run_until: Optional[str] = None  # “运行到此节点”一次性目标
+        self._overlay_notice = None          # 覆盖层【弹信息】：最近一条值得提醒的运行事件(WARN/ERROR)，前端按 id 去重、瞬时弹出
+        self._overlay_notice_id = 0
         self._run_profile = False            # 性能监控：开启后每帧附带各节点「自身/累计」耗时
         self._run_preview = False            # 截图预览：开启后每帧附带各感知节点「截到的区域图」(base64 PNG)
         self._latest: Optional[dict] = None  # 最近一帧轨迹快照（path/ports/data/tick）
@@ -1098,6 +1100,7 @@ class Api:
             paused = alive and self._run_paused   # 没在跑时 _run_paused 恒为 True，别误报「已暂停」
             bp = self._bp_hit if alive else None
         return {"items": items, "running": alive and not paused, "paused": paused, "bp_hit": bp,
+                "notice": (self._overlay_notice if alive else None),
                 "bg_alpha": self._overlay_bg_alpha, "content_alpha": self._overlay_content_alpha,
                 "frost": self._overlay_frost,
                 "rect": list(self._overlay_rect), "screen": list(self._overlay_screen)}
@@ -1223,6 +1226,10 @@ class Api:
                     new_logs = self._run_logs[before:]
                     for l in new_logs:
                         l["tick"] = tick
+                        if l.get("level") in ("WARN", "ERROR"):   # 值得在游戏里醒目提醒的事件（自动关开关/输入屏蔽失败/异常等）
+                            self._overlay_notice_id += 1
+                            self._overlay_notice = {"id": self._overlay_notice_id,
+                                                    "level": l["level"], "msg": l.get("msg", "")}
                     if len(self._run_logs) > _RUN_LOG_CAP:
                         del self._run_logs[: len(self._run_logs) - _RUN_LOG_CAP]
                     data = {}

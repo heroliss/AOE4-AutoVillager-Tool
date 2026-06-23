@@ -36,9 +36,13 @@
   .chip .v.on  { color: #7bf0a2; }
   .chip .v.off { color: #ff9a9a; }
 
-  #alert { display: none; align-items: center; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 700;
-    color: #fff; background: rgba(210,59,59,0.82); text-shadow: 0 1px 2px #0008; animation: pulse 1s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 6px #ff3b3b55; } 50% { box-shadow: 0 0 16px #ff5b5bbb; } }
+  /* 弹信息：运行中值得提醒的事件（自动关开关/输入屏蔽失败/命中断点/已暂停）——按级别上色、脉冲，醒目瞬时弹出 */
+  #alert { display: none; align-items: center; padding: 1px 9px; border-radius: 6px; font-size: 12px; font-weight: 700;
+    color: #fff; text-shadow: 0 1px 2px #0008; animation: pulse 1s ease-in-out infinite; }
+  #alert.lv-error { background: rgba(210,59,59,0.88); }
+  #alert.lv-warn  { background: rgba(214,158,46,0.92); }
+  #alert.lv-info  { background: rgba(58,120,200,0.86); }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 6px #0000; } 50% { box-shadow: 0 0 16px #ffffff66; } }
 
   #tools { display: inline-flex; align-items: center; gap: 3px; opacity: var(--ca); }
   .tbtn { cursor: pointer; color: #e6ebf3; font-size: 12px; padding: 1px 3px; border-radius: 5px;
@@ -78,10 +82,15 @@
     document.getElementById("chips").innerHTML =
       html || "<span class='chip' style='cursor:default;border:0;background:none'><span class='k'>（未选择要显示的开关）</span></span>";
     setRunBtn(d);
-    const al = document.getElementById("alert");
-    if (Date.now() < alertHoldUntil) { /* 临时提示（如“先在主界面运行”）期间不被覆盖 */ }
-    else if (d.bp_hit || d.paused) { al.style.display = "inline-flex"; al.textContent = "⏸ " + (d.bp_hit ? ("命中断点：" + d.bp_hit) : "已暂停"); }
-    else { al.style.display = "none"; }
+    // 弹信息：新的 WARN/ERROR 运行事件（如“未检测到市场→已关闭出商人”）→ 醒目瞬时弹出 4.5s
+    if (d.notice && d.notice.id && d.notice.id !== lastNoticeId) {
+      lastNoticeId = d.notice.id;
+      flashAlert(d.notice.msg, d.notice.level === "ERROR" ? "error" : "warn", 4500);
+    }
+    if (Date.now() < alertHoldUntil) { /* 瞬时弹信息/提示期间不被覆盖 */ }
+    else if (d.bp_hit) { applyAlert("⏸ 命中断点：" + d.bp_hit, "error"); }
+    else if (d.paused) { applyAlert("⏸ 已暂停", "warn"); }
+    else { document.getElementById("alert").style.display = "none"; }
     if (d.content_alpha != null) document.documentElement.style.setProperty("--ca", (d.content_alpha / 100).toFixed(2));
     fitToContent();
   }
@@ -92,16 +101,17 @@
     else if (d && d.paused) { b.textContent = "▶ 继续"; b.className = "run"; }
     else { b.textContent = "▶ 启动"; b.className = "run"; }
   }
-  let alertHoldUntil = 0;
-  function flashAlert(msg) {
+  let alertHoldUntil = 0, lastNoticeId = 0;
+  function applyAlert(text, level) {
     const al = document.getElementById("alert"); if (!al) return;
-    al.style.display = "inline-flex"; al.textContent = "⚠ " + msg; alertHoldUntil = Date.now() + 2500;
+    al.className = "lv-" + (level || "warn"); al.style.display = "inline-flex"; al.textContent = text;
   }
+  function flashAlert(msg, level, ms) { applyAlert("⚠ " + msg, level || "warn"); alertHoldUntil = Date.now() + (ms || 2500); }
   function toggleRunBtn() {
     try {
       Promise.resolve(api().overlay_run_toggle()).then((r) => {
         if (!r) return;
-        if (r.reason) flashAlert(r.reason);     // 还没运行过 → 提示先在主界面点一次运行
+        if (r.reason) flashAlert(r.reason, "info");     // 还没运行过 → 提示先在主界面点一次运行
         setRunBtn(r);
       }).catch(() => {});
     } catch (e) {}
