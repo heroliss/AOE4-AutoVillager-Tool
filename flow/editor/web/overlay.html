@@ -5,19 +5,19 @@
 <title>AOE4 Overlay</title>
 <style>
   /* 背景全透明：让出系统玻璃与游戏画面。内容透明度由 --ca 单独控制。
-     html/body 用 max-content + overflow:visible，使整条按内容自然撑开，便于测量真实宽高后把窗口收到贴合内容。 */
-  html, body { margin: 0; height: 100%; width: max-content; background: transparent; overflow: visible;
+     overflow:hidden 杜绝 WebView2 滚动条；宽度仍用 max-content 让整条按内容撑开(便于测量后把窗口收到贴合)。 */
+  html, body { margin: 0; height: 100%; width: max-content; background: transparent; overflow: hidden;
     font-family: "Microsoft YaHei", system-ui, sans-serif; -webkit-user-select: none; user-select: none; cursor: default; }
   :root { --ca: 1; }                 /* 内容不透明度（0.3~1），与背景玻璃独立 */
 
-  /* 很窄、很透的玻璃条：自身几乎不画背景（背景全靠系统玻璃），只留极细边框勾出轮廓。 */
-  #bar { display: inline-flex; align-items: center; gap: 6px; width: max-content; height: 100%; box-sizing: border-box;
-    padding: 0 6px; background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; }
+  /* 很透的玻璃条：自身几乎不画背景（背景全靠系统玻璃），只留极细边框勾出轮廓。 */
+  #bar { display: inline-flex; align-items: center; gap: 8px; width: max-content; height: 100%; box-sizing: border-box;
+    padding: 0 10px; background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 7px; }
 
   /* 文字/按钮全透明：直接把玻璃背景露出来，只有文字本身（带描边增强可读性）。 */
-  #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 11px; padding: 0 1px; line-height: 1; }
-  #chips { display: inline-flex; align-items: center; gap: 5px; }
-  .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 11.5px; line-height: 1;
+  #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 12px; padding: 0 1px; line-height: 1; }
+  #chips { display: inline-flex; align-items: center; gap: 7px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; line-height: 1;
     opacity: var(--ca); text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
   .chip .k { color: #dfe5ee; }
   .chip .v { font-weight: 700; }
@@ -49,7 +49,7 @@
 <script>
   function api() { return (window.pywebview && window.pywebview.api) || null; }
   let pinned = true, ready = false;
-  let winX = 0, winY = 0, winW = 200, winH = 26, screenW = 1920, screenH = 1080, lastFitW = 0;
+  let winX = 0, winY = 0, winW = 240, winH = 30, screenW = 1920, screenH = 1080, lastFitW = 0;
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 
@@ -69,11 +69,11 @@
     fitToContent();
   }
 
-  // 内容自适应：测量整条真实宽高，把窗口收成贴合内容（玻璃只覆盖内容大小，不再占半屏）
+  // 内容自适应：只测量【宽度】，把窗口收成贴合内容（玻璃只覆盖内容大小）。高度固定 30(够放下内容、不出滚动条)。
   function fitToContent() {
-    const r = document.getElementById("bar").getBoundingClientRect();
-    const w = Math.ceil(r.width) + 2, h = Math.max(22, Math.ceil(r.height));
-    if (Math.abs(w - lastFitW) >= 2) { lastFitW = w; try { api().overlay_resize(w, h); } catch (e) {} }
+    const bar = document.getElementById("bar");
+    const w = Math.max(120, Math.ceil(Math.max(bar.scrollWidth, bar.offsetWidth, bar.getBoundingClientRect().width)) + 2);
+    if (Math.abs(w - lastFitW) >= 3) { lastFitW = w; try { api().overlay_resize(w, 30); } catch (e) {} }
   }
 
   function toggleCfg() { try { api().toggle_overlay_cfg(); } catch (e) {} }

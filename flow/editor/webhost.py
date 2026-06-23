@@ -326,7 +326,7 @@ class Api:
         self._overlay_bg_alpha = 55          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=背景全透；以透明为主故默认很淡）
         self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
         self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认只一点点
-        self._overlay_rect = [0, 0, 200, 22] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
+        self._overlay_rect = [0, 0, 240, 30] # [x, y, w, h] 当前几何（自适应缩放/拖拽时更新；供前端钳制不出屏）
         self._overlay_screen = [1920, 1080]  # 屏幕逻辑尺寸（拖拽钳制用）
         self._overlay_user_moved = False     # 用户是否手动拖过；没拖过则自适应缩放时保持顶端居中
 
@@ -578,7 +578,7 @@ class Api:
         self._overlay_user_moved = False
         # 顶端居中；宽度先给个保守初值，页面渲染完会按内容自适应收窄(overlay_resize)并重新居中。高度做成和按钮一样窄。
         # ⚠ 必须给 min_size 很小，否则 pywebview 默认最小高(100)会让 26px 的窄条根本压不下去。
-        w0, h0 = 360, 22
+        w0, h0 = 360, 30
         x0, y0 = max(0, (sw - w0) // 2), 0
         self._overlay_rect = [x0, y0, w0, h0]
         kw = dict(width=w0, height=h0, x=x0, y=y0, js_api=self,
