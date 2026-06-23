@@ -338,6 +338,7 @@ class Api:
         self._run_lock = threading.RLock()   # 保护图结构：引擎跑帧 vs run_update 改图 互斥
         self._snap_lock = threading.Lock()   # 保护“最近一帧快照 + 待取日志 + 断点集”，引擎/轮询短暂占用
         self._run_thread: Optional[threading.Thread] = None
+        self._last_payload = None             # 最近一次（编辑器）运行用的图载荷——供覆盖层「运行/暂停」按钮冷启动复用
         self._run_paused = True              # 引擎线程是否暂停（创建即暂停，等前端 run_resume）
         self._run_stop = False               # 引擎线程退出标志
         self._run_real = False               # 当前会话是否真跑（发输入）
@@ -1135,6 +1136,7 @@ class Api:
         self._stop_thread()               # 先停掉上一个会话（不持锁，避免死锁）
         with self._run_lock:
             self._run_graph = payload_to_graph(payload)
+            self._last_payload = payload      # 记住本次图，供覆盖层「运行/暂停」按钮在停止后冷启动复用
             self._run_real = bool(real)
             self._run_interval = self._interval_of(self._run_graph)
 
@@ -1266,6 +1268,24 @@ class Api:
             self._run_paused = False
             return True
         return False
+
+    def overlay_run_toggle(self):
+        """覆盖层「运行/暂停」合并按钮：未跑→用最近一次的图【真跑】；暂停中→继续；运行中→暂停。
+        让用户可在游戏里直接启停，并在暂停后回主界面查看当帧的流程信息（暂停时引擎停在帧间，快照即当时态）。"""
+        alive = bool(self._run_thread and self._run_thread.is_alive())
+        if alive:
+            with self._snap_lock:
+                paused = self._run_paused
+            if paused:
+                self.run_resume()
+                return {"running": True, "paused": False}
+            self.run_pause()
+            return {"running": False, "paused": True}
+        if self._last_payload is None:
+            return {"running": False, "paused": False, "reason": "请先在主界面点一次「运行」"}
+        self.run_begin(self._last_payload, real=True)
+        self.run_resume()
+        return {"running": True, "paused": False}
 
     def run_set_breakpoints(self, bps=None, run_until=None):
         """前端切换断点 / “运行到此节点” 时同步给引擎线程（引擎据此精确自停）。"""

@@ -16,6 +16,13 @@
 
   /* 文字/按钮全透明：直接把玻璃背景露出来，只有文字本身（带描边增强可读性）。 */
   #grip { cursor: move; color: rgba(255,255,255,calc(0.5 * var(--ca))); font-size: 12px; padding: 0 1px; line-height: 1; }
+  /* 运行/暂停 合并按钮：未跑/暂停=绿(可启动/继续)，运行中=琥珀(可暂停)。放在最左，游戏里好按。 */
+  #runbtn { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px;
+    line-height: 1; padding: 2px 9px; border-radius: 11px; font-weight: 700; opacity: var(--ca);
+    border: 1px solid rgba(255,255,255,0.18); text-shadow: 0 1px 2px rgba(0,0,0,0.6); transition: background .12s; }
+  #runbtn:hover { background: rgba(255,255,255,0.14); }
+  #runbtn.run   { border-color: rgba(110,240,150,0.5); background: rgba(70,200,110,0.16); color: #9af0bd; }
+  #runbtn.pause { border-color: rgba(255,200,110,0.5); background: rgba(230,170,60,0.16); color: #ffd98a; }
   #chips { display: inline-flex; align-items: center; gap: 7px; }
   /* 开关芯片：可点击切换。整片有一层很淡的描边/底，开=偏绿、关=偏红，点一下就翻。 */
   .chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; line-height: 1;
@@ -43,6 +50,7 @@
 <body>
   <div id="bar">
     <div id="grip" title="按住拖动可移动整条（限制在屏幕内）">⠿</div>
+    <div id="runbtn" class="run" title="运行/暂停：在游戏里直接启停流程；暂停后可回主界面查看当帧的流程信息" onclick="toggleRunBtn()">▶ 启动</div>
     <div id="chips"></div>
     <div id="alert"></div>
     <div id="tools">
@@ -69,11 +77,34 @@
     }
     document.getElementById("chips").innerHTML =
       html || "<span class='chip' style='cursor:default;border:0;background:none'><span class='k'>（未选择要显示的开关）</span></span>";
+    setRunBtn(d);
     const al = document.getElementById("alert");
-    if (d.bp_hit || d.paused) { al.style.display = "inline-flex"; al.textContent = "⏸ " + (d.bp_hit ? ("命中断点：" + d.bp_hit) : "已暂停"); }
+    if (Date.now() < alertHoldUntil) { /* 临时提示（如“先在主界面运行”）期间不被覆盖 */ }
+    else if (d.bp_hit || d.paused) { al.style.display = "inline-flex"; al.textContent = "⏸ " + (d.bp_hit ? ("命中断点：" + d.bp_hit) : "已暂停"); }
     else { al.style.display = "none"; }
     if (d.content_alpha != null) document.documentElement.style.setProperty("--ca", (d.content_alpha / 100).toFixed(2));
     fitToContent();
+  }
+  // 运行/暂停 合并按钮：据运行态显示「启动 / 继续 / 暂停」并上对应颜色。
+  function setRunBtn(d) {
+    const b = document.getElementById("runbtn"); if (!b) return;
+    if (d && d.running) { b.textContent = "⏸ 暂停"; b.className = "pause"; }
+    else if (d && d.paused) { b.textContent = "▶ 继续"; b.className = "run"; }
+    else { b.textContent = "▶ 启动"; b.className = "run"; }
+  }
+  let alertHoldUntil = 0;
+  function flashAlert(msg) {
+    const al = document.getElementById("alert"); if (!al) return;
+    al.style.display = "inline-flex"; al.textContent = "⚠ " + msg; alertHoldUntil = Date.now() + 2500;
+  }
+  function toggleRunBtn() {
+    try {
+      Promise.resolve(api().overlay_run_toggle()).then((r) => {
+        if (!r) return;
+        if (r.reason) flashAlert(r.reason);     // 还没运行过 → 提示先在主界面点一次运行
+        setRunBtn(r);
+      }).catch(() => {});
+    } catch (e) {}
   }
 
   // 内容自适应：只测量【宽度】，把窗口收成贴合内容（玻璃只覆盖内容大小）。高度固定 30(够放下内容、不出滚动条)。

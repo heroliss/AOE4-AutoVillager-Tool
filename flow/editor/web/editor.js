@@ -2703,6 +2703,7 @@ const ED = (function () {
       applySimpleMode();
       if (simpleMode) simpleEntrySig = JSON.stringify(collect());   // 开机即处于使用模式：记下“退出时还原”的基线
       startSysMon();       // 启动右下角资源监控小窗（轮询后端 sys_stats）
+      try { if (!overlayOpen) toggleOverlay(); } catch (e) {}   // 启动即默认打开游戏内覆盖层（可在工具栏 🎮 关掉）
     } catch (err) {
       showError("启动失败：\n" + (err && (err.stack || err.message) || err));
     }
@@ -3246,6 +3247,12 @@ const ED = (function () {
   // 处理一次轮询结果：刷新高亮状态 + 追加增量日志 + 命中断点则暂停（断点判定已在引擎侧精确完成）。
   function applyPoll(r) {
     if (!r) return;
+    // 覆盖层（或别处）把引擎暂停了：编辑器同步成暂停态——停止轮询、按钮回到「继续」，画面定格在当帧供查看。
+    if (r.paused && running && !r.bp_hit) {
+      running = false; stopPoll(); setRunUI();
+      setStatus("⏸ 已暂停 · 第 " + _lastTick + " 帧（可在覆盖层或此处点「继续」）");
+      return;
+    }
     const t = r.trace;
     if (t && t.tick === _lastTick && !(r.logs && r.logs.length) && !r.bp_hit) return;  // 帧未推进、无新日志/断点 → 跳过，免去高频轮询下的无谓重绘与集合重建
     if (t) {
@@ -4412,6 +4419,7 @@ const ED = (function () {
       canvas.show_info = false;          // 隐藏左下角 T/I/N/V/FPS 调试信息（对普通用户无意义）
       canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
       canvas.render_connection_arrows = true;    // 每条连线中段画一个方向箭头，一眼看出数据/执行的流向
+      canvas.render_curved_connections = true;   // 箭头朝向按【曲线切线】算（连线本就是样条）；否则会退化成纯上/下的竖直朝向 → 方向看着不对
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）/ 折叠态画“子图箱体”
