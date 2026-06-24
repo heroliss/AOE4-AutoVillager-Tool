@@ -200,26 +200,21 @@ def build_combined_graph() -> Graph:
         ["sw_cart", "on"],
     ]
 
-    # ==================== 可视化分组：把三段(+共享/收尾)框起来，一眼看清结构 ====================
+    # ==================== 可视化分组（两级嵌套：组≈函数）====================
+    # 顶层 4 个「函数」：每帧守卫 / 共享识别 / 生产门控 / 生产操作区。
+    # 「操作区」是父组(parent)，内含 进入+三段+收尾 五个子段；其余为顶层叶子组。
+    # 折叠某组＝收成一个紧凑“子图节点”：组内连线隐藏、跨组连线收成箱体端口、暴露的参数列在箱体上。
+    # 默认折叠最啰嗦的「生产门控」(24 节点、平时最少动)。纯视图层，引擎仍跑扁平图、不改行为。
     g.groups = [
-        # 资源/识别类传感器都放“共享前段”：每帧只识别一次、多段按需拉取（人口/空位、食物、黄金、TC），
-        # 放一起对齐、视觉一致（食物虽只村民用，但与其它资源对齐更清楚）。
-        {"title": "共享前段（每帧一次）", "color": "#4a8a8a",
-         "members": ["tick", "mod", "if_mod", "win", "and_win", "if_win", "occ", "if_blocked", "if_trans",
-                     "pop", "slots", "food", "gold", "wood", "tc",
-                     "lock", "block_begin", "save_sel", "relmod1"]},
-        {"title": "村民段", "color": "#3a6ea5",
-         "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v",
-                     "c_per_v", "plan_v", "prod_v", "queue_v"]},
-        {"title": "乡骑段（金朝）", "color": "#8a5a9a",
-         "members": ["sw_xq", "if_sw_xq", "q_xq", "if_qxq", "sel_tc_x",
-                     "c_per_x", "plan_x", "prod_x", "queue_x"]},
-        {"title": "商人段（市场）", "color": "#a5793a",
-         "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market", "market", "not_mkt", "set_cart",
-                     "c_per_cart", "plan_cart", "prod_cart", "queue_cart"]},
-        {"title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#7a6a4a",
-         "members": ["c_zero", "pre_sw_vill", "pre_q_vill",
-                     "pre_sw_xq", "pre_q_xq",
+        {"id": "g_guard", "title": "每帧守卫", "color": "#4a8a8a",
+         "desc": "每帧先过的安全闸：修饰键/窗口/遮挡，任一不过就结束本帧。",
+         "members": ["tick", "mod", "if_mod", "win", "and_win", "if_win", "occ", "if_blocked", "if_trans"]},
+        {"id": "g_sense", "title": "共享识别", "color": "#3f7a6a",
+         "desc": "每帧只识别一次、多段共享：人口/空位/食物/黄金/木头/TC。",
+         "members": ["pop", "slots", "food", "gold", "wood", "tc"]},
+        {"id": "g_gate", "title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#7a6a4a", "collapsed": True,
+         "desc": "抢锁/屏蔽之前的短路：逐段判 开关→队列空→资源够买1个→人口有空位；都没活/人口满＝本帧结束。",
+         "members": ["c_zero", "pre_sw_vill", "pre_q_vill", "pre_sw_xq", "pre_q_xq",
                      "pre_sw_cart", "pre_q_cart",
                      "c_cost_v", "cmp_food_v", "pre_food_v",
                      "c_cost_x_food", "cmp_food_x", "pre_food_x",
@@ -227,9 +222,49 @@ def build_combined_graph() -> Graph:
                      "c_cost_cart", "cmp_gold_cart", "pre_gold_cart",
                      "c_cost_cart_wood", "cmp_wood_cart", "pre_wood_cart",
                      "cmp_slots", "pre_slots"]},
-        {"title": "收尾（整批一次）", "color": "#5a9367",
+        # 父组：把“进入+三段+收尾”整批操作裹成一个大函数（自身无直接成员，外框由子组撑开）。
+        {"id": "g_op", "title": "生产操作区（整批一次）", "color": "#3a6ea5",
+         "desc": "抢锁、屏蔽输入、存好编组后，一帧内依次生产 村民/乡骑/商人，最后统一收尾。", "members": []},
+        {"id": "g_enter", "parent": "g_op", "title": "进入", "color": "#4178b5",
+         "desc": "取锁→屏蔽鼠标键盘→Ctrl+0 暂存当前选择→松修饰键。",
+         "members": ["lock", "block_begin", "save_sel", "relmod1"]},
+        {"id": "g_vill", "parent": "g_op", "title": "村民段", "color": "#3a6ea5",
+         "members": ["sw_vill", "if_sw_vill", "q_vill", "if_qvill", "sel_tc_v",
+                     "c_per_v", "plan_v", "prod_v", "queue_v"]},
+        {"id": "g_xq", "parent": "g_op", "title": "乡骑段（金朝）", "color": "#8a5a9a",
+         "members": ["sw_xq", "if_sw_xq", "q_xq", "if_qxq", "sel_tc_x",
+                     "c_per_x", "plan_x", "prod_x", "queue_x"]},
+        {"id": "g_cart", "parent": "g_op", "title": "商人段（市场）", "color": "#a5793a",
+         "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market", "market", "not_mkt", "set_cart",
+                     "c_per_cart", "plan_cart", "prod_cart", "queue_cart"]},
+        {"id": "g_exit", "parent": "g_op", "title": "收尾", "color": "#5a9367",
+         "desc": "恢复编组选择→解散临时编组→松修饰键→解除屏蔽→等待→解锁。",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
     ]
+
+    # ==================== 参数“向上暴露”（组≈函数的接口）====================
+    # foldparams=节点把【自身】参数暴露给它所在的【直接组】（折叠该组后在箱体上可调）；
+    # groupexpose=该组再把某参数【向上一级】暴露给父组。于是折叠时箱体即列出关键旋钮，不必展开。
+    g.foldparams = [
+        ["sw_vill", "on"], ["c_per_v", "value"],          # 三段：开关 + 每×数
+        ["sw_xq", "on"], ["c_per_x", "value"],
+        ["sw_cart", "on"], ["c_per_cart", "value"],
+        ["c_cost_v", "value"], ["c_cost_x_food", "value"], ["c_cost_x", "value"],   # 门控(默认折叠)：各单位单价
+        ["c_cost_cart", "value"], ["c_cost_cart_wood", "value"],
+    ]
+    # 三段开关再向上冒到「操作区」箱体：折叠整个操作区时仍能一眼看到/切换三段开关。
+    g.groupexpose = [
+        ["g_vill", "sw_vill", "on"],
+        ["g_xq", "sw_xq", "on"],
+        ["g_cart", "sw_cart", "on"],
+    ]
+    # 折叠箱体上的参数显示名 = 控制面板同名（统一存 labels，键 "nodeId|key"）。
+    g.labels = {
+        "sw_vill|on": "出村民", "sw_xq|on": "出乡骑(金朝)", "sw_cart|on": "出商人(市场)",
+        "c_per_v|value": "每个TC出村民数", "c_per_x|value": "每个TC出乡骑数", "c_per_cart|value": "每个市场出商人数",
+        "c_cost_v|value": "村民成本(食物)", "c_cost_x_food|value": "乡骑成本(食物)", "c_cost_x|value": "乡骑成本(黄金)",
+        "c_cost_cart|value": "商人成本(黄金)", "c_cost_cart_wood|value": "商人成本(木头)",
+    }
 
     # ==================== 节点说明（编辑器里展示，帮助看懂每个节点的作用）====================
     g.notes.update({

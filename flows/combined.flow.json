@@ -96,8 +96,10 @@
   ],
   "groups": [
     {
-      "title": "共享前段（每帧一次）",
+      "id": "g_guard",
+      "title": "每帧守卫",
       "color": "#4a8a8a",
+      "desc": "每帧先过的安全闸：修饰键/窗口/遮挡，任一不过就结束本帧。",
       "members": [
         "tick",
         "mod",
@@ -107,70 +109,29 @@
         "if_win",
         "occ",
         "if_blocked",
-        "if_trans",
+        "if_trans"
+      ]
+    },
+    {
+      "id": "g_sense",
+      "title": "共享识别",
+      "color": "#3f7a6a",
+      "desc": "每帧只识别一次、多段共享：人口/空位/食物/黄金/木头/TC。",
+      "members": [
         "pop",
         "slots",
         "food",
         "gold",
         "wood",
-        "tc",
-        "lock",
-        "block_begin",
-        "save_sel",
-        "relmod1"
+        "tc"
       ]
     },
     {
-      "title": "村民段",
-      "color": "#3a6ea5",
-      "members": [
-        "sw_vill",
-        "if_sw_vill",
-        "q_vill",
-        "if_qvill",
-        "sel_tc_v",
-        "c_per_v",
-        "plan_v",
-        "prod_v",
-        "queue_v"
-      ]
-    },
-    {
-      "title": "乡骑段（金朝）",
-      "color": "#8a5a9a",
-      "members": [
-        "sw_xq",
-        "if_sw_xq",
-        "q_xq",
-        "if_qxq",
-        "sel_tc_x",
-        "c_per_x",
-        "plan_x",
-        "prod_x",
-        "queue_x"
-      ]
-    },
-    {
-      "title": "商人段（市场）",
-      "color": "#a5793a",
-      "members": [
-        "sw_cart",
-        "if_sw_cart",
-        "q_cart",
-        "if_qcart",
-        "sel_market",
-        "market",
-        "not_mkt",
-        "set_cart",
-        "c_per_cart",
-        "plan_cart",
-        "prod_cart",
-        "queue_cart"
-      ]
-    },
-    {
+      "id": "g_gate",
       "title": "生产门控（开关+队列空+资源够+人口空位）",
       "color": "#7a6a4a",
+      "collapsed": true,
+      "desc": "抢锁/屏蔽之前的短路：逐段判 开关→队列空→资源够买1个→人口有空位；都没活/人口满＝本帧结束。",
       "members": [
         "c_zero",
         "pre_sw_vill",
@@ -199,8 +160,85 @@
       ]
     },
     {
-      "title": "收尾（整批一次）",
+      "id": "g_op",
+      "title": "生产操作区（整批一次）",
+      "color": "#3a6ea5",
+      "desc": "抢锁、屏蔽输入、存好编组后，一帧内依次生产 村民/乡骑/商人，最后统一收尾。",
+      "members": []
+    },
+    {
+      "id": "g_enter",
+      "parent": "g_op",
+      "title": "进入",
+      "color": "#4178b5",
+      "desc": "取锁→屏蔽鼠标键盘→Ctrl+0 暂存当前选择→松修饰键。",
+      "members": [
+        "lock",
+        "block_begin",
+        "save_sel",
+        "relmod1"
+      ]
+    },
+    {
+      "id": "g_vill",
+      "parent": "g_op",
+      "title": "村民段",
+      "color": "#3a6ea5",
+      "members": [
+        "sw_vill",
+        "if_sw_vill",
+        "q_vill",
+        "if_qvill",
+        "sel_tc_v",
+        "c_per_v",
+        "plan_v",
+        "prod_v",
+        "queue_v"
+      ]
+    },
+    {
+      "id": "g_xq",
+      "parent": "g_op",
+      "title": "乡骑段（金朝）",
+      "color": "#8a5a9a",
+      "members": [
+        "sw_xq",
+        "if_sw_xq",
+        "q_xq",
+        "if_qxq",
+        "sel_tc_x",
+        "c_per_x",
+        "plan_x",
+        "prod_x",
+        "queue_x"
+      ]
+    },
+    {
+      "id": "g_cart",
+      "parent": "g_op",
+      "title": "商人段（市场）",
+      "color": "#a5793a",
+      "members": [
+        "sw_cart",
+        "if_sw_cart",
+        "q_cart",
+        "if_qcart",
+        "sel_market",
+        "market",
+        "not_mkt",
+        "set_cart",
+        "c_per_cart",
+        "plan_cart",
+        "prod_cart",
+        "queue_cart"
+      ]
+    },
+    {
+      "id": "g_exit",
+      "parent": "g_op",
+      "title": "收尾",
       "color": "#5a9367",
+      "desc": "恢复编组选择→解散临时编组→松修饰键→解除屏蔽→等待→解锁。",
       "members": [
         "restore",
         "disband",
@@ -211,6 +249,82 @@
       ]
     }
   ],
+  "foldparams": [
+    [
+      "sw_vill",
+      "on"
+    ],
+    [
+      "c_per_v",
+      "value"
+    ],
+    [
+      "sw_xq",
+      "on"
+    ],
+    [
+      "c_per_x",
+      "value"
+    ],
+    [
+      "sw_cart",
+      "on"
+    ],
+    [
+      "c_per_cart",
+      "value"
+    ],
+    [
+      "c_cost_v",
+      "value"
+    ],
+    [
+      "c_cost_x_food",
+      "value"
+    ],
+    [
+      "c_cost_x",
+      "value"
+    ],
+    [
+      "c_cost_cart",
+      "value"
+    ],
+    [
+      "c_cost_cart_wood",
+      "value"
+    ]
+  ],
+  "groupexpose": [
+    [
+      "g_vill",
+      "sw_vill",
+      "on"
+    ],
+    [
+      "g_xq",
+      "sw_xq",
+      "on"
+    ],
+    [
+      "g_cart",
+      "sw_cart",
+      "on"
+    ]
+  ],
+  "labels": {
+    "sw_vill|on": "出村民",
+    "sw_xq|on": "出乡骑(金朝)",
+    "sw_cart|on": "出商人(市场)",
+    "c_per_v|value": "每个TC出村民数",
+    "c_per_x|value": "每个TC出乡骑数",
+    "c_per_cart|value": "每个市场出商人数",
+    "c_cost_v|value": "村民成本(食物)",
+    "c_cost_x_food|value": "乡骑成本(食物)",
+    "c_cost_x|value": "乡骑成本(黄金)",
+    "c_cost_cart|value": "商人成本(黄金)",
+    "c_cost_cart_wood|value": "商人成本(木头)"
+  },
   "overlaypanel": [
     [
       "sw_vill",
@@ -354,8 +468,8 @@
       "id": "pop",
       "type": "sense.ocr_number",
       "pos": [
-        4088.0,
-        796.0
+        1578.5,
+        368.0
       ],
       "params": {
         "region": [
@@ -374,8 +488,8 @@
       "id": "slots",
       "type": "math.arith",
       "pos": [
-        4449.0,
-        612.0
+        1595.5,
+        2458.0
       ],
       "params": {
         "op": "-"
@@ -386,8 +500,8 @@
       "id": "food",
       "type": "sense.ocr_number",
       "pos": [
-        1561.0,
-        368.0
+        1578.5,
+        2102.0
       ],
       "params": {
         "region": [
@@ -406,8 +520,8 @@
       "id": "gold",
       "type": "sense.ocr_number",
       "pos": [
-        2799.0,
-        568.0
+        1578.5,
+        1626.0
       ],
       "params": {
         "region": [
@@ -426,8 +540,8 @@
       "id": "wood",
       "type": "sense.ocr_number",
       "pos": [
-        3727.0,
-        352.0
+        1578.5,
+        2778.0
       ],
       "params": {
         "region": [
@@ -446,8 +560,8 @@
       "id": "tc",
       "type": "game.building_count",
       "pos": [
-        6306.0,
-        348.0
+        1561.0,
+        844.0
       ],
       "params": {
         "building_name": "城镇中心",
@@ -483,7 +597,7 @@
       "id": "c_zero",
       "type": "data.const_number",
       "pos": [
-        4457.5,
+        4373.5,
         432.0
       ],
       "params": {
@@ -495,7 +609,7 @@
       "id": "pre_sw_vill",
       "type": "control.if",
       "pos": [
-        1621.5,
+        1639.0,
         40.0
       ],
       "params": {},
@@ -505,7 +619,7 @@
       "id": "pre_q_vill",
       "type": "control.if",
       "pos": [
-        1965.5,
+        2000.5,
         40.0
       ],
       "params": {},
@@ -515,7 +629,7 @@
       "id": "pre_sw_xq",
       "type": "control.if",
       "pos": [
-        2524.0,
+        2559.0,
         40.0
       ],
       "params": {},
@@ -525,7 +639,7 @@
       "id": "pre_q_xq",
       "type": "control.if",
       "pos": [
-        2859.5,
+        2877.5,
         40.0
       ],
       "params": {},
@@ -535,7 +649,7 @@
       "id": "pre_sw_cart",
       "type": "control.if",
       "pos": [
-        3787.5,
+        3763.0,
         40.0
       ],
       "params": {},
@@ -545,7 +659,7 @@
       "id": "pre_q_cart",
       "type": "control.if",
       "pos": [
-        4148.5,
+        4081.5,
         40.0
       ],
       "params": {},
@@ -555,7 +669,7 @@
       "id": "cmp_slots",
       "type": "logic.compare",
       "pos": [
-        4776.0,
+        4692.0,
         232.0
       ],
       "params": {
@@ -567,7 +681,7 @@
       "id": "pre_slots",
       "type": "control.if",
       "pos": [
-        5103.0,
+        5019.0,
         40.0
       ],
       "params": {},
@@ -577,8 +691,8 @@
       "id": "c_cost_v",
       "type": "data.const_number",
       "pos": [
-        1586.5,
-        724.0
+        1604.0,
+        3166.0
       ],
       "params": {
         "value": 50
@@ -589,7 +703,7 @@
       "id": "cmp_food_v",
       "type": "logic.compare",
       "pos": [
-        1922.0,
+        1957.0,
         264.0
       ],
       "params": {
@@ -601,7 +715,7 @@
       "id": "pre_food_v",
       "type": "control.if",
       "pos": [
-        2249.0,
+        2284.0,
         40.0
       ],
       "params": {},
@@ -611,7 +725,7 @@
       "id": "c_cost_x_food",
       "type": "data.const_number",
       "pos": [
-        2489.0,
+        2524.0,
         248.0
       ],
       "params": {
@@ -623,7 +737,7 @@
       "id": "cmp_food_x",
       "type": "logic.compare",
       "pos": [
-        2816.0,
+        2834.0,
         248.0
       ],
       "params": {
@@ -635,7 +749,7 @@
       "id": "pre_food_x",
       "type": "control.if",
       "pos": [
-        3203.5,
+        3204.5,
         40.0
       ],
       "params": {},
@@ -645,8 +759,8 @@
       "id": "c_cost_x",
       "type": "data.const_number",
       "pos": [
-        2824.5,
-        924.0
+        2842.5,
+        448.0
       ],
       "params": {
         "value": 50
@@ -657,7 +771,7 @@
       "id": "cmp_gold_x",
       "type": "logic.compare",
       "pos": [
-        3160.0,
+        3161.0,
         232.0
       ],
       "params": {
@@ -669,7 +783,7 @@
       "id": "pre_gold_x",
       "type": "control.if",
       "pos": [
-        3487.0,
+        3488.0,
         40.0
       ],
       "params": {},
@@ -679,7 +793,7 @@
       "id": "c_cost_cart",
       "type": "data.const_number",
       "pos": [
-        4113.5,
+        4046.5,
         448.0
       ],
       "params": {
@@ -691,7 +805,7 @@
       "id": "cmp_gold_cart",
       "type": "logic.compare",
       "pos": [
-        4449.0,
+        4365.0,
         232.0
       ],
       "params": {
@@ -703,7 +817,7 @@
       "id": "pre_gold_cart",
       "type": "control.if",
       "pos": [
-        4819.5,
+        4735.5,
         40.0
       ],
       "params": {},
@@ -713,8 +827,8 @@
       "id": "c_cost_cart_wood",
       "type": "data.const_number",
       "pos": [
-        3752.5,
-        740.0
+        3728.0,
+        232.0
       ],
       "params": {
         "value": 60
@@ -725,7 +839,7 @@
       "id": "cmp_wood_cart",
       "type": "logic.compare",
       "pos": [
-        4105.0,
+        4038.0,
         248.0
       ],
       "params": {
@@ -737,7 +851,7 @@
       "id": "pre_wood_cart",
       "type": "control.if",
       "pos": [
-        4492.5,
+        4408.5,
         40.0
       ],
       "params": {},
@@ -747,7 +861,7 @@
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        5343.0,
+        5259.0,
         40.0
       ],
       "params": {},
@@ -757,7 +871,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        5583.0,
+        5499.0,
         40.0
       ],
       "params": {
@@ -769,7 +883,7 @@
       "id": "save_sel",
       "type": "action.press_key",
       "pos": [
-        5962.0,
+        5878.0,
         40.0
       ],
       "params": {
@@ -783,7 +897,7 @@
       "id": "relmod1",
       "type": "action.release_modifiers",
       "pos": [
-        6384.0,
+        6222.0,
         40.0
       ],
       "params": {},
@@ -793,7 +907,7 @@
       "id": "sw_vill",
       "type": "data.switch",
       "pos": [
-        6736.5,
+        6496.5,
         412.0
       ],
       "params": {
@@ -805,7 +919,7 @@
       "id": "if_sw_vill",
       "type": "control.if",
       "pos": [
-        6771.5,
+        6531.5,
         40.0
       ],
       "params": {},
@@ -815,7 +929,7 @@
       "id": "q_vill",
       "type": "sense.template_match",
       "pos": [
-        6702.0,
+        6462.0,
         712.0
       ],
       "params": {
@@ -837,7 +951,7 @@
       "id": "if_qvill",
       "type": "control.if",
       "pos": [
-        7124.5,
+        6884.5,
         40.0
       ],
       "params": {},
@@ -847,7 +961,7 @@
       "id": "sel_tc_v",
       "type": "action.press_key",
       "pos": [
-        7425.0,
+        7185.0,
         40.0
       ],
       "params": {
@@ -861,7 +975,7 @@
       "id": "c_per_v",
       "type": "data.const_number",
       "pos": [
-        6736.5,
+        6496.5,
         232.0
       ],
       "params": {
@@ -873,7 +987,7 @@
       "id": "plan_v",
       "type": "math.arith",
       "pos": [
-        7081.0,
+        6841.0,
         216.0
       ],
       "params": {
@@ -885,7 +999,7 @@
       "id": "prod_v",
       "type": "game.produce_count",
       "pos": [
-        7408.0,
+        7168.0,
         392.0
       ],
       "params": {
@@ -902,7 +1016,7 @@
       "id": "queue_v",
       "type": "action.press_key",
       "pos": [
-        7786.0,
+        7546.0,
         40.0
       ],
       "params": {
@@ -916,7 +1030,7 @@
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
-        8164.5,
+        7924.5,
         412.0
       ],
       "params": {
@@ -928,7 +1042,7 @@
       "id": "if_sw_xq",
       "type": "control.if",
       "pos": [
-        8199.5,
+        7959.5,
         40.0
       ],
       "params": {},
@@ -938,7 +1052,7 @@
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
-        8130.0,
+        7890.0,
         712.0
       ],
       "params": {
@@ -960,7 +1074,7 @@
       "id": "if_qxq",
       "type": "control.if",
       "pos": [
-        8552.5,
+        8312.5,
         40.0
       ],
       "params": {},
@@ -970,7 +1084,7 @@
       "id": "sel_tc_x",
       "type": "action.press_key",
       "pos": [
-        8853.0,
+        8613.0,
         40.0
       ],
       "params": {
@@ -984,7 +1098,7 @@
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
-        8164.5,
+        7924.5,
         232.0
       ],
       "params": {
@@ -996,7 +1110,7 @@
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
-        8509.0,
+        8269.0,
         216.0
       ],
       "params": {
@@ -1008,7 +1122,7 @@
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
-        8836.0,
+        8596.0,
         360.0
       ],
       "params": {
@@ -1025,7 +1139,7 @@
       "id": "queue_x",
       "type": "action.press_key",
       "pos": [
-        9214.0,
+        8974.0,
         40.0
       ],
       "params": {
@@ -1039,7 +1153,7 @@
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
-        9592.5,
+        9352.5,
         232.0
       ],
       "params": {
@@ -1051,7 +1165,7 @@
       "id": "if_sw_cart",
       "type": "control.if",
       "pos": [
-        9627.5,
+        9387.5,
         40.0
       ],
       "params": {},
@@ -1061,7 +1175,7 @@
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
-        9558.0,
+        9318.0,
         532.0
       ],
       "params": {
@@ -1083,7 +1197,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        10015.0,
+        9775.0,
         40.0
       ],
       "params": {},
@@ -1093,7 +1207,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        10333.0,
+        10093.0,
         40.0
       ],
       "params": {
@@ -1107,7 +1221,7 @@
       "id": "market",
       "type": "game.building_count",
       "pos": [
-        9937.0,
+        9697.0,
         336.0
       ],
       "params": {
@@ -1146,7 +1260,7 @@
       "id": "not_mkt",
       "type": "logic.not",
       "pos": [
-        10385.0,
+        10145.0,
         392.0
       ],
       "params": {},
@@ -1156,7 +1270,7 @@
       "id": "set_cart",
       "type": "control.set_switch",
       "pos": [
-        10677.0,
+        10437.0,
         40.0
       ],
       "params": {
@@ -1170,7 +1284,7 @@
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        9980.0,
+        9740.0,
         1046.0
       ],
       "params": {
@@ -1182,7 +1296,7 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        10341.5,
+        10101.5,
         588.0
       ],
       "params": {
@@ -1194,7 +1308,7 @@
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        10677.5,
+        10437.5,
         360.0
       ],
       "params": {
@@ -1211,7 +1325,7 @@
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        11056.0,
+        10816.0,
         40.0
       ],
       "params": {
@@ -1225,7 +1339,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        11400.0,
+        11160.0,
         40.0
       ],
       "params": {
@@ -1239,7 +1353,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        11744.0,
+        11504.0,
         40.0
       ],
       "params": {
@@ -1253,7 +1367,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        12088.0,
+        11848.0,
         40.0
       ],
       "params": {},
@@ -1263,7 +1377,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        12328.0,
+        12088.0,
         40.0
       ],
       "params": {},
@@ -1273,7 +1387,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        12568.0,
+        12328.0,
         40.0
       ],
       "params": {
@@ -1285,7 +1399,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        12861.0,
+        12621.0,
         40.0
       ],
       "params": {},

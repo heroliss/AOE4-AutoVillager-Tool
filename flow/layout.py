@@ -349,6 +349,18 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: flo
         if n not in spine_set:
             col[n] = dcol(n)
 
+    # 数据-only 分组（无脊柱成员，如“共享识别”）：成员天然按各自消费者散到很右（如 tc 被靠后的段消费），
+    # 会把组框横拉到跨越整图、与别的组框重叠。把这类组的数据成员收拢到组内最左列，成一竖排“传感器栏”，
+    # 组框即紧凑（代价：到远端消费者的数据线变长，但折叠该组后这些线会收成箱体端口）。
+    for gr in (getattr(graph, "groups", []) or []):
+        members = gr.get("members", []) if isinstance(gr, dict) else []
+        if members and not any(m in spine_set for m in members):   # 该组全是数据节点 = 数据-only 组
+            dm = [m for m in members if m in col]
+            if dm:
+                c0 = min(col[m] for m in dm)   # 收拢到“成员最左列”，成一竖排紧凑栏（否则会被最靠后的消费者拉宽跨整图）
+                for m in dm:
+                    col[m] = c0
+
     # 归一化列号从 0 开始（数据链可能产生负列）
     base = min(col.values())
     for n in col:
