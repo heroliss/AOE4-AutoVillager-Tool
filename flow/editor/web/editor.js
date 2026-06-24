@@ -4645,6 +4645,15 @@ const ED = (function () {
       window.addEventListener("resize", resize);
       // 用 ResizeObserver 让窗口拖拽改变大小时内容实时刷新（window resize 在部分情况下不够即时）
       try { new ResizeObserver(resize).observe(document.getElementById("wrap")); } catch (e) {}
+      // 窗口最小化/隐藏(document.hidden)时通知后端挂起 preview/耗时监控——这两项只为本界面服务、却在引擎
+      // 线程上每帧计算(PNG 编码/计时)，没人看时纯属浪费。最小化即“性能最大化”：引擎全速跑且零浪费；恢复可见自动续上。
+      // （rAF 本就会在最小化时自停，省下的是 UI 端；这里补上引擎线程那一截。）
+      document.addEventListener("visibilitychange", () => {
+        try {
+          const a = window.pywebview && window.pywebview.api;
+          if (a && typeof a.set_ui_visible === "function") a.set_ui_visible(!document.hidden);
+        } catch (e) {}
+      });
       window.__bootReady = true;       // 供 Python 可选地 push 启动数据（__bootstrap__）
       setStatus("正在连接后端…");
       pullWhenReady(0);                // 主路径：轮询直到 api 就绪再拉取（pywebview 注入 api 有延迟）

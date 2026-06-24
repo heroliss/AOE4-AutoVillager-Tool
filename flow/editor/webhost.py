@@ -352,6 +352,8 @@ class Api:
         self._overlay_notice_id = 0
         self._run_profile = False            # 性能监控：开启后每帧附带各节点「自身/累计」耗时
         self._run_preview = False            # 截图预览：开启后每帧附带各感知节点「截到的区域图」(base64 PNG)
+        self._ui_visible = True              # 编辑器窗口当前是否可见（前端 visibilitychange 回报）。最小化/隐藏→False 时
+        #                                      挂起 preview/耗时监控这两项【只喂 UI】的每帧计算，让最小化真正等于“全速且零浪费”。
         self._latest: Optional[dict] = None  # 最近一帧轨迹快照（path/ports/data/tick）
         self._pending_logs: list = []        # 自上次轮询以来的新日志（取走即清）
         self._bp_hit: Optional[str] = None   # 本次暂停命中的断点节点（供前端提示）
@@ -1224,8 +1226,7 @@ class Api:
                 self._run_logs.append({"level": level, "msg": message, "node": node_id})
 
             self._run_ctx = ExecutionContext(on_log=_log, dry_run=(not real))
-            self._run_ctx.profile_enabled = self._run_profile   # 沿用当前「性能监控」开关
-            self._run_ctx.preview_enabled = self._run_preview   # 沿用当前「截图预览」开关
+            self._apply_ui_gates(self._run_ctx)   # preview/耗时监控实际启用 = 用户开关 AND UI 可见（已最小化则从第 1 帧就不算）
             self._run_exec = TraceExecutor(self._run_graph)
             begin = {"level": "INFO", "tick": 0,
                      "msg": ("开始运行：执行流程并向游戏发送按键/鼠标操作" if real
@@ -1395,13 +1396,28 @@ class Api:
             self._run_until = run_until
         return True
 
+    def _apply_ui_gates(self, ctx):
+        """把 preview / 耗时监控这两项【只为编辑器 UI 服务】的每帧计算，按「用户开关 AND UI 可见」落到 ctx。
+        它们跑在引擎线程上（PNG 编码 / 计时），窗口最小化时没人看，纯属浪费 → UI 不可见时一律不算。
+        都是单 bool 写入、引擎线程下一帧即读到（与其它运行期标志一致，无需持锁）。"""
+        if ctx is None:
+            return
+        ctx.profile_enabled = self._run_profile and self._ui_visible
+        ctx.preview_enabled = self._run_preview and self._ui_visible
+
+    def set_ui_visible(self, flag):
+        """前端 visibilitychange 回报：窗口最小化/隐藏(document.hidden)→False，恢复→True。
+        据此挂起/恢复 preview 与耗时监控——最小化时引擎照常全速跑、且零浪费。
+        用户的开关意图仍保留在 _run_preview/_run_profile，恢复可见时自动续上。"""
+        self._ui_visible = bool(flag)
+        self._apply_ui_gates(self._run_ctx)
+        return True
+
     def run_set_profile(self, on=True):
         """前端切换「性能监控」开关。开启后引擎每帧计时并在快照里附带各节点 [自身ms, 累计ms]。
         计时仅 perf_counter 取差（~0.1µs/节点），关闭时零开销；可在运行中随时开/关。"""
         self._run_profile = bool(on)
-        ctx = self._run_ctx
-        if ctx is not None:
-            ctx.profile_enabled = self._run_profile   # 简单 bool 写入，引擎线程下一帧即生效
+        self._apply_ui_gates(self._run_ctx)   # 实际启用还要 AND UI 可见；引擎线程下一帧即生效
         return True
 
     def run_set_preview(self, on=True):
@@ -1409,9 +1425,7 @@ class Api:
         引擎每帧在快照里附带各节点的预览图，前端画到节点上——一眼看出“它到底截到了什么”。
         仅编码开销（关闭时零开销）；可在运行/试运行中随时开关。"""
         self._run_preview = bool(on)
-        ctx = self._run_ctx
-        if ctx is not None:
-            ctx.preview_enabled = self._run_preview
+        self._apply_ui_gates(self._run_ctx)   # 实际启用还要 AND UI 可见
         return True
 
     def run_update(self, payload):
