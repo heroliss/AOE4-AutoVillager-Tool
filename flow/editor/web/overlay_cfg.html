@@ -34,22 +34,13 @@
         <b data-f="2" onclick="setFrost(2)">重</b>
       </span>
     </div>
-    <div class="row" title="开：光标不在窄条上时鼠标穿透到游戏(照常贴边移镜)，移到窄条上自动恢复可点击">
-      <label>穿透</label>
-      <span class="seg">
-        <b id="pt1" onclick="setPass(true)">自动</b>
-        <b id="pt0" onclick="setPass(false)">关</b>
-      </span>
-    </div>
   </div>
 <script>
   function api() { return (window.pywebview && window.pywebview.api) || null; }
   function setBg(v) { try { api().overlay_set_bg(parseInt(v, 10)); } catch (e) {} }
   function setCa(v) { try { api().overlay_set_content(parseInt(v, 10)); } catch (e) {} }
   function markFrost(f) { document.querySelectorAll(".seg b[data-f]").forEach(b => b.classList.toggle("on", parseInt(b.dataset.f, 10) === f)); }
-  function markPass(on) { document.getElementById("pt1").classList.toggle("on", !!on); document.getElementById("pt0").classList.toggle("on", !on); }
   function setFrost(f) { try { api().overlay_set_frost(f); } catch (e) {} markFrost(f); }
-  function setPass(on) { try { api().overlay_set_passthrough(on); } catch (e) {} markPass(on); }
   function closeWin() { try { api().toggle_overlay_cfg(); } catch (e) {} }
 
   function init() {
@@ -60,7 +51,6 @@
       document.getElementById("bg").value = s.bg;
       document.getElementById("ct").value = s.content;
       markFrost(s.frost);
-      markPass(s.passthrough);
     }).catch(() => {});
   }
   init();

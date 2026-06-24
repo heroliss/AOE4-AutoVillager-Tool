@@ -364,7 +364,6 @@ class Api:
         self._overlay_bg_alpha = 20          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=不着色纯靠模糊；默认20=很淡的一点着色）
         self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
         self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认轻
-        self._overlay_passthrough = True     # 鼠标穿透(自动)：光标不在窄条上时让窗口对鼠标透明→游戏照常贴边移镜
         self._overlay_stop_hover = False     # 停止 hover 轮询线程标志
         self._overlay_hover_thread = None    # 光标 hover 轮询线程（自动切换穿透/可点击）
         self._closing = False                # 程序正在关闭：此后一律不再 BeginInvoke 原生窗体（防关闭崩溃）
@@ -635,9 +634,11 @@ class Api:
             s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
             st = g(hwnd, GWL_EXSTYLE)
             s(hwnd, GWL_EXSTYLE, (st | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW)
-            # 改了扩展样式后轻推一下让外壳重算窗框/任务栏归属（不移动/不缩放/不改Z序/不激活，也不重建句柄→无闪烁）
-            SWP = 0x1 | 0x2 | 0x4 | 0x10 | 0x20   # NOSIZE|NOMOVE|NOZORDER|NOACTIVATE|FRAMECHANGED
-            u.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP)
+            # 让外壳按新样式重算【任务栏/Alt+Tab】归属：只改样式或 FRAMECHANGED 不一定生效，必须 hide→show 才可靠。
+            # SW_SHOWNA=显示但不激活(不抢焦点)。这是一次极短的眨眼、且只在窗口首次创建(loaded)发生一次——
+            # 远好过 .NET ShowInTaskbar 触发的【整窗句柄重建】(原来“打开闪一秒多”的元凶)。
+            u.ShowWindow(hwnd, 0)   # SW_HIDE
+            u.ShowWindow(hwnd, 8)   # SW_SHOWNA
         except Exception:
             pass
 
@@ -689,12 +690,9 @@ class Api:
                                                           name="overlay-maintain", daemon=True)
             self._overlay_hover_thread.start()
 
-    # —— 鼠标穿透（解决覆盖层挡住游戏“贴屏边移镜”）——
-    # 自动模式：光标【不在】窄条矩形内时给窗口加 WS_EX_TRANSPARENT → 鼠标穿透到游戏(照常贴边移镜)；
-    #          光标【在】窄条上时去掉它 → 恢复可点击(能切开关)。用物理像素比对，规避 DPI 缩放误差。
     def _managed_overlays(self):
-        """维护循环要照看的【可见】覆盖玻璃窗：(native, is_bar)。
-        is_bar=True 的是悬在游戏上方的长条(开关条/资源条)——它们参与“鼠标自动穿透”；设置窗只参与“留缝防贴边”。
+        """维护循环要照看的【可见】覆盖玻璃窗：(native, is_bar)。维护循环只做“各边留1px防贴边”，对所有窗一视同仁。
+        （is_bar 字段保留：原用于区分长条参与鼠标穿透，穿透已移除，现仅作语义标注、暂未使用。）
         大监控窗不入列：它可脱离覆盖层独立存在(编辑器监控)、且是你主动摆放的交互窗，不该被强行拉离边缘。"""
         out = []
         for attr, is_bar, vis in (("_overlay_window", True, None),
@@ -711,9 +709,11 @@ class Api:
             out.append((native, is_bar))
         return out
 
-    # —— 统一维护循环：对所有悬浮小窗做 ①各边留1px(防贴边挡移镜) + ②鼠标自动穿透(仅长条) ——
-    # 全程用裸 Win32(GetWindowRect/SetWindowPos/SetWindowLongPtr)在后台线程直接做：这些按 hwnd 操作、可跨线程，
+    # —— 统一维护循环：对所有悬浮小窗做【各边留 1px】(防贴边挡“贴屏边移镜”) ——
+    # 全程用裸 Win32(GetWindowRect/SetWindowPos)在后台线程直接做：按 hwnd 操作、可跨线程，
     # 且【不走 .NET BeginInvoke】——天然避开关闭时 BeginInvoke 撞销毁窗体的 pythonnet 崩溃路径。读不到句柄就跳过。
+    # （原“鼠标自动穿透”已移除：留 1px 边缝已让屏幕最外缘恒为游戏区，贴边移镜照常；而穿透会把长条间歇变透明、
+    #   导致资源条✕等按钮点不动，弊大于利。）
     def _overlay_hover_loop(self):
         import ctypes
         import time as _t
@@ -729,29 +729,14 @@ class Api:
         u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
         u.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
         u.GetAsyncKeyState.argtypes = [ctypes.c_int]; u.GetAsyncKeyState.restype = ctypes.c_short
-        g = u.GetWindowLongPtrW; g.restype = ctypes.c_ssize_t; g.argtypes = [wintypes.HWND, ctypes.c_int]
-        s = u.SetWindowLongPtrW; s.restype = ctypes.c_ssize_t
-        s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
-        GWL_EXSTYLE, WS_EX_TRANSPARENT, WS_EX_LAYERED = -20, 0x20, 0x80000
         SWP = 0x1 | 0x4 | 0x10            # NOSIZE | NOZORDER | NOACTIVATE
         pt, rc, mi = wintypes.POINT(), wintypes.RECT(), MONITORINFO()
-        through_state = {}               # id(native) -> 当前是否穿透（仅在变化时改样式）
-
-        def _clear_through():
-            for native, is_bar in self._managed_overlays():
-                if not is_bar:
-                    continue
-                try:
-                    hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
-                    s(hwnd, GWL_EXSTYLE, g(hwnd, GWL_EXSTYLE) & ~WS_EX_TRANSPARENT)
-                except Exception:
-                    pass
 
         while not self._overlay_stop_hover and self._overlay_window is not None and not self._closing:
             try:
                 u.GetCursorPos(ctypes.byref(pt))
                 lbtn_down = bool(u.GetAsyncKeyState(0x01) & 0x8000)   # 左键按下中（多半正在拖某个窗）
-                for native, is_bar in self._managed_overlays():
+                for native, _is_bar in self._managed_overlays():
                     try:
                         hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
                     except Exception:
@@ -774,27 +759,9 @@ class Api:
                     dragging_this = lbtn_down and (rc.left <= pt.x <= rc.right and rc.top <= pt.y <= rc.bottom)
                     if not dragging_this and (nx != rc.left or ny != rc.top):
                         u.SetWindowPos(hwnd, None, int(nx), int(ny), 0, 0, SWP)
-                    through = (is_bar and self._overlay_passthrough
-                               and not (nx <= pt.x <= nx + w and ny <= pt.y <= ny + h))
-                    k = id(native)
-                    if through_state.get(k) != through:
-                        through_state[k] = through
-                        st = g(hwnd, GWL_EXSTYLE)
-                        st = (st | WS_EX_TRANSPARENT | WS_EX_LAYERED) if through else (st & ~WS_EX_TRANSPARENT)
-                        s(hwnd, GWL_EXSTYLE, st)
             except Exception:
                 pass
             _t.sleep(0.06)
-        if not self._closing:                                 # 退出时把长条恢复可点击
-            try:
-                _clear_through()
-            except Exception:
-                pass
-
-    def overlay_set_passthrough(self, on):
-        """开/关“鼠标自动穿透”。关掉=长条始终可点击（但会挡住其下的贴边移镜）。维护循环在 ≤60ms 内据此恢复可点击。"""
-        self._overlay_passthrough = bool(on)
-        return True
 
     def overlay_set_switch(self, nid, on):
         """覆盖层点开关：实时启停某生产段。
@@ -983,7 +950,7 @@ class Api:
     def overlay_cfg_state(self):
         """设置窗读取当前值，初始化滑杆。"""
         return {"bg": self._overlay_bg_alpha, "content": self._overlay_content_alpha,
-                "frost": self._overlay_frost, "passthrough": self._overlay_passthrough}
+                "frost": self._overlay_frost}
 
     # ---------- 覆盖层【资源监控】小窗：同款玻璃，CPU/内存/曲线（复用 sys_stats）----------
     def toggle_overlay_mon(self):

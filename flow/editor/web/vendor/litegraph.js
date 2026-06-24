@@ -9745,10 +9745,10 @@ LGraphNode.prototype.executeAction = function(action)
                 ctx.restore();
             }
 
-            //circle
-            ctx.beginPath();
-            ctx.arc(pos[0], pos[1], 5, 0, Math.PI * 2);
-            ctx.fill();
+            //circle —— 连线中点的实心圆点：方向已用箭头表示，圆点冗余，去掉(本项目改动)
+            // ctx.beginPath();
+            // ctx.arc(pos[0], pos[1], 5, 0, Math.PI * 2);
+            // ctx.fill();
         }
 
         //render flowing points
