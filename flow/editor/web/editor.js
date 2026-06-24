@@ -2249,9 +2249,8 @@ const ED = (function () {
   function toggleOverlayPin(nid, key) {
     const i = overlayPins.findIndex((p) => p[0] === nid && p[1] === key);
     if (i >= 0) overlayPins.splice(i, 1); else overlayPins.push([nid, key]);
-    try { api().set_run_payload(collect()); } catch (e) {}   // 实时登记 → 覆盖层下次轮询即按新子集显示
+    try { api().set_run_payload(collect()); } catch (e) {}   // 实时登记 → 覆盖层下次轮询(0.5s)即按新子集显示
     scheduleSnap(); refreshDirty();
-    if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
   }
   // 组把“已暴露进它接口”的某参数再向上暴露给父组（逐级封装）。
   function isGroupExposed(gid, nid, key) { return groupExpose.some((e) => e[0] === gid && e[1] === nid && e[2] === key); }
@@ -2642,6 +2641,15 @@ const ED = (function () {
       item.appendChild(lab);
       const ctrl = buildParamControl(node, key);
       if (ctrl) item.appendChild(ctrl);
+      // 📺 显示到游戏覆盖层：编辑模式下每个面板项一个开关——点亮＝该项出现在游戏内覆盖层窄条上
+      if (!simpleMode) {
+        const ov = document.createElement("span");
+        ov.className = "pov" + (isOverlayPinned(nid, key) ? " on" : "");
+        ov.textContent = "📺";
+        ov.title = "显示到游戏覆盖层：点亮后该项出现在游戏内覆盖层（开关可点切、数值只读显示）。\n（全流程一个都没点亮时，覆盖层回退显示所有开关项）";
+        ov.onclick = () => { toggleOverlayPin(nid, key); ov.classList.toggle("on", isOverlayPinned(nid, key)); };
+        item.appendChild(ov);
+      }
       // 🎯 定位：选中并居中到该节点（取代“移除”按钮，避免误点删除；移除在右下角说明里取消勾选）
       const loc = document.createElement("span");
       loc.className = "ploc"; loc.textContent = "🎯";
@@ -3694,25 +3702,23 @@ const ED = (function () {
     // 显示到 控制面板 / 折叠节点：两列勾选——左=置顶到顶部面板；右=折叠该参数所属分组后在折叠箱体里显示可编辑控件。
     const pinnable = (d.params || []);
     if (pinnable.length) {
-      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>勾选：①置顶到顶部控制面板 ②暴露给所在组（折叠该组后在组里可直接编辑；要再往上层显示需在组里继续勾选） ③显示到游戏覆盖层（开关可在游戏里点切、数值/文本只读显示）。任一勾选后可填“显示名”，三处共用同一个名字。</div>";
+      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>左：置顶到顶部控制面板 ｜ 右：把该参数暴露给所在组（折叠该组后在组里可直接编辑；要再往上层显示需在组里继续勾选）。勾选任一后可填“显示名”，面板与折叠箱体共用同一个名字。<br>（要把某项显示到<b>游戏覆盖层</b>：先置顶到控制面板，再点面板里那一项的 📺 即可。）</div>";
       for (const p of pinnable) {
-        const pinned = isPinned(node._id, p.key), fpinned = isFoldPinned(node._id, p.key), opinned = isOverlayPinned(node._id, p.key);
+        const pinned = isPinned(node._id, p.key), fpinned = isFoldPinned(node._id, p.key);
         b += `<div style="margin-top:3px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">` +
              `<label style="cursor:pointer;color:#aeb6c2;flex:1 1 120px;min-width:120px">` +
              `<input type="checkbox" data-pin="${esc(p.key)}" ${pinned ? "checked" : ""}> ${esc(p.label)}</label>` +
              `<label style="cursor:pointer;color:#8fb6e0;white-space:nowrap" title="把该参数暴露给它所在的分组：折叠该组后在组里显示这个可编辑控件（需先把节点加入分组）。逐级封装：要再往上一层显示，在那个组的详情里继续勾选。">` +
-             `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 暴露给所在组</label>` +
-             `<label style="cursor:pointer;color:#9ad6a8;white-space:nowrap" title="显示到游戏内覆盖层开关条：开关可在游戏里直接点切，数值/文本只读显示当前值。全流程一个都没勾时，覆盖层回退显示所有置顶的开关。">` +
-             `<input type="checkbox" data-ovpin="${esc(p.key)}" ${opinned ? "checked" : ""}> 覆盖层</label>`;
-        if (pinned || fpinned || opinned) {   // 三处任一勾选都显示“显示名”输入——共用同一个名字
+             `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 暴露给所在组</label>`;
+        if (pinned || fpinned) {   // 置顶或暴露给组任一勾选都显示“显示名”输入——两处共用同一个名字
           const cur = customLabel(node._id, p.key);
           b += `<input type="text" data-pinlabel="${esc(p.key)}" value="${esc(cur)}" ` +
-               `placeholder="${esc(defaultPinLabel(node, p.key))}" title="显示名：控制面板 / 折叠箱体 / 覆盖层 共用同一个名字（留空＝用默认）" ` +
+               `placeholder="${esc(defaultPinLabel(node, p.key))}" title="显示名：控制面板与“暴露给所在组”折叠箱体共用同一个名字（留空＝用默认）" ` +
                `style="flex-basis:100%;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;font-size:12px;padding:1px 4px">`;
         }
         b += `</div>`;
       }
-      html += section("pin", "显示到 控制面板 / 所在组 / 覆盖层", b, null);
+      html += section("pin", "显示到 控制面板 / 暴露给所在组", b, null);
     }
     helpEl.innerHTML = html;
     helpEl.querySelectorAll("details[data-sec]").forEach((dt) => {
@@ -3723,9 +3729,6 @@ const ED = (function () {
     });
     helpEl.querySelectorAll("[data-foldpin]").forEach((cb) => {
       cb.onchange = () => toggleFoldPin(node._id, cb.getAttribute("data-foldpin"));
-    });
-    helpEl.querySelectorAll("[data-ovpin]").forEach((cb) => {
-      cb.onchange = () => toggleOverlayPin(node._id, cb.getAttribute("data-ovpin"));
     });
     helpEl.querySelectorAll("[data-pinlabel]").forEach((inp) => {
       inp.onchange = () => setPinLabel(node._id, inp.getAttribute("data-pinlabel"), inp.value);

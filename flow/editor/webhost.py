@@ -1047,6 +1047,74 @@ class Api:
         self._form_invoke(getattr(win, "native", None), _do)
         return {"x": x, "y": y}
 
+    @staticmethod
+    def _classify_overlay(type_id, val):
+        """把一个参数值归类成覆盖层芯片：开关(可点切) / 数值(只读) / 文本(只读)。返回 (kind, value, editable)。"""
+        if type_id == "data.switch":
+            return "bool", bool(val), True
+        if isinstance(val, bool):
+            return "bool", val, False
+        if isinstance(val, (int, float)):
+            return "num", val, False
+        return "text", ("" if val is None else str(val)), False
+
+    @staticmethod
+    def _overlay_select(sel, panel, is_switch):
+        """选出要显示的 (nid,key) 列表：优先流程自选的 overlaypanel；为空则回退“所有开关型面板项”。
+        is_switch(nid) 判断某节点是否 data.switch（图/字典两种来源各自实现）。"""
+        out = [list(p)[:2] for p in (sel or []) if len(p) >= 2]
+        if not out:
+            for row in (panel or []):
+                if len(row) >= 2 and is_switch(row[0]):
+                    out.append([row[0], row[1]])
+        return out
+
+    def _overlay_items_from_graph(self, g):
+        sel = self._overlay_select(getattr(g, "overlaypanel", []), getattr(g, "panel", []),
+                                   lambda nid: getattr(g.nodes.get(nid), "type_id", "") == "data.switch")
+        items, seen = [], set()
+        for nid, key in sel:
+            if (nid, key) in seen:
+                continue
+            seen.add((nid, key))
+            node = g.nodes.get(nid)
+            if node is None:
+                continue
+            kind, out, editable = self._classify_overlay(getattr(node, "type_id", ""), node.values.get(key))
+            items.append({"id": nid, "key": key, "label": self._overlay_item_label(g, nid, key),
+                          "value": out, "kind": kind, "editable": editable})
+        return items
+
+    def _overlay_items_from_payload(self, payload):
+        """从编辑器实时上报的 collect() payload(原始 dict)直接构造——编辑期(未运行)用，让“勾选/改值”即时反映到覆盖层。"""
+        nodes = {n.get("id"): n for n in payload.get("nodes", [])}
+        labels = payload.get("labels", {}) or {}
+        panel = payload.get("panel", [])
+
+        def _label(nid, key):
+            lab = labels.get(nid + "|" + key)
+            if lab:
+                return str(lab)
+            for row in panel:
+                if len(row) >= 3 and row[0] == nid and row[1] == key and row[2]:
+                    return str(row[2])
+            return key
+
+        sel = self._overlay_select(payload.get("overlaypanel", []), panel,
+                                   lambda nid: (nodes.get(nid) or {}).get("type") == "data.switch")
+        items, seen = [], set()
+        for nid, key in sel:
+            if (nid, key) in seen:
+                continue
+            seen.add((nid, key))
+            n = nodes.get(nid)
+            if n is None:
+                continue
+            kind, out, editable = self._classify_overlay(n.get("type", ""), (n.get("params") or {}).get(key))
+            items.append({"id": nid, "key": key, "label": _label(nid, key),
+                          "value": out, "kind": kind, "editable": editable})
+        return items
+
     def _overlay_item_label(self, g, nid, key):
         """覆盖层项显示名：优先用户自定义名(labels，与面板/折叠箱体同源)，否则回退面板内联名，再否则参数键。"""
         lab = (getattr(g, "labels", {}) or {}).get(nid + "|" + key)
@@ -1059,37 +1127,19 @@ class Api:
 
     def overlay_data(self):
         """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。
-        显示子集由流程的 overlaypanel 决定（编辑器里逐参数勾“显示到覆盖层”）；开关(布尔)可点切，数值/文本只读显示。
-        overlaypanel 为空 → 回退“显示所有置顶到控制面板的开关项”（向后兼容旧流程，保持原来三开关的行为）。"""
-        g = self._run_graph or self._graph
-        items = []
-        if g is not None:
-            sel = [list(p) for p in getattr(g, "overlaypanel", []) if len(p) >= 2]
-            if not sel:   # 未自选 → 回退：所有置顶开关项
-                for row in getattr(g, "panel", []):
-                    if len(row) >= 2 and getattr(g.nodes.get(row[0]), "type_id", "") == "data.switch":
-                        sel.append([row[0], row[1]])
-            seen = set()
-            for nid, key in sel:
-                if (nid, key) in seen:
-                    continue
-                seen.add((nid, key))
-                node = g.nodes.get(nid)
-                if node is None:
-                    continue
-                val = node.values.get(key)
-                if getattr(node, "type_id", "") == "data.switch":
-                    kind, out = "bool", bool(val)
-                elif isinstance(val, bool):
-                    kind, out = "bool", val
-                elif isinstance(val, (int, float)):
-                    kind, out = "num", val
-                else:
-                    kind, out = "text", ("" if val is None else str(val))
-                items.append({"id": nid, "key": key, "label": self._overlay_item_label(g, nid, key),
-                              "value": out, "kind": kind,
-                              "editable": (kind == "bool" and getattr(node, "type_id", "") == "data.switch")})
+        显示子集由流程的 overlaypanel 决定（控制面板里点该项的 📺）；开关(布尔)可点切，数值/文本只读显示。
+        数据源：运行中→运行图(引擎权威的实时值，含自动改写的开关)；未运行→编辑器实时上报的 collect() payload
+        (所以编辑期点 📺 / 改值会立刻反映到覆盖层)；都没有→已加载图兜底。
+        overlaypanel 为空 → 回退“显示所有开关型面板项”（向后兼容旧流程，保持原来三开关的行为）。"""
         alive = bool(self._run_thread and self._run_thread.is_alive())
+        if alive and self._run_graph is not None:
+            items = self._overlay_items_from_graph(self._run_graph)
+        elif self._last_payload is not None:
+            items = self._overlay_items_from_payload(self._last_payload)
+        elif self._graph is not None:
+            items = self._overlay_items_from_graph(self._graph)
+        else:
+            items = []
         with self._snap_lock:
             paused = alive and self._run_paused   # 没在跑时 _run_paused 恒为 True，别误报「已暂停」
             bp = self._bp_hit if alive else None

@@ -109,6 +109,10 @@
   #panel select { max-width: 160px; }
   #panel .ploc { cursor: pointer; font-size: 12px; opacity: 0.5; }
   #panel .ploc:hover { opacity: 1; }
+  /* 覆盖层显示开关（仅编辑模式）：灰=不显示、亮绿=已显示到游戏覆盖层 */
+  #panel .pov { cursor: pointer; font-size: 12px; opacity: 0.42; filter: grayscale(1); user-select: none; }
+  #panel .pov:hover { opacity: 0.8; }
+  #panel .pov.on { opacity: 1; filter: none; text-shadow: 0 0 6px rgba(120,240,160,0.55); }
   /* 控制面板项的拖动柄（仅编辑模式显示）：拖动可调整顺序 */
   #panel .pgrip { cursor: grab; color: var(--fg-dim); font-size: 12px; user-select: none; margin-right: 1px; }
   #panel .pgrip:active { cursor: grabbing; }
