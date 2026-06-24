@@ -1797,7 +1797,10 @@ const ED = (function () {
     for (const k in cl) if (cl[k] !== bl[k]) { const [id, key] = splitK(k); push(`◇ 显示名：${pkName(id, key)} → ${cl[k]}`, () => restoreLabel(id, key, bl[k] || "")); }
     for (const k in bl) if (!(k in cl)) { const [id, key] = splitK(k); push(`◇ 清除显示名：${pkName(id, key)}`, () => restoreLabel(id, key, bl[k] || "")); }
     // 暴露给所在组的参数
-    const fKey = (p) => p[0] + "|" + p[1];
+    // 注意：cur.* 来自 collect()(数组 [id,key,…])，而 savedBaseline.* 解析自 curSig()——其中
+    // overlaypanel/groupexpose 已被规范化成「join('|') 的字符串」。故按键函数要同时认数组与字符串，
+    // 否则对字符串调用 p[0]/p[1] 会取到单个字符、对其 .join 更会抛 "x.join is not a function"。
+    const fKey = (p) => Array.isArray(p) ? p.join("|") : p;
     const baseF = new Set((savedBaseline.foldparams || []).map(fKey)), curF = new Set((cur.foldparams || []).map(fKey));
     for (const k of curF) if (!baseF.has(k)) { const [id, key] = splitK(k); push(`＋ 暴露给组：${pkName(id, key)}`); }
     for (const k of baseF) if (!curF.has(k)) { const [id, key] = splitK(k); push(`－ 取消暴露：${pkName(id, key)}`); }
@@ -1805,7 +1808,7 @@ const ED = (function () {
     const baseO = new Set((savedBaseline.overlaypanel || []).map(fKey)), curO = new Set((cur.overlaypanel || []).map(fKey));
     for (const k of curO) if (!baseO.has(k)) { const [id, key] = splitK(k); push(`＋ 显示到覆盖层：${pkName(id, key)}`); }
     for (const k of baseO) if (!curO.has(k)) { const [id, key] = splitK(k); push(`－ 取消覆盖层显示：${pkName(id, key)}`); }
-    const geSig = (a) => JSON.stringify([...(a || [])].map((x) => x.join("|")).sort());
+    const geSig = (a) => JSON.stringify([...(a || [])].map((x) => Array.isArray(x) ? x.join("|") : x).sort());
     if (geSig(cur.groupexpose) !== geSig(savedBaseline.groupexpose)) push("◇ 组的“向上暴露”设置已修改");
     // 分组：逐个列出改了什么
     const gById = (gs) => { const m = {}; for (const g of (gs || [])) m[g.id] = g; return m; };
