@@ -1713,7 +1713,7 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     api._graph = graph
     api._path = path
     index = os.path.join(WEB_DIR, "index.html")
-    api._window = webview.create_window("AOE4 Flow Editor", url=index, js_api=api,
+    api._window = webview.create_window("AoE4 自动化节点编辑器", url=index, js_api=api,
                                         width=1320, height=820)
 
     # 关闭窗口时，若有未保存修改则弹原生确认（返回 False 取消关闭）。前端通过 set_dirty 同步脏标记。

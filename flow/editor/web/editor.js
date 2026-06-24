@@ -1709,7 +1709,7 @@ const ED = (function () {
   function showDirty(d) {
     const el = document.getElementById("dirty");
     if (el) el.textContent = d ? "●未保存" : "";
-    try { document.title = (d ? "*" : "") + "AOE4 Flow Editor"; } catch (e) {}
+    try { document.title = (d ? "*" : "") + "AoE4 自动化节点编辑器"; } catch (e) {}
     // 把“是否有未保存修改”同步给 Python，供关闭窗口时弹确认（仅在状态变化时调，省得频繁过桥）
     if (d !== _lastDirty) {
       _lastDirty = d;
