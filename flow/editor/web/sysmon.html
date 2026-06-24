@@ -154,6 +154,9 @@
     let s = null;
     try { s = await api().sys_stats(); } catch (e) {}
     if (s && s.ok) {
+      if (s.glass === false) {   // WebView2 透明不可用 → 套不透明深色底兜底（防白底），与其它玻璃窗一致
+        document.documentElement.style.background = "#0f1217"; document.body.style.background = "#0f1217";
+      }
       last = s;
       const c = cap();
       hist.cpu.push(s.tool_cpu); hist.mem.push(s.tool_mem);

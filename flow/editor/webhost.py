@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import functools
 import os
 import threading
 import time
@@ -86,6 +87,47 @@ BUILTIN_FLOWS_DIR = os.path.abspath("flows")
 USER_FLOWS_DIR = os.path.abspath("user_flows")
 # 截模板的保存目录（与内置模板同目录，节点里按相对路径 templates/xxx.png 读取）。
 TEMPLATES_DIR = os.path.abspath("templates")
+
+WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
+
+
+@functools.lru_cache(maxsize=1)
+def _webview2_version():
+    """读注册表里 WebView2 Evergreen 运行时版本号(pv)；未安装返回 None。
+    （它是系统级组件、不随 exe 分发——不同机器版本不同，正是覆盖层透明在有的机器失效的根源。）"""
+    try:
+        import winreg
+    except Exception:
+        return None
+    guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"   # WebView2 Runtime 的 EdgeUpdate Client GUID
+    cands = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\\" + guid),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + guid),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\EdgeUpdate\Clients\\" + guid),
+    ]
+    for root, path in cands:
+        try:
+            with winreg.OpenKey(root, path) as k:
+                pv, _ = winreg.QueryValueEx(k, "pv")
+                if pv and pv != "0.0.0.0":
+                    return str(pv)
+        except OSError:
+            continue
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _glass_ok():
+    """覆盖层「透明玻璃」是否大概率可用：WebView2 透明背景(DefaultBackgroundColor=透明)需 ≈Edge 90+ 运行时。
+    判不准时【fail-open=返回 True】——只在【确证】运行时缺失/过旧时才返回 False，以免误伤本来正常的机器。
+    返回 False → 覆盖层改用不透明深色背景兜底（绝不发白）。"""
+    pv = _webview2_version()
+    if not pv:
+        return False                      # 运行时缺失（这种机器编辑器本身多半也异常）→ 深色兜底
+    try:
+        return int(pv.split(".")[0]) >= 90
+    except Exception:
+        return True                       # 版本号格式异常 → 不误伤，按可用处理
 
 
 def _to_rel_path(path):
@@ -435,6 +477,7 @@ class Api:
                 "sys_used_pct": round(vm.percent, 1),
                 "sys_avail": round(vm.available / 1048576.0, 1),
                 "ncpu": ncpu,
+                "glass": _glass_ok(),   # False → 监控玻璃窗同样套深色底兜底（防白条）
             }
         except Exception:
             return {"ok": False}
@@ -1140,8 +1183,17 @@ class Api:
         return {"items": items, "running": alive and not paused, "paused": paused, "bp_hit": bp,
                 "notice": (self._overlay_notice if alive else None),
                 "bg_alpha": self._overlay_bg_alpha, "content_alpha": self._overlay_content_alpha,
-                "frost": self._overlay_frost,
+                "frost": self._overlay_frost, "glass": _glass_ok(),   # False → 前端套不透明深色底兜底（防白条）
                 "rect": list(self._overlay_rect), "screen": list(self._overlay_screen)}
+
+    def open_url(self, url):
+        """在系统默认浏览器打开链接（用于「去装 WebView2 运行时」等提示）。"""
+        try:
+            import webbrowser
+            webbrowser.open(str(url))
+            return True
+        except Exception:
+            return False
 
     def overlay_resize(self, w, h):
         """页面按内容测得宽高后调用：把窗口收成贴合内容的小窄条。位置保持(并保证不出屏右/下)。"""
@@ -1753,6 +1805,25 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
                 setattr(api, attr, None)
     try:
         api._window.events.closed += _close_monitor
+    except Exception:
+        pass
+
+    # WebView2 运行时缺失/过旧时，覆盖层透明会失效（变白条，已由前端深色兜底）。友好提示去装一次：
+    def _webview2_hint():
+        try:
+            if _glass_ok() or user_settings.get_setting("webview2_hint_done"):
+                return
+            msg = ("检测到 WebView2 运行时缺失或较旧：游戏内覆盖层将以【深色背景】显示（功能不受影响）。\n"
+                   "安装最新 WebView2 运行时即可恢复【透明玻璃】效果。是否现在打开下载页？")
+            go = bool(api._window.create_confirmation_dialog("WebView2 运行时", msg))
+            user_settings.update_settings(webview2_hint_done=True)   # 只提示一次（无论是否前往下载）
+            if go:
+                import webbrowser
+                webbrowser.open(WEBVIEW2_DOWNLOAD_URL)
+        except Exception:
+            pass
+    try:    # 延后到页面载入后再弹，避开与首帧加载/控制器创建的时序冲突（见 pywebview gotchas）
+        api._window.events.loaded += (lambda *a: threading.Timer(1.2, _webview2_hint).start())
     except Exception:
         pass
     # 前端通过 js_api 轮询拉取启动数据（pywebview 注入 api 有延迟，前端会等到就绪再拉），

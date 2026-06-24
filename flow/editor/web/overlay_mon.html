@@ -90,6 +90,9 @@
   })();
 
   function render(s) {
+    if (s.glass === false) {   // WebView2 透明不可用 → 套不透明深色底兜底（防白条），与开关条一致
+      document.documentElement.style.background = "#1b1f27"; document.body.style.background = "#1b1f27";
+    }
     set("tc", pct(s.tool_cpu));
     set("tm", fmtMB(s.tool_mem));
     const g = document.getElementById("game");

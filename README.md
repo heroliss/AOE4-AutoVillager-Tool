@@ -32,6 +32,7 @@ python build.py --editor                  # 打包成 exe → build/aoe4_editor_
 ```
 
 - 编辑器需管理员权限做"输入屏蔽"；拒绝 UAC 也能编辑，仅屏蔽不生效。设 `AOE4_EDITOR_DEBUG=1` 可开 WebView2 开发者工具。
+- 游戏内**半透明覆盖层**依赖较新的 **WebView2 运行时**（Win11 自带；老 Win10 可能缺/旧 → 覆盖层会自动降级为不透明深色条，并提示去 [WebView2 下载页](https://developer.microsoft.com/microsoft-edge/webview2/) 装一次即可恢复玻璃透明）。
 - 内置流程的所有区域/模板/按键/成本均为占位默认值，请按你的分辨率与实际界面在节点上调整（开🖼预览核对最直观）。
 
 ## 游戏设置要求（引擎 / 旧版通用）
