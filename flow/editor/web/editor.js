@@ -1217,9 +1217,6 @@ const ED = (function () {
         ctx.strokeStyle = col; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
         ctx.bezierCurveTo(cc[0][0], cc[0][1] + bow, cc[1][0], cc[1][1] + bow, pb[0], pb[1]); ctx.stroke();
-        // 汇入线也铺同款方向箭头（沿带 bow 的同一贝塞尔），与 base/聚焦数量一致
-        const ac0 = [cc[0][0], cc[0][1] + bow], ac1 = [cc[1][0], cc[1][1] + bow];
-        LGraphCanvas.drawWireArrows(ctx, (t) => _bezAt([pa[0], pa[1]], ac0, ac1, [pb[0], pb[1]], t), col);
       });
     }
     ctx.restore();
@@ -2953,12 +2950,25 @@ const ED = (function () {
     const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
     return [a * p0[0] + b * c0[0] + c * c1[0] + d * p1[0], a * p0[1] + b * c0[1] + c * c1[1] + d * p1[1]];
   }
-  // 方向箭头：与 base 连线共用 LGraphCanvas.drawWireArrows（按固定弧长铺、长线多短线少），
-  // 沿“带 bow 偏移”的同一条贝塞尔取样 → 聚焦高亮线的箭头数量/位置与底层连线完全一致。
-  function _drawDirArrow(ctx, pa, pb, color, bow) {
+  // 流动光点：沿连线(带 bow 偏移的同一条贝塞尔)按固定弧长铺白色小圆点，随 flowPhase 从【源头→目标】流动，
+  // 用“流动方向”表示连线方向。只画在聚焦(悬停/选中)的连线上，平时不画 → 画面干净、空闲零重绘。
+  function drawFlowDots(ctx, pa, pb, color, bow, phase) {
     const cc = linkCtrlPts(pa, pb), b = bow || 0;
-    const c0 = [cc[0][0], cc[0][1] + b], c1 = [cc[1][0], cc[1][1] + b];   // 随汇入线的“交错弯曲”一起偏移，箭头才落在曲线上
-    LGraphCanvas.drawWireArrows(ctx, (t) => _bezAt(pa, c0, c1, pb, t), color);
+    const c0 = [cc[0][0], cc[0][1] + b], c1 = [cc[1][0], cc[1][1] + b];
+    const N = 24, pts = [];
+    for (let i = 0; i <= N; i++) pts.push(_bezAt(pa, c0, c1, pb, i / N));
+    const acc = [0]; let L = 0;
+    for (let i = 1; i <= N; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); acc.push(L); }
+    if (L < 8) return;
+    const SP = 24, SPEED = 48;                          // 点间距(px) / 流速(px每秒)
+    const off = (((phase * SPEED) % SP) + SP) % SP;     // 相位换算成首点的弧长偏移(0..SP)，随时间增大→整体向目标流动
+    const ptAt = (d) => { let j = 1; while (j < N && acc[j] < d) j++;
+      const f = acc[j] > acc[j - 1] ? (d - acc[j - 1]) / (acc[j] - acc[j - 1]) : 0;
+      return [pts[j - 1][0] + (pts[j][0] - pts[j - 1][0]) * f, pts[j - 1][1] + (pts[j][1] - pts[j - 1][1]) * f]; };
+    ctx.save();
+    ctx.shadowColor = color; ctx.shadowBlur = 7; ctx.fillStyle = "#ffffff";   // 白心 + 连线色辉光，在彩色线上醒目
+    for (let d = off; d <= L - 1; d += SP) { const p = ptAt(d); ctx.beginPath(); ctx.arc(p[0], p[1], 2.1, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
   }
   function drawLinkFocus(ctx) {
     if (!graph || runSession || foldHidden.size) return;   // 试运行交给运行可视化；折叠态连线走箱体端口，先不掺和
@@ -2999,12 +3009,13 @@ const ED = (function () {
       ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1] + r.bow, cc[1][0], cc[1][1] + r.bow, r.pb[0], r.pb[1]); ctx.stroke();
     }
     ctx.lineCap = "round";
-    for (const r of hot) {            // ② 点亮焦点连线（类型色、加粗、发光）+ 方向箭头
+    for (const r of hot) {            // ② 点亮焦点连线（类型色、加粗、发光）
       const cc = linkCtrlPts(r.pa, r.pb);
       ctx.strokeStyle = r.col; ctx.lineWidth = 3.5; ctx.shadowColor = r.col; ctx.shadowBlur = 8;
       ctx.beginPath(); ctx.moveTo(r.pa[0], r.pa[1]); ctx.bezierCurveTo(cc[0][0], cc[0][1] + r.bow, cc[1][0], cc[1][1] + r.bow, r.pb[0], r.pb[1]); ctx.stroke();
-      ctx.shadowBlur = 0; _drawDirArrow(ctx, r.pa, r.pb, r.col, r.bow);
+      ctx.shadowBlur = 0;
     }
+    for (const r of hot) drawFlowDots(ctx, r.pa, r.pb, r.col, r.bow, flowPhase);   // ③ 流动光点表示方向（白心，画在所有点亮线之上）
     ctx.restore();
   }
 
@@ -3159,6 +3170,28 @@ const ED = (function () {
     runAnimRAF = requestAnimationFrame(step);
   }
   function stopRunAnim() { if (runAnimRAF) cancelAnimationFrame(runAnimRAF); runAnimRAF = null; }
+
+  // —— 聚焦连线“流动光点”动画驱动：只在【有焦点(悬停或选中)且非试运行/非折叠】时持续重绘，无焦点立即自停（空闲零开销）——
+  let flowAnimRAF = null, flowPhase = 0, _flowAnimLast = 0;
+  function flowFocusActive() {
+    if (runSession || foldHidden.size || !canvas) return false;       // 试运行交给运行可视化；折叠态连线走箱体端口
+    if (canvas.node_over) return true;
+    return Object.keys(canvas.selected_nodes || {}).length > 0;
+  }
+  function ensureFlowAnim() { if (!flowAnimRAF && flowFocusActive()) startFlowAnim(); }
+  function startFlowAnim() {
+    if (flowAnimRAF) return;
+    _flowAnimLast = 0;
+    let _lastDraw = 0;
+    const step = (ts) => {
+      const gap = _flowAnimLast ? (ts - _flowAnimLast) : 16; _flowAnimLast = ts;
+      flowPhase += Math.min(gap, 200) / 1000;                          // 秒;掉帧也不变速(相位按真实时间走)
+      if (!flowFocusActive()) { flowAnimRAF = null; if (canvas) canvas.setDirty(false, true); return; }  // 失焦：自停 + 最后刷一帧抹掉光点
+      if (ts - _lastDraw >= 33) { _lastDraw = ts; canvas.setDirty(false, true); }   // 重绘限到 ~30fps(连线在背景层,标 bg 脏);rAF 本身廉价
+      flowAnimRAF = requestAnimationFrame(step);
+    };
+    flowAnimRAF = requestAnimationFrame(step);
+  }
 
   function setRunUI() {
     const btn = document.getElementById("runbtn"), stop = document.getElementById("stopbtn"),
@@ -3636,7 +3669,7 @@ const ED = (function () {
       "overflow:auto;background:#23272fee;color:#cfd3da;border:1px solid #3a404a;border-radius:6px;" +
       "padding:8px 10px;font:12px/1.6 'Microsoft YaHei',sans-serif;display:none;z-index:50;";
     document.body.appendChild(helpEl);
-    canvas.onNodeSelected = (n) => { selectedNode = n; selectedGroupId = null; showNodeHelp(n); };   // 选节点即取消组选中
+    canvas.onNodeSelected = (n) => { selectedNode = n; selectedGroupId = null; showNodeHelp(n); ensureFlowAnim(); };   // 选节点即取消组选中 + 启动其连线流动光点
     canvas.onNodeDeselected = () => { selectedNode = null; if (!selectedGroupId) helpEl.style.display = "none"; };
   }
 
@@ -4497,8 +4530,8 @@ const ED = (function () {
       canvas.allow_searchbox = false;   // 关闭双击/Shift 弹出的搜索框（易误触；加节点统一走右键空白处"添加节点"）
       canvas.show_info = false;          // 隐藏左下角 T/I/N/V/FPS 调试信息（对普通用户无意义）
       canvas.render_connections_border = false;  // 连线不画深色描边——避免"一条线两种颜色(深/浅)"的观感
-      canvas.render_connection_arrows = true;    // 每条连线中段画一个方向箭头，一眼看出数据/执行的流向
-      canvas.render_curved_connections = true;   // 箭头朝向按【曲线切线】算（连线本就是样条）；否则会退化成纯上/下的竖直朝向 → 方向看着不对
+      canvas.render_connection_arrows = false;   // 不画静态方向箭头——方向改用“悬停/选中某节点时，其连线上的流动光点”表示(见 drawLinkFocus/drawFlowDots)，平时画面干净
+      canvas.render_curved_connections = true;   // 连线本就是样条；保留(影响切线/采样朝向计算)，与流动光点无冲突
       canvas.render_canvas_border = false;  // 不画画布边框（背景里那条蓝色细线矩形）
       canvas.node_title_color = "#e3e7ee";  // 默认标题字调亮（原 #999 偏灰、看不清）
       canvas.onDrawBackground = drawGroups;   // 在节点后面画“分组框”（随成员自动包裹）/ 折叠态画“子图箱体”
@@ -4508,6 +4541,7 @@ const ED = (function () {
       canvas.canvas.addEventListener("mousemove", () => {
         const id = (canvas && canvas.node_over) ? canvas.node_over._id : null;
         if (id !== _lastHoverId) { _lastHoverId = id; if (!runSession && canvas) canvas.setDirty(true, true); }
+        ensureFlowAnim();   // 悬停到节点 → 启动其连线的流动光点动画（无悬停/无选中时自停，空闲不重绘）
       });
       // 折叠子图：用自定义连线绘制——跳过组内连线、把跨边界连线改接到箱体端口；无折叠时走原版。
       const _origDrawConn = canvas.drawConnections;
