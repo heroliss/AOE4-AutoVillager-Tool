@@ -16,7 +16,10 @@ from . import _imaging
 # ==================== 三态遮挡检测 ====================
 @register
 class Occlusion(DataNode):
-    """检测某区域是否被 UI 遮挡：完全遮挡 / 完全未遮挡 / 渐变中（含稳定性与误判修正）。"""
+    """检测某区域是否被 UI 遮挡，输出 完全遮挡 / 未遮挡 / 渐变中 三态。
+    判据：与“遮挡模板”的匹配分定三态分界；落在中间“灰区”时，再用【帧间像素变化】分辨
+    是真·渐入渐出动画（画面在动→渐变中、跳过本帧）还是场景色恰好落在灰区（静止→当未遮挡可读）。
+    比旧的“离散状态连续 N 次才算稳定”更贴近直觉：画面没动就不会被误报“不稳定”。"""
 
     type_id = "game.occlusion"
     category = "游戏"
@@ -26,13 +29,13 @@ class Occlusion(DataNode):
         data_out("blocked", DataType.BOOL, label="遮挡",
                  help="那块区域被完全盖住（如打开了某个面板）。此时识别不可靠，流程应跳过本帧。"),
         data_out("in_transition", DataType.BOOL, label="渐变中",
-                 help="UI 正在渐入/渐出动画、或读数还没稳定。此时识别会误判，流程应跳过本帧。"),
+                 help="匹配分落在“灰区”且画面正在变化（UI 渐入/渐出动画）。此时识别会误判，流程应跳过本帧。"),
         data_out("clear", DataType.BOOL, label="未遮挡",
                  help="区域干净、可放心识别（= 既非遮挡也非渐变）。三态里的“正常”态。"),
         data_out("confidence", DataType.NUMBER, label="置信度",
                  help="与“遮挡模板”的匹配分(0~1)：越高越像被遮挡。用于判定 遮挡/渐变/未遮挡 三态的分界。"),
         data_out("state", DataType.STRING, label="状态",
-                 help="给人看的状态文字：完全遮挡 / 未遮挡 / 渐变中，可能带“(不稳定)”或“误判修正->未遮挡”。仅展示、不参与判断。"),
+                 help="给人看的状态文字：完全遮挡 / 未遮挡 / 渐变中，灰区里可能带“(画面在动 Δ…)”或“(灰区静止)”。仅展示、不参与判断。"),
     ]
     params = [
         ParamSpec("region", "检测区域", "region", default=[265, 950, 280, 970],
@@ -42,21 +45,29 @@ class Occlusion(DataNode):
         ParamSpec("match_threshold", "完全遮挡阈值", "float", default=0.7, minimum=0.0, maximum=1.0, step=0.01,
                   help="匹配分 ≥ 它 → 判为“完全遮挡”。"),
         ParamSpec("transition_threshold", "渐变下限阈值", "float", default=0.1, minimum=0.0, maximum=1.0, step=0.01,
-                  help="匹配分 < 它 → 判为“未遮挡”；介于本阈值与“完全遮挡阈值”之间 → “渐变中”。"),
-        ParamSpec("stable_threshold", "稳定所需次数", "int", default=2, minimum=1, maximum=10,
-                  help="同一状态要连续出现这么多次才算“稳定”，否则先当“渐变中”——防 UI 抖动误判。"),
-        ParamSpec("transition_repeat", "渐变误判次数", "int", default=3, minimum=1, maximum=10, advanced=True,
-                  help="落在渐变区但连续这么多次几乎不变 → 判定为“场景色误判”、当作未遮挡。调试用。"),
-        ParamSpec("change_threshold", "渐变误判变化阈", "float", default=0.05, minimum=0.0, maximum=1.0, step=0.01, advanced=True,
-                  help="配合上一项：相邻帧匹配分变化 < 它才算“几乎不变”。调试用。"),
+                  help="匹配分 < 它 → 直接判“未遮挡”（最可靠：长得完全不像遮挡物，生产动画等也落这档、不受运动误伤）；"
+                       "介于本阈值与“完全遮挡阈值”之间＝“灰区/渐变区”，此时再看“画面变化阈值”分辨真渐变还是场景巧合。"),
+        ParamSpec("motion_eps", "画面变化阈值", "float", default=0.02, minimum=0.0, maximum=1.0, step=0.005,
+                  help="相邻两帧、这块区域的平均像素变化（0~1，≈变化灰度÷255）。【仅在灰区里】用它分辨：\n"
+                       "≥它＝画面在动 → 判“渐变中”（渐入/渐出动画，跳过本帧）；<它＝画面静止 → 当“未遮挡”可读。\n"
+                       "静止 UI 通常≈0，渐变动画时远大于它。误报渐变就调大，漏判慢动画就调小。"),
+        ParamSpec("hysteresis", "遮挡判定滞回", "float", default=0.05, minimum=0.0, maximum=0.5, step=0.01, advanced=True,
+                  help="防“遮挡↔未遮挡”在阈值线上反复横跳：一旦判为遮挡，要等匹配分掉到（完全遮挡阈值−本值）才解除。0=不滞回。"),
     ]
 
     def __init__(self):
         super().__init__()
-        self._last_state = None
-        self._stable_count = 0
-        self._transition_count = 0
-        self._last_transition_conf = 0.0
+        self._prev_gray = None     # 上一帧本区域灰度图（副本），用于帧间差分＝“画面有没有动”的直接度量
+        self._was_blocked = False  # 上一帧是否判为遮挡，用于遮挡阈值的滞回消抖
+
+    def _frame_motion(self, gray):
+        """与上一帧本区域做差，返回平均像素变化(0~1)；首帧/尺寸不一致返回 None。"""
+        prev = self._prev_gray
+        if prev is None or gray is None or prev.shape != gray.shape:
+            return None
+        import cv2
+        import numpy as np
+        return float(np.mean(cv2.absdiff(gray, prev))) / 255.0
 
     def evaluate(self, ctx, inputs):
         region = self.values["region"]
@@ -70,47 +81,44 @@ class Occlusion(DataNode):
                                   right - left, bottom - top)
         conf = _imaging.best_match(gray, tmpl)
 
+        # 帧间运动量：本区域相邻两帧的平均像素变化(0~1)。这是“画面在不在动”的直接度量，
+        # 取代旧的“离散三态连续相同 N 次”——后者在阈值边界会把静止画面误判成“在变”而永远(不稳定)。
+        motion = self._frame_motion(gray)              # 首帧无上一帧 → None
+        self._prev_gray = None if gray is None else gray.copy()
+
         m_thr = self.values["match_threshold"]
         t_thr = self.values["transition_threshold"]
+        eps = self.values["motion_eps"]
+        hyst = self.values.get("hysteresis", 0.0) or 0.0
 
-        if conf >= m_thr:
-            cur, status = "blocked", "完全遮挡"
+        # 遮挡判定带滞回：未遮挡→遮挡需 conf≥阈值；已遮挡→需掉到 阈值−滞回 才解除，防边界横跳。
+        enter = m_thr if not self._was_blocked else (m_thr - hyst)
+        is_blocked = conf >= enter
+        self._was_blocked = is_blocked
+
+        # 画面在动吗？首帧(motion=None)无从比较 → 视为静止（信任本帧），正是“刚进游戏没动就别报不稳定”。
+        moving = motion is not None and motion >= eps
+
+        blocked = in_transition = clear = False
+        if is_blocked:
+            blocked = True                  # 匹配分高＝面板确实盖住，决断，不看运动
+            status = "完全遮挡"
         elif conf < t_thr:
-            cur, status = "clear", "未遮挡"
+            clear = True                    # 长得完全不像遮挡物＝干净，决断（生产动画等也落这里，故不会被运动误伤）
+            status = "未遮挡"
+        elif moving:
+            in_transition = True            # 灰区+画面在动＝真·渐入/渐出动画 → 跳过本帧
+            status = f"渐变中(画面在动 Δ{motion:.3f})"
         else:
-            cur, status = "transition", "渐变中"
+            clear = True                    # 灰区+画面静止＝场景色恰落在灰区(非遮挡)，可放心识别（旧“误判修正”的直判版）
+            status = "未遮挡(灰区静止)"
 
-        # 稳定性检测
-        if cur == self._last_state:
-            self._stable_count += 1
-        else:
-            self._last_state = cur
-            self._stable_count = 1
-
-        blocked = in_transition = False
-        if self._stable_count < self.values["stable_threshold"]:
-            in_transition = True
-            self._transition_count = 0
-            status = f"{status}(不稳定)"
-        elif cur == "blocked":
-            blocked = True
-            self._transition_count = 0
-        elif cur == "clear":
-            self._transition_count = 0
-        else:  # transition
-            change = abs(conf - self._last_transition_conf)
-            self._transition_count += 1
-            if self._transition_count >= self.values["transition_repeat"] and change < self.values["change_threshold"]:
-                status = "误判修正->未遮挡"  # 场景色恰落在渐变区
-            else:
-                in_transition = True
-            self._last_transition_conf = conf
-
-        clear = not blocked and not in_transition
-        self.live = {"confidence": conf, "state": status}
+        self.live = {"confidence": conf, "state": status,
+                     "motion": None if motion is None else round(motion, 4)}
         if ctx.preview_enabled:
             self.live["preview"] = _imaging.encode_preview(img)
-            self.live["preview_label"] = f"{status} {conf:.2f}"
+            m_txt = "—" if motion is None else f"{motion:.3f}"
+            self.live["preview_label"] = f"{status}  match {conf:.2f}  Δ{m_txt}"
         return {"blocked": blocked, "in_transition": in_transition,
                 "clear": clear, "confidence": conf, "state": status}
 

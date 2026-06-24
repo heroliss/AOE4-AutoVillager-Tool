@@ -302,7 +302,7 @@
       "id": "if_win",
       "type": "control.if",
       "pos": [
-        780.5,
+        772.0,
         40.0
       ],
       "params": {},
@@ -325,9 +325,8 @@
         "template": "templates/blocked.png",
         "match_threshold": 0.7,
         "transition_threshold": 0.1,
-        "stable_threshold": 2,
-        "transition_repeat": 3,
-        "change_threshold": 0.05
+        "motion_eps": 0.02,
+        "hysteresis": 0.05
       },
       "note": "三态遮挡检测：生产相关区域是否被 UI 盖住 / 正在渐变。"
     },
@@ -335,7 +334,7 @@
       "id": "if_blocked",
       "type": "control.if",
       "pos": [
-        1098.0,
+        1081.0,
         40.0
       ],
       "params": {},
@@ -345,7 +344,7 @@
       "id": "if_trans",
       "type": "control.if",
       "pos": [
-        1338.0,
+        1321.0,
         40.0
       ],
       "params": {},
@@ -355,7 +354,7 @@
       "id": "pop",
       "type": "sense.ocr_number",
       "pos": [
-        4105.0,
+        4088.0,
         796.0
       ],
       "params": {
@@ -375,7 +374,7 @@
       "id": "slots",
       "type": "math.arith",
       "pos": [
-        4466.0,
+        4449.0,
         612.0
       ],
       "params": {
@@ -387,7 +386,7 @@
       "id": "food",
       "type": "sense.ocr_number",
       "pos": [
-        1578.0,
+        1561.0,
         368.0
       ],
       "params": {
@@ -407,7 +406,7 @@
       "id": "gold",
       "type": "sense.ocr_number",
       "pos": [
-        2816.0,
+        2799.0,
         568.0
       ],
       "params": {
@@ -427,7 +426,7 @@
       "id": "wood",
       "type": "sense.ocr_number",
       "pos": [
-        3744.0,
+        3727.0,
         352.0
       ],
       "params": {
@@ -447,7 +446,7 @@
       "id": "tc",
       "type": "game.building_count",
       "pos": [
-        6323.0,
+        6306.0,
         348.0
       ],
       "params": {
@@ -484,7 +483,7 @@
       "id": "c_zero",
       "type": "data.const_number",
       "pos": [
-        4474.5,
+        4457.5,
         432.0
       ],
       "params": {
@@ -496,7 +495,7 @@
       "id": "pre_sw_vill",
       "type": "control.if",
       "pos": [
-        1638.5,
+        1621.5,
         40.0
       ],
       "params": {},
@@ -506,7 +505,7 @@
       "id": "pre_q_vill",
       "type": "control.if",
       "pos": [
-        1982.5,
+        1965.5,
         40.0
       ],
       "params": {},
@@ -516,7 +515,7 @@
       "id": "pre_sw_xq",
       "type": "control.if",
       "pos": [
-        2541.0,
+        2524.0,
         40.0
       ],
       "params": {},
@@ -526,7 +525,7 @@
       "id": "pre_q_xq",
       "type": "control.if",
       "pos": [
-        2876.5,
+        2859.5,
         40.0
       ],
       "params": {},
@@ -536,7 +535,7 @@
       "id": "pre_sw_cart",
       "type": "control.if",
       "pos": [
-        3804.5,
+        3787.5,
         40.0
       ],
       "params": {},
@@ -546,7 +545,7 @@
       "id": "pre_q_cart",
       "type": "control.if",
       "pos": [
-        4165.5,
+        4148.5,
         40.0
       ],
       "params": {},
@@ -556,7 +555,7 @@
       "id": "cmp_slots",
       "type": "logic.compare",
       "pos": [
-        4793.0,
+        4776.0,
         232.0
       ],
       "params": {
@@ -568,7 +567,7 @@
       "id": "pre_slots",
       "type": "control.if",
       "pos": [
-        5120.0,
+        5103.0,
         40.0
       ],
       "params": {},
@@ -578,7 +577,7 @@
       "id": "c_cost_v",
       "type": "data.const_number",
       "pos": [
-        1603.5,
+        1586.5,
         724.0
       ],
       "params": {
@@ -590,7 +589,7 @@
       "id": "cmp_food_v",
       "type": "logic.compare",
       "pos": [
-        1939.0,
+        1922.0,
         264.0
       ],
       "params": {
@@ -602,7 +601,7 @@
       "id": "pre_food_v",
       "type": "control.if",
       "pos": [
-        2266.0,
+        2249.0,
         40.0
       ],
       "params": {},
@@ -612,7 +611,7 @@
       "id": "c_cost_x_food",
       "type": "data.const_number",
       "pos": [
-        2506.0,
+        2489.0,
         248.0
       ],
       "params": {
@@ -624,7 +623,7 @@
       "id": "cmp_food_x",
       "type": "logic.compare",
       "pos": [
-        2833.0,
+        2816.0,
         248.0
       ],
       "params": {
@@ -636,7 +635,7 @@
       "id": "pre_food_x",
       "type": "control.if",
       "pos": [
-        3220.5,
+        3203.5,
         40.0
       ],
       "params": {},
@@ -646,7 +645,7 @@
       "id": "c_cost_x",
       "type": "data.const_number",
       "pos": [
-        2841.5,
+        2824.5,
         924.0
       ],
       "params": {
@@ -658,7 +657,7 @@
       "id": "cmp_gold_x",
       "type": "logic.compare",
       "pos": [
-        3177.0,
+        3160.0,
         232.0
       ],
       "params": {
@@ -670,7 +669,7 @@
       "id": "pre_gold_x",
       "type": "control.if",
       "pos": [
-        3504.0,
+        3487.0,
         40.0
       ],
       "params": {},
@@ -680,7 +679,7 @@
       "id": "c_cost_cart",
       "type": "data.const_number",
       "pos": [
-        4130.5,
+        4113.5,
         448.0
       ],
       "params": {
@@ -692,7 +691,7 @@
       "id": "cmp_gold_cart",
       "type": "logic.compare",
       "pos": [
-        4466.0,
+        4449.0,
         232.0
       ],
       "params": {
@@ -704,7 +703,7 @@
       "id": "pre_gold_cart",
       "type": "control.if",
       "pos": [
-        4836.5,
+        4819.5,
         40.0
       ],
       "params": {},
@@ -714,7 +713,7 @@
       "id": "c_cost_cart_wood",
       "type": "data.const_number",
       "pos": [
-        3769.5,
+        3752.5,
         740.0
       ],
       "params": {
@@ -726,7 +725,7 @@
       "id": "cmp_wood_cart",
       "type": "logic.compare",
       "pos": [
-        4122.0,
+        4105.0,
         248.0
       ],
       "params": {
@@ -738,7 +737,7 @@
       "id": "pre_wood_cart",
       "type": "control.if",
       "pos": [
-        4509.5,
+        4492.5,
         40.0
       ],
       "params": {},
@@ -748,7 +747,7 @@
       "id": "lock",
       "type": "control.lock_acquire",
       "pos": [
-        5360.0,
+        5343.0,
         40.0
       ],
       "params": {},
@@ -758,7 +757,7 @@
       "id": "block_begin",
       "type": "control.input_block_begin",
       "pos": [
-        5600.0,
+        5583.0,
         40.0
       ],
       "params": {
@@ -770,7 +769,7 @@
       "id": "save_sel",
       "type": "action.press_key",
       "pos": [
-        5979.0,
+        5962.0,
         40.0
       ],
       "params": {
@@ -784,7 +783,7 @@
       "id": "relmod1",
       "type": "action.release_modifiers",
       "pos": [
-        6401.0,
+        6384.0,
         40.0
       ],
       "params": {},
@@ -794,7 +793,7 @@
       "id": "sw_vill",
       "type": "data.switch",
       "pos": [
-        6753.5,
+        6736.5,
         412.0
       ],
       "params": {
@@ -806,7 +805,7 @@
       "id": "if_sw_vill",
       "type": "control.if",
       "pos": [
-        6788.5,
+        6771.5,
         40.0
       ],
       "params": {},
@@ -816,7 +815,7 @@
       "id": "q_vill",
       "type": "sense.template_match",
       "pos": [
-        6719.0,
+        6702.0,
         712.0
       ],
       "params": {
@@ -838,7 +837,7 @@
       "id": "if_qvill",
       "type": "control.if",
       "pos": [
-        7141.5,
+        7124.5,
         40.0
       ],
       "params": {},
@@ -848,7 +847,7 @@
       "id": "sel_tc_v",
       "type": "action.press_key",
       "pos": [
-        7442.0,
+        7425.0,
         40.0
       ],
       "params": {
@@ -862,7 +861,7 @@
       "id": "c_per_v",
       "type": "data.const_number",
       "pos": [
-        6753.5,
+        6736.5,
         232.0
       ],
       "params": {
@@ -874,7 +873,7 @@
       "id": "plan_v",
       "type": "math.arith",
       "pos": [
-        7098.0,
+        7081.0,
         216.0
       ],
       "params": {
@@ -886,7 +885,7 @@
       "id": "prod_v",
       "type": "game.produce_count",
       "pos": [
-        7425.0,
+        7408.0,
         392.0
       ],
       "params": {
@@ -903,7 +902,7 @@
       "id": "queue_v",
       "type": "action.press_key",
       "pos": [
-        7803.0,
+        7786.0,
         40.0
       ],
       "params": {
@@ -917,7 +916,7 @@
       "id": "sw_xq",
       "type": "data.switch",
       "pos": [
-        8181.5,
+        8164.5,
         412.0
       ],
       "params": {
@@ -929,7 +928,7 @@
       "id": "if_sw_xq",
       "type": "control.if",
       "pos": [
-        8216.5,
+        8199.5,
         40.0
       ],
       "params": {},
@@ -939,7 +938,7 @@
       "id": "q_xq",
       "type": "sense.template_match",
       "pos": [
-        8147.0,
+        8130.0,
         712.0
       ],
       "params": {
@@ -961,7 +960,7 @@
       "id": "if_qxq",
       "type": "control.if",
       "pos": [
-        8569.5,
+        8552.5,
         40.0
       ],
       "params": {},
@@ -971,7 +970,7 @@
       "id": "sel_tc_x",
       "type": "action.press_key",
       "pos": [
-        8870.0,
+        8853.0,
         40.0
       ],
       "params": {
@@ -985,7 +984,7 @@
       "id": "c_per_x",
       "type": "data.const_number",
       "pos": [
-        8181.5,
+        8164.5,
         232.0
       ],
       "params": {
@@ -997,7 +996,7 @@
       "id": "plan_x",
       "type": "math.arith",
       "pos": [
-        8526.0,
+        8509.0,
         216.0
       ],
       "params": {
@@ -1009,7 +1008,7 @@
       "id": "prod_x",
       "type": "game.produce_count",
       "pos": [
-        8853.0,
+        8836.0,
         360.0
       ],
       "params": {
@@ -1026,7 +1025,7 @@
       "id": "queue_x",
       "type": "action.press_key",
       "pos": [
-        9231.0,
+        9214.0,
         40.0
       ],
       "params": {
@@ -1040,7 +1039,7 @@
       "id": "sw_cart",
       "type": "data.switch",
       "pos": [
-        9609.5,
+        9592.5,
         232.0
       ],
       "params": {
@@ -1052,7 +1051,7 @@
       "id": "if_sw_cart",
       "type": "control.if",
       "pos": [
-        9644.5,
+        9627.5,
         40.0
       ],
       "params": {},
@@ -1062,7 +1061,7 @@
       "id": "q_cart",
       "type": "sense.template_match",
       "pos": [
-        9575.0,
+        9558.0,
         532.0
       ],
       "params": {
@@ -1084,7 +1083,7 @@
       "id": "if_qcart",
       "type": "control.if",
       "pos": [
-        10032.0,
+        10015.0,
         40.0
       ],
       "params": {},
@@ -1094,7 +1093,7 @@
       "id": "sel_market",
       "type": "action.press_key",
       "pos": [
-        10350.0,
+        10333.0,
         40.0
       ],
       "params": {
@@ -1108,7 +1107,7 @@
       "id": "market",
       "type": "game.building_count",
       "pos": [
-        9954.0,
+        9937.0,
         336.0
       ],
       "params": {
@@ -1147,7 +1146,7 @@
       "id": "not_mkt",
       "type": "logic.not",
       "pos": [
-        10402.0,
+        10385.0,
         392.0
       ],
       "params": {},
@@ -1157,7 +1156,7 @@
       "id": "set_cart",
       "type": "control.set_switch",
       "pos": [
-        10694.0,
+        10677.0,
         40.0
       ],
       "params": {
@@ -1171,7 +1170,7 @@
       "id": "c_per_cart",
       "type": "data.const_number",
       "pos": [
-        9997.0,
+        9980.0,
         1046.0
       ],
       "params": {
@@ -1183,7 +1182,7 @@
       "id": "plan_cart",
       "type": "math.arith",
       "pos": [
-        10358.5,
+        10341.5,
         588.0
       ],
       "params": {
@@ -1195,7 +1194,7 @@
       "id": "prod_cart",
       "type": "game.produce_count",
       "pos": [
-        10694.5,
+        10677.5,
         360.0
       ],
       "params": {
@@ -1212,7 +1211,7 @@
       "id": "queue_cart",
       "type": "action.press_key",
       "pos": [
-        11073.0,
+        11056.0,
         40.0
       ],
       "params": {
@@ -1226,7 +1225,7 @@
       "id": "restore",
       "type": "action.press_key",
       "pos": [
-        11417.0,
+        11400.0,
         40.0
       ],
       "params": {
@@ -1240,7 +1239,7 @@
       "id": "disband",
       "type": "action.press_key",
       "pos": [
-        11761.0,
+        11744.0,
         40.0
       ],
       "params": {
@@ -1254,7 +1253,7 @@
       "id": "relmod2",
       "type": "action.release_modifiers",
       "pos": [
-        12105.0,
+        12088.0,
         40.0
       ],
       "params": {},
@@ -1264,7 +1263,7 @@
       "id": "block_end",
       "type": "control.input_block_end",
       "pos": [
-        12345.0,
+        12328.0,
         40.0
       ],
       "params": {},
@@ -1274,7 +1273,7 @@
       "id": "delay",
       "type": "control.delay",
       "pos": [
-        12585.0,
+        12568.0,
         40.0
       ],
       "params": {
@@ -1286,7 +1285,7 @@
       "id": "unlock",
       "type": "control.lock_release",
       "pos": [
-        12878.0,
+        12861.0,
         40.0
       ],
       "params": {},
