@@ -2,9 +2,10 @@
 AOE4 自动生产村民工具 - PyInstaller 打包脚本
 
 使用方法：
-    python build.py              # 打包GUI CPU精简版（复用已有虚拟环境）
-    python build.py --full       # 打包GUI完整版（含torch GPU支持，约2GB）
-    python build.py --cli        # 打包命令行版本
+    python build.py              # 打包旧版GUI CPU精简版（复用已有虚拟环境）
+    python build.py --full       # 打包旧版GUI完整版（含torch GPU支持，约2GB）
+    python build.py --cli        # 打包旧版命令行版本
+    python build.py --editor     # 打包【节点编辑器（引擎, v3.0）】：含网页前端 + pywebview
     python build.py --clean      # 清理包括虚拟环境（强制重新下载依赖）
     python build.py --help       # 显示帮助
 
@@ -171,8 +172,13 @@ def _setup_cpu_venv():
     return venv_python
 
 
-def _build_with_venv(venv_python, entry_script, exe_name, output_dir, console_mode):
-    """使用虚拟环境的 Python 执行 PyInstaller 打包"""
+def _build_with_venv(venv_python, entry_script, exe_name, output_dir, console_mode,
+                     extra_datas=None, extra_hiddenimports=None, collect_pkgs=None):
+    """使用虚拟环境的 Python 执行 PyInstaller 打包。
+
+    extra_datas: 追加的 datas 条目(spec 字符串，如网页前端目录)；
+    extra_hiddenimports: 追加的隐藏导入(如 webview/clr)；
+    collect_pkgs: 用 collect_all 兜底收集的包名(如 webview/pythonnet，静态分析抓不全)。"""
 
     pi_build_dir = os.path.join(BASE_DIR, "build", f"{exe_name}_build")
     runtime_hook_path = _create_runtime_hook()
@@ -195,8 +201,28 @@ def _build_with_venv(venv_python, entry_script, exe_name, output_dir, console_mo
     ]
     if easyocr_model_dir:
         datas_entries.append(f"(r'{easyocr_model_dir}', 'easyocr/model')")
+    datas_entries += list(extra_datas or [])
 
     datas_str = ',\n        '.join(datas_entries)
+
+    # hiddenimports：基础 + 调用方追加（如引擎需要 webview/clr）
+    hidden = ['easyocr', 'torch', 'torchvision', 'cv2', 'numpy', 'PIL',
+              'mss', 'pydirectinput', 'psutil'] + list(extra_hiddenimports or [])
+    hidden_str = ',\n        '.join(repr(h) for h in hidden)
+
+    # 对 pywebview/pythonnet 这类“静态分析抓不全”的包，用 collect_all 兜底收集其数据/二进制/子模块。
+    # 始终先定义三个空列表，使下面 Analysis 的引用恒有效（无 collect_pkgs 时即空）。
+    collect_prelude = "_collect_datas, _collect_bins, _collect_hidden = [], [], []\n"
+    if collect_pkgs:
+        collect_prelude += (
+            "from PyInstaller.utils.hooks import collect_all\n"
+            f"for _pkg in {list(collect_pkgs)!r}:\n"
+            "    try:\n"
+            "        _d, _b, _h = collect_all(_pkg)\n"
+            "        _collect_datas += _d; _collect_bins += _b; _collect_hidden += _h\n"
+            "    except Exception as _e:\n"
+            "        print('collect_all 跳过', _pkg, _e)\n"
+        )
 
     spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
 import os
@@ -205,23 +231,18 @@ block_cipher = None
 
 base_dir = r'{BASE_DIR}'
 
+{collect_prelude}
 a = Analysis(
     [os.path.join(base_dir, '{entry_script}')],
     pathex=[base_dir],
-    binaries=[],
+    binaries=[*_collect_bins],
     datas=[
-        {datas_str}
+        {datas_str},
+        *_collect_datas
     ],
     hiddenimports=[
-        'easyocr',
-        'torch',
-        'torchvision',
-        'cv2',
-        'numpy',
-        'PIL',
-        'mss',
-        'pydirectinput',
-        'psutil',
+        {hidden_str},
+        *_collect_hidden
     ],
     hookspath=[],
     hooksconfig={{}},
@@ -460,6 +481,40 @@ def build_cli():
     )
 
 
+def build_editor():
+    """打包【节点编辑器（引擎, v3.0）】：run_editor.py + 网页前端资源 + pywebview。
+
+    与旧版的关键差异：① datas 追加 flow/editor/web（编辑器 HTML/JS/vendored litegraph，WEB_DIR 按
+    webhost.py 相对定位，故目标须还原成 flow/editor/web）与 flows（内置流程）；② 追加 webview/clr 隐藏导入，
+    并 collect_all('webview','pythonnet') 兜底（pywebview+pythonnet 静态分析抓不全）。引擎也用到 OCR(easyocr)，
+    故同样走 CPU 精简 venv。"""
+    print("\n" + "=" * 60)
+    print("  打包 节点编辑器（引擎, CPU精简版）")
+    print("=" * 60)
+
+    editor_output_dir = os.path.join(BASE_DIR, "build", "aoe4_editor_cpu")
+    os.makedirs(editor_output_dir, exist_ok=True)
+
+    venv_python = _setup_cpu_venv()
+
+    _build_with_venv(
+        venv_python=venv_python,
+        entry_script="run_editor.py",
+        exe_name="AOE4-FlowEditor",
+        output_dir=editor_output_dir,
+        # 首次验证建议保留控制台(True)以便看 pywebview/资源路径报错；确认能正常打开编辑器后可改 False 走纯窗口。
+        console_mode=True,
+        extra_datas=[
+            "(os.path.join(base_dir, 'flow', 'editor', 'web'), os.path.join('flow', 'editor', 'web'))",
+            "(os.path.join(base_dir, 'flows'), 'flows')",
+        ],
+        extra_hiddenimports=[
+            'webview', 'webview.platforms.winforms', 'clr', 'proxy_tools', 'bottle',
+        ],
+        collect_pkgs=['webview', 'pythonnet'],
+    )
+
+
 def main():
     # 检查 PyInstaller
     try:
@@ -491,6 +546,8 @@ def main():
         build_gui_full()
     elif "--cli" in args:
         build_cli()
+    elif "--editor" in args:
+        build_editor()
     else:
         build_gui_cpu()
 
