@@ -626,7 +626,7 @@ class AOE4App:
                 return result.stdout.strip().lstrip("v")
         except Exception:
             pass
-        return "2.0.0"
+        return "3.0.0"
 
     def _build_ui(self):
         """构建界面"""
