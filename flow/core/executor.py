@@ -96,10 +96,16 @@ class Executor:
             for out_name, val in outputs.items():
                 ctx.memo_set((node_id, out_name), val)
 
+            self._on_visit(node_id, next_port)
+
             if next_port is None:
                 break
             target = self.graph.exec_target(node_id, next_port)
             node_id = target[0] if target else None
+
+    def _on_visit(self, node_id: str, next_port: Optional[str]) -> None:
+        """钩子：每执行完一个控制节点后调用，参数为该节点与它选择的出口名。
+        基类不记录任何东西；TraceExecutor 用它收集执行轨迹（避免复制整段 _walk）。"""
 
     # ==================== 主循环（headless 用）====================
     def run(self, ctx: ExecutionContext, interval: float = 0.1, max_ticks: Optional[int] = None) -> None:  # noqa: D401
@@ -143,28 +149,8 @@ class TraceExecutor(Executor):
             self.trace_data.add(node_id)
         return val
 
-    def _walk(self, ctx: ExecutionContext) -> None:
-        node_id: Optional[str] = self.graph.entry_id()
-        guard = 0
-        max_steps = len(self.graph.nodes) * 4 + 16
-
-        while node_id is not None:
-            guard += 1
-            if guard > max_steps:
-                ctx.log("ERROR", f"执行步数超过上限({max_steps})，疑似存在环，已中断本帧")
-                break
-
-            node = self.graph.nodes[node_id]
-            inputs = self._resolve_inputs(ctx, node_id, node)
-            outputs, next_port = self._execute_node(ctx, node_id, node, inputs)
-            self.trace_path.append(node_id)
-            if next_port is not None:
-                self.trace_ports[node_id] = next_port
-
-            for out_name, val in outputs.items():
-                ctx.memo_set((node_id, out_name), val)
-
-            if next_port is None:
-                break
-            target = self.graph.exec_target(node_id, next_port)
-            node_id = target[0] if target else None
+    def _on_visit(self, node_id: str, next_port: Optional[str]) -> None:
+        # 记录本帧实际经过的执行节点及其选择的出口（复用基类 _walk，不再复制遍历逻辑）。
+        self.trace_path.append(node_id)
+        if next_port is not None:
+            self.trace_ports[node_id] = next_port

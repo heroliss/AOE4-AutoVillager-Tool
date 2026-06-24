@@ -3,8 +3,9 @@
 
 用法::
 
-    python run_headless.py                         # 跑 flows/villager.flow.json
-    python run_headless.py --file flows/jin.flow.json
+    python run_headless.py                         # 跑 flows/combined.flow.json（统一生产，默认只开村民）
+    python run_headless.py --file flows/combined.flow.json
+    python run_headless.py --builtin jin           # 改用内置构建器（测试用：villager/trade_cart/jin/combined）
     python run_headless.py --dry-run               # 只打日志、不真正发按键（安全演练）
     python run_headless.py --interval 0.1 --max-ticks 100
 
@@ -30,6 +31,7 @@ _BUILDERS = {
     "villager": "flow.flows.villager:build_villager_graph",
     "trade_cart": "flow.flows.trade_cart:build_trade_cart_graph",
     "jin": "flow.flows.jin:build_jin_graph",
+    "combined": "flow.flows.combined:build_combined_graph",
 }
 
 
@@ -40,9 +42,9 @@ def _load_graph(file: str | None, name: str | None) -> Graph:
         return getattr(importlib.import_module(mod), fn)()
     if file and os.path.exists(file):
         return Graph.load(file)
-    # 回退：内置出农
-    from flow.flows.villager import build_villager_graph
-    return build_villager_graph()
+    # 回退：内置统一生产（唯一分发的内置流程）
+    from flow.flows.combined import build_combined_graph
+    return build_combined_graph()
 
 
 def _warmup_ocr() -> None:
@@ -58,7 +60,7 @@ def _warmup_ocr() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--file", default="flows/villager.flow.json", help="流程图 JSON 路径")
+    ap.add_argument("--file", default="flows/combined.flow.json", help="流程图 JSON 路径")
     ap.add_argument("--builtin", choices=list(_BUILDERS), help="改用内置构建器（忽略 --file）")
     ap.add_argument("--dry-run", action="store_true", help="只打日志，不真正发送按键/屏蔽输入")
     ap.add_argument("--interval", type=float, default=0.1, help="循环间隔(秒)")

@@ -8,8 +8,11 @@
 4. 坐标：按各节点的"估算尺寸"分配间距——列宽取该列最宽层、行高取该行最高层，
    因此不同大小的节点也不会重叠（可用 no_overlaps() 客观校验）。
 
-尺寸默认按"标题/端口/参数文字宽度 + 行数"估算（中文按宽字符计）；编辑器也可注入
-基于 DearPyGui 实测尺寸的 size_fn 以更精确。
+尺寸默认按"标题/端口/参数文字宽度 + 行数"估算（中文按宽字符计；常量须与 vendor/litegraph.js 对齐）；
+布局函数仍保留可选 size_fn 形参，以便将来注入实测尺寸。
+
+注：网页编辑器用 mainline_layout（主线横向铺开）；layered_layout/needs_layout 是早期 DPG 编辑器
+用的分层布局，DPG 编辑器移除后当前未被调用，暂留作通用工具/参考。
 """
 from __future__ import annotations
 
