@@ -33,7 +33,8 @@ class Occlusion(DataNode):
         data_out("clear", DataType.BOOL, label="未遮挡",
                  help="区域干净、可放心识别（= 既非遮挡也非渐变）。三态里的“正常”态。"),
         data_out("confidence", DataType.NUMBER, label="置信度",
-                 help="与“遮挡模板”的匹配分(0~1)：越高越像被遮挡。用于判定 遮挡/渐变/未遮挡 三态的分界。"),
+                 help="与“遮挡模板”的匹配分(0~1)：越高越像被遮挡。≥完全遮挡阈值=遮挡、<渐变下限阈值=未遮挡；"
+                      "落在中间“灰区”时再结合“画面变化”分辨渐变/未遮挡。"),
         data_out("state", DataType.STRING, label="状态",
                  help="给人看的状态文字：完全遮挡 / 未遮挡 / 渐变中，灰区里可能带“(画面在动 Δ…)”或“(灰区静止)”。仅展示、不参与判断。"),
     ]
@@ -89,7 +90,7 @@ class Occlusion(DataNode):
         m_thr = self.values["match_threshold"]
         t_thr = self.values["transition_threshold"]
         eps = self.values["motion_eps"]
-        hyst = self.values.get("hysteresis", 0.0) or 0.0
+        hyst = self.values["hysteresis"]
 
         # 遮挡判定带滞回：未遮挡→遮挡需 conf≥阈值；已遮挡→需掉到 阈值−滞回 才解除，防边界横跳。
         enter = m_thr if not self._was_blocked else (m_thr - hyst)
