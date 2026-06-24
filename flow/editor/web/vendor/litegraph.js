@@ -6720,6 +6720,7 @@ LGraphNode.prototype.executeAction = function(action)
         var now = LiteGraph.getTime();
         e.click_time = now - this.last_mouseclick;
         this.last_mouse_dragging = false;
+		var _down_click_position = this.last_click_position;   // 本项目改动:先存按下位置,原代码紧接着置 null;下面判“空白点击 vs 平移”要用
 		this.last_click_position = null;
 
 		if(this.block_click)
@@ -6942,9 +6943,10 @@ LGraphNode.prototype.executeAction = function(action)
 
                 // 只有“空白处真·点击(几乎没移动)”才取消选中；空白处拖动=平移画布，哪怕很短也保留选中(本项目改动)。
                 // 原判据仅 click_time<300(按住时长)，短促的平移会被误判成点击→取消选中。改为同时要求指针位移很小。
-                var _clickMoved = this.last_click_position
-                    ? (Math.abs(e.clientX - this.last_click_position[0]) + Math.abs(e.clientY - this.last_click_position[1]))
-                    : 0;
+                // 注意要用上面提前存好的 _down_click_position（this.last_click_position 此时已被置 null）；位移用屏幕坐标(clientX/Y)算。
+                var _clickMoved = _down_click_position
+                    ? (Math.abs(e.clientX - _down_click_position[0]) + Math.abs(e.clientY - _down_click_position[1]))
+                    : 999;   // 没有按下位置记录 → 当作“移动过”，不取消选中（宁可保留也别误清）
                 if (!node && e.click_time < 300 && _clickMoved < 6) {
                     this.deselectAllNodes();
                 }
