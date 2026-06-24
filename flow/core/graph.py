@@ -61,6 +61,9 @@ class Graph:
         self.groupexpose: list = []
         # 参数自定义显示名：{ "node_id|param_key": "名" }。控制面板置顶与折叠箱体“暴露给所在组”共用同一名字。仅编辑器展示。
         self.labels: dict = {}
+        # 游戏内覆盖层要显示的参数子集：[ [node_id, param_key], ... ]。开关(布尔)可在覆盖层直接点切，
+        # 其它(数值/文本)只读显示当前值。空＝覆盖层回退“显示所有置顶的开关项”（向后兼容旧流程）。仅展示，不参与执行。
+        self.overlaypanel: list = []
 
     # ==================== 构建 ====================
     def add(self, node_id: str, node: Node, pos: tuple[float, float] = (0.0, 0.0)) -> Node:
@@ -113,6 +116,7 @@ class Graph:
             **({"foldparams": [list(x) for x in self.foldparams]} if self.foldparams else {}),
             **({"groupexpose": [list(x) for x in self.groupexpose]} if self.groupexpose else {}),
             **({"labels": dict(self.labels)} if self.labels else {}),
+            **({"overlaypanel": [list(x) for x in self.overlaypanel]} if self.overlaypanel else {}),
             "nodes": [
                 {
                     "id": node_id,
@@ -136,6 +140,7 @@ class Graph:
         g.foldparams = [list(x) for x in data.get("foldparams", [])]
         g.groupexpose = [list(x) for x in data.get("groupexpose", [])]
         g.labels = dict(data.get("labels", {}) or {})
+        g.overlaypanel = [list(x) for x in data.get("overlaypanel", [])]
         for nd in data.get("nodes", []):
             node = create_node(nd["type"])
             # 仅写入已声明的参数，忽略多余键，缺失键保留默认

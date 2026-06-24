@@ -35,6 +35,10 @@
   .chip .v { font-weight: 700; }
   .chip .v.on  { color: #7bf0a2; }
   .chip .v.off { color: #ff9a9a; }
+  /* 只读项（数值/文本/非开关布尔）：中性描边、不可点，右侧显示当前值（数字等宽对齐） */
+  .chip.val { cursor: default; border-color: rgba(255,255,255,0.16); background: rgba(255,255,255,0.05); }
+  .chip.val:hover { background: rgba(255,255,255,0.05); }
+  .chip .nv { font-weight: 700; color: #cfe3ff; font-variant-numeric: tabular-nums; }
 
   /* 弹信息：运行中值得提醒的事件（自动关开关/输入屏蔽失败/命中断点/已暂停）——按级别上色、脉冲，醒目瞬时弹出 */
   #alert { display: none; align-items: center; padding: 1px 9px; border-radius: 6px; font-size: 12px; font-weight: 700;
@@ -73,14 +77,23 @@
   function render(d) {
     let html = "";
     for (const it of (d.items || [])) {
-      const on = (it.value === true || it.value === "true" || it.value === 1);
-      switchState[it.id] = on;
-      html += "<span class='chip " + (on ? "on" : "off") + "' data-id='" + esc(it.id) + "' title='点击切换'>" +
-              "<span class='k'>" + esc(it.label) + "</span>" +
-              "<span class='v " + (on ? "on" : "off") + "'>" + (on ? "开" : "关") + "</span></span>";
+      if (it.kind === "bool" && it.editable) {     // 开关：可点切（绿/红）
+        const on = (it.value === true || it.value === "true" || it.value === 1);
+        switchState[it.id] = on;
+        html += "<span class='chip " + (on ? "on" : "off") + "' data-edit='1' data-id='" + esc(it.id) + "' title='点击切换'>" +
+                "<span class='k'>" + esc(it.label) + "</span>" +
+                "<span class='v " + (on ? "on" : "off") + "'>" + (on ? "开" : "关") + "</span></span>";
+      } else {                                      // 只读：数值/文本/非开关布尔——显示标签+当前值，不可点
+        let vtext;
+        if (it.kind === "bool") vtext = (it.value === true || it.value === 1) ? "开" : "关";
+        else vtext = String(it.value == null ? "" : it.value);
+        html += "<span class='chip val' title='只读显示'>" +
+                "<span class='k'>" + esc(it.label) + "</span>" +
+                "<span class='nv'>" + esc(vtext) + "</span></span>";
+      }
     }
     document.getElementById("chips").innerHTML =
-      html || "<span class='chip' style='cursor:default;border:0;background:none'><span class='k'>（未选择要显示的开关）</span></span>";
+      html || "<span class='chip' style='cursor:default;border:0;background:none'><span class='k'>（未选择要显示的项：编辑器里勾“显示到覆盖层”）</span></span>";
     setRunBtn(d);
     // 弹信息：新的 WARN/ERROR 运行事件（如“未检测到市场→已关闭出商人”）→ 醒目瞬时弹出 4.5s
     if (d.notice && d.notice.id && d.notice.id !== lastNoticeId) {
@@ -143,7 +156,7 @@
     if (v) { v.textContent = on ? "开" : "关"; v.className = "v " + (on ? "on" : "off"); }
   }
   document.getElementById("chips").addEventListener("click", (e) => {
-    const chip = e.target.closest(".chip[data-id]"); if (!chip) return;
+    const chip = e.target.closest(".chip[data-edit]"); if (!chip) return;   // 只有开关项可点切，只读项不响应
     const id = chip.dataset.id, on = !switchState[id];
     switchState[id] = on; applyChipUI(chip, on);
     try { api().overlay_set_switch(id, on); } catch (err) {}

@@ -22,6 +22,8 @@ const ED = (function () {
   // 一个参数要出现在第 N 层组的折叠箱体里，必须从拥有它的节点起、沿途每一层组都勾选了向上暴露（见 interfaceParams）。
   let foldPins = [];
   let groupExpose = [];
+  // “显示到游戏覆盖层”的参数子集：[[nodeId,paramKey]]（随流程保存 overlaypanel 字段）。空＝覆盖层回退显示所有置顶开关。
+  let overlayPins = [];
   // 参数自定义显示名的【唯一权威存储】（键= nodeId|key）：控制面板置顶 与 “暴露给所在组”折叠箱体 共用同一个名字。
   // 与是否置顶无关——只要填了两处都用；随流程保存(labels 字段)、撤销/重做、取消勾选都不丢；清空文本即删除、回落默认名。
   let pinLabels = {};
@@ -1680,9 +1682,10 @@ const ED = (function () {
         return o;
       }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const foldparams = (c.foldparams || []).slice().sort((a, b) => ((a + "") < (b + "") ? -1 : 1));
+      const overlaypanel = (c.overlaypanel || []).map((e) => e.join("|")).sort();   // 覆盖层子集纳入签名（顺序无关）
       const groupexpose = (c.groupexpose || []).map((e) => e.join("|")).sort();
       const labels = {}; Object.keys(c.labels || {}).sort().forEach((k) => { labels[k] = c.labels[k]; });   // 键排序，使签名稳定
-      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, labels, groups, foldparams, groupexpose, nodes, edges });
+      return JSON.stringify({ name: c.name, description: c.description, panel: c.panel, labels, groups, foldparams, groupexpose, overlaypanel, nodes, edges });
     } catch (e) { return null; }
   }
   function markSaved() {         // 保存/载入后：把“当前”设为基线，清除所有标记
@@ -1801,6 +1804,10 @@ const ED = (function () {
     const baseF = new Set((savedBaseline.foldparams || []).map(fKey)), curF = new Set((cur.foldparams || []).map(fKey));
     for (const k of curF) if (!baseF.has(k)) { const [id, key] = splitK(k); push(`＋ 暴露给组：${pkName(id, key)}`); }
     for (const k of baseF) if (!curF.has(k)) { const [id, key] = splitK(k); push(`－ 取消暴露：${pkName(id, key)}`); }
+    // 显示到游戏覆盖层的参数子集
+    const baseO = new Set((savedBaseline.overlaypanel || []).map(fKey)), curO = new Set((cur.overlaypanel || []).map(fKey));
+    for (const k of curO) if (!baseO.has(k)) { const [id, key] = splitK(k); push(`＋ 显示到覆盖层：${pkName(id, key)}`); }
+    for (const k of baseO) if (!curO.has(k)) { const [id, key] = splitK(k); push(`－ 取消覆盖层显示：${pkName(id, key)}`); }
     const geSig = (a) => JSON.stringify([...(a || [])].map((x) => x.join("|")).sort());
     if (geSig(cur.groupexpose) !== geSig(savedBaseline.groupexpose)) push("◇ 组的“向上暴露”设置已修改");
     // 分组：逐个列出改了什么
@@ -2073,6 +2080,7 @@ const ED = (function () {
     const panel = panelPins.filter(([nid]) => graph._nodes.some((n) => n._id === nid));
     const ids = new Set(graph._nodes.map((n) => n._id));
     const foldparams = foldPins.filter(([nid]) => ids.has(nid)).map((p) => p.slice(0, 2));
+    const overlaypanel = overlayPins.filter(([nid]) => ids.has(nid)).map((p) => p.slice(0, 2));
     const gset = new Set(groupDefs.map((g) => g.id));
     const groupexpose = groupExpose.filter(([gid, nid]) => ids.has(nid) && gset.has(gid)).map((e) => e.slice(0, 3));
     // 自定义显示名（权威存储，含未置顶但已暴露给组的）：随流程保存，面板/折叠箱体共用。
@@ -2084,7 +2092,7 @@ const ED = (function () {
     // 支持空组：保留所有组（含空组），随流程存盘；pos/size 用于空组兜底定位（有成员时由包围盒每帧刷新）。
     const groups = groupDefs
       .map((g) => ({ id: g.id, title: g.title, color: g.color, collapsed: !!g.collapsed, parent: g.parent || null, members: (g.members || []).filter((m) => ids.has(m)), pos: g.pos || null, size: g.size || null, desc: g.desc || "" }));
-    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, groupexpose, labels, nodes, edges };
+    return { name: flowMeta.name || "未命名流程", description: flowMeta.desc || "", panel, groups, foldparams, groupexpose, overlaypanel, labels, nodes, edges };
   }
 
   // 操作提示走底部居中的临时浮层（toast），与工具栏的“文件信息”分开、互不覆盖；几秒后淡出。
@@ -2144,6 +2152,7 @@ const ED = (function () {
     if (flow.labels && typeof flow.labels === "object") for (const k in flow.labels) if (flow.labels[k]) pinLabels[k] = String(flow.labels[k]);
     for (const p of panelPins) if (p[2] && !pinLabels[p[0] + "|" + p[1]]) pinLabels[p[0] + "|" + p[1]] = p[2];
     foldPins = Array.isArray(flow.foldparams) ? flow.foldparams.map((x) => x.slice(0, 2)) : [];   // 节点暴露给所在组的参数
+    overlayPins = Array.isArray(flow.overlaypanel) ? flow.overlaypanel.map((x) => x.slice(0, 2)) : [];   // 显示到游戏覆盖层的参数子集
     groupExpose = Array.isArray(flow.groupexpose) ? flow.groupexpose.map((x) => x.slice(0, 3)) : [];   // 组再向上一级暴露的参数
     groupDefs = Array.isArray(flow.groups) ? normalizeGroups(flow.groups) : [];   // 补 id/parent，旧格式自动迁移成容器树
     selectedGroupId = null;   // 新流程：清除组选中
@@ -2233,6 +2242,16 @@ const ED = (function () {
     scheduleSnap(); refreshDirty();
     if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
     if (selectedGroupId) showGroupHelp(groupById(selectedGroupId));
+  }
+  // “显示到游戏覆盖层”：第三维勾选——勾上的参数会出现在游戏内覆盖层开关条上（开关可点切，数值/文本只读显示当前值）。
+  // 独立于“置顶到控制面板”：不必置顶也能上覆盖层。全流程一个都没勾时，覆盖层回退显示所有置顶开关（向后兼容）。
+  function isOverlayPinned(nid, key) { return overlayPins.some((p) => p[0] === nid && p[1] === key); }
+  function toggleOverlayPin(nid, key) {
+    const i = overlayPins.findIndex((p) => p[0] === nid && p[1] === key);
+    if (i >= 0) overlayPins.splice(i, 1); else overlayPins.push([nid, key]);
+    try { api().set_run_payload(collect()); } catch (e) {}   // 实时登记 → 覆盖层下次轮询即按新子集显示
+    scheduleSnap(); refreshDirty();
+    if (selectedNode) showNodeHelp(selectedNode);   // 同步说明里勾选框状态
   }
   // 组把“已暴露进它接口”的某参数再向上暴露给父组（逐级封装）。
   function isGroupExposed(gid, nid, key) { return groupExpose.some((e) => e[0] === gid && e[1] === nid && e[2] === key); }
@@ -3675,23 +3694,25 @@ const ED = (function () {
     // 显示到 控制面板 / 折叠节点：两列勾选——左=置顶到顶部面板；右=折叠该参数所属分组后在折叠箱体里显示可编辑控件。
     const pinnable = (d.params || []);
     if (pinnable.length) {
-      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>左：置顶到顶部控制面板 ｜ 右：把该参数暴露给所在组（折叠该组后在组里可直接编辑；要再往上层显示需在组里继续勾选）。勾选任一后可填“显示名”，面板与折叠箱体共用同一个名字。</div>";
+      let b = "<div style='color:#7f8895;margin-bottom:4px;font-size:12px'>勾选：①置顶到顶部控制面板 ②暴露给所在组（折叠该组后在组里可直接编辑；要再往上层显示需在组里继续勾选） ③显示到游戏覆盖层（开关可在游戏里点切、数值/文本只读显示）。任一勾选后可填“显示名”，三处共用同一个名字。</div>";
       for (const p of pinnable) {
-        const pinned = isPinned(node._id, p.key), fpinned = isFoldPinned(node._id, p.key);
+        const pinned = isPinned(node._id, p.key), fpinned = isFoldPinned(node._id, p.key), opinned = isOverlayPinned(node._id, p.key);
         b += `<div style="margin-top:3px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">` +
              `<label style="cursor:pointer;color:#aeb6c2;flex:1 1 120px;min-width:120px">` +
              `<input type="checkbox" data-pin="${esc(p.key)}" ${pinned ? "checked" : ""}> ${esc(p.label)}</label>` +
              `<label style="cursor:pointer;color:#8fb6e0;white-space:nowrap" title="把该参数暴露给它所在的分组：折叠该组后在组里显示这个可编辑控件（需先把节点加入分组）。逐级封装：要再往上一层显示，在那个组的详情里继续勾选。">` +
-             `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 暴露给所在组</label>`;
-        if (pinned || fpinned) {   // 置顶或暴露给组任一勾选都显示“显示名”输入——两处共用同一个名字
+             `<input type="checkbox" data-foldpin="${esc(p.key)}" ${fpinned ? "checked" : ""}> 暴露给所在组</label>` +
+             `<label style="cursor:pointer;color:#9ad6a8;white-space:nowrap" title="显示到游戏内覆盖层开关条：开关可在游戏里直接点切，数值/文本只读显示当前值。全流程一个都没勾时，覆盖层回退显示所有置顶的开关。">` +
+             `<input type="checkbox" data-ovpin="${esc(p.key)}" ${opinned ? "checked" : ""}> 覆盖层</label>`;
+        if (pinned || fpinned || opinned) {   // 三处任一勾选都显示“显示名”输入——共用同一个名字
           const cur = customLabel(node._id, p.key);
           b += `<input type="text" data-pinlabel="${esc(p.key)}" value="${esc(cur)}" ` +
-               `placeholder="${esc(defaultPinLabel(node, p.key))}" title="显示名：控制面板与“暴露给所在组”折叠箱体共用同一个名字（留空＝用默认）" ` +
+               `placeholder="${esc(defaultPinLabel(node, p.key))}" title="显示名：控制面板 / 折叠箱体 / 覆盖层 共用同一个名字（留空＝用默认）" ` +
                `style="flex-basis:100%;background:#15171c;color:#cfd3da;border:1px solid #444;border-radius:3px;font-size:12px;padding:1px 4px">`;
         }
         b += `</div>`;
       }
-      html += section("pin", "显示到 控制面板 / 暴露给所在组", b, null);
+      html += section("pin", "显示到 控制面板 / 所在组 / 覆盖层", b, null);
     }
     helpEl.innerHTML = html;
     helpEl.querySelectorAll("details[data-sec]").forEach((dt) => {
@@ -3702,6 +3723,9 @@ const ED = (function () {
     });
     helpEl.querySelectorAll("[data-foldpin]").forEach((cb) => {
       cb.onchange = () => toggleFoldPin(node._id, cb.getAttribute("data-foldpin"));
+    });
+    helpEl.querySelectorAll("[data-ovpin]").forEach((cb) => {
+      cb.onchange = () => toggleOverlayPin(node._id, cb.getAttribute("data-ovpin"));
     });
     helpEl.querySelectorAll("[data-pinlabel]").forEach((inp) => {
       inp.onchange = () => setPinLabel(node._id, inp.getAttribute("data-pinlabel"), inp.value);
@@ -4235,6 +4259,7 @@ const ED = (function () {
     if (data.labels && typeof data.labels === "object") for (const k in data.labels) if (data.labels[k]) pinLabels[k] = String(data.labels[k]);
     for (const p of panelPins) if (p[2] && !pinLabels[p[0] + "|" + p[1]]) pinLabels[p[0] + "|" + p[1]] = p[2];
     foldPins = Array.isArray(data.foldparams) ? data.foldparams.map((x) => x.slice(0, 2)) : [];   // 暴露给所在组的参数随撤销/重做恢复
+    overlayPins = Array.isArray(data.overlaypanel) ? data.overlaypanel.map((x) => x.slice(0, 2)) : [];   // 覆盖层子集随撤销/重做恢复
     groupExpose = Array.isArray(data.groupexpose) ? data.groupexpose.map((x) => x.slice(0, 3)) : [];   // 组向上暴露随撤销/重做恢复
     groupDefs = Array.isArray(data.groups) ? normalizeGroups(data.groups) : [];   // 分组（含 id/parent/折叠态）随撤销/重做恢复
     refreshFold();

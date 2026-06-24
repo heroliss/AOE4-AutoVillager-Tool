@@ -264,6 +264,7 @@ def graph_to_payload(graph: Graph) -> dict:
             "foldparams": [list(x) for x in getattr(graph, "foldparams", [])],
             "groupexpose": [list(x) for x in getattr(graph, "groupexpose", [])],
             "labels": dict(getattr(graph, "labels", {}) or {}),
+            "overlaypanel": [list(x) for x in getattr(graph, "overlaypanel", [])],
             "nodes": nodes, "edges": edges}
 
 
@@ -287,6 +288,8 @@ def payload_to_graph(payload: dict) -> Graph:
     g.panel = [list(p) for p in payload.get("panel", []) if len(p) >= 2 and p[0] in g.nodes]
     # “显示到折叠节点”的参数：仅保留指向现存节点的 [node_id, key]
     g.foldparams = [list(p)[:2] for p in payload.get("foldparams", []) if len(p) >= 2 and p[0] in g.nodes]
+    # “显示到游戏覆盖层”的参数子集：仅保留指向现存节点的 [node_id, key]
+    g.overlaypanel = [list(p)[:2] for p in payload.get("overlaypanel", []) if len(p) >= 2 and p[0] in g.nodes]
     # 组“再向上一级暴露”的参数 [group_id, node_id, key]：仅保留指向现存节点的
     g.groupexpose = [list(p)[:3] for p in payload.get("groupexpose", []) if len(p) >= 3 and p[1] in g.nodes]
     # 参数自定义显示名 {"node_id|key": "名"}：仅保留指向现存节点的（面板/折叠箱体共用）
@@ -1044,23 +1047,48 @@ class Api:
         self._form_invoke(getattr(win, "native", None), _do)
         return {"x": x, "y": y}
 
+    def _overlay_item_label(self, g, nid, key):
+        """覆盖层项显示名：优先用户自定义名(labels，与面板/折叠箱体同源)，否则回退面板内联名，再否则参数键。"""
+        lab = (getattr(g, "labels", {}) or {}).get(nid + "|" + key)
+        if lab:
+            return str(lab)
+        for row in getattr(g, "panel", []):
+            if len(row) >= 3 and row[0] == nid and row[1] == key and row[2]:
+                return str(row[2])
+        return key
+
     def overlay_data(self):
         """覆盖层轮询：要显示的面板项 + 运行态 + 弹信息(命中断点/自动改写开关) + 几何(供前端自适应/钳制)。
-        当前只显示开关(bool)项——即出村民/出乡骑/出商人三个开关；子集自选下一步做。"""
+        显示子集由流程的 overlaypanel 决定（编辑器里逐参数勾“显示到覆盖层”）；开关(布尔)可点切，数值/文本只读显示。
+        overlaypanel 为空 → 回退“显示所有置顶到控制面板的开关项”（向后兼容旧流程，保持原来三开关的行为）。"""
         g = self._run_graph or self._graph
         items = []
         if g is not None:
-            for row in getattr(g, "panel", []):
-                if len(row) < 2:
+            sel = [list(p) for p in getattr(g, "overlaypanel", []) if len(p) >= 2]
+            if not sel:   # 未自选 → 回退：所有置顶开关项
+                for row in getattr(g, "panel", []):
+                    if len(row) >= 2 and getattr(g.nodes.get(row[0]), "type_id", "") == "data.switch":
+                        sel.append([row[0], row[1]])
+            seen = set()
+            for nid, key in sel:
+                if (nid, key) in seen:
                     continue
-                nid, key = row[0], row[1]
+                seen.add((nid, key))
                 node = g.nodes.get(nid)
                 if node is None:
                     continue
-                if node.type_id != "data.switch":   # 暂时只上生产开关(出村民/出乡骑/出商人)，排除 HDR 等其它布尔项
-                    continue
-                items.append({"id": nid, "label": (row[2] if len(row) > 2 else key),
-                              "value": bool(node.values.get(key)), "kind": "bool"})
+                val = node.values.get(key)
+                if getattr(node, "type_id", "") == "data.switch":
+                    kind, out = "bool", bool(val)
+                elif isinstance(val, bool):
+                    kind, out = "bool", val
+                elif isinstance(val, (int, float)):
+                    kind, out = "num", val
+                else:
+                    kind, out = "text", ("" if val is None else str(val))
+                items.append({"id": nid, "key": key, "label": self._overlay_item_label(g, nid, key),
+                              "value": out, "kind": kind,
+                              "editable": (kind == "bool" and getattr(node, "type_id", "") == "data.switch")})
         alive = bool(self._run_thread and self._run_thread.is_alive())
         with self._snap_lock:
             paused = alive and self._run_paused   # 没在跑时 _run_paused 恒为 True，别误报「已暂停」
