@@ -6940,7 +6940,12 @@ LGraphNode.prototype.executeAction = function(action)
                     this.visible_nodes
                 );
 
-                if (!node && e.click_time < 300) {
+                // 只有“空白处真·点击(几乎没移动)”才取消选中；空白处拖动=平移画布，哪怕很短也保留选中(本项目改动)。
+                // 原判据仅 click_time<300(按住时长)，短促的平移会被误判成点击→取消选中。改为同时要求指针位移很小。
+                var _clickMoved = this.last_click_position
+                    ? (Math.abs(e.clientX - this.last_click_position[0]) + Math.abs(e.clientY - this.last_click_position[1]))
+                    : 0;
+                if (!node && e.click_time < 300 && _clickMoved < 6) {
                     this.deselectAllNodes();
                 }
 
