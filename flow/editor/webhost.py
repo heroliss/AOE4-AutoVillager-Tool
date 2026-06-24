@@ -1059,19 +1059,12 @@ class Api:
         return "text", ("" if val is None else str(val)), False
 
     @staticmethod
-    def _overlay_select(sel, panel, is_switch):
-        """选出要显示的 (nid,key) 列表：优先流程自选的 overlaypanel；为空则回退“所有开关型面板项”。
-        is_switch(nid) 判断某节点是否 data.switch（图/字典两种来源各自实现）。"""
-        out = [list(p)[:2] for p in (sel or []) if len(p) >= 2]
-        if not out:
-            for row in (panel or []):
-                if len(row) >= 2 and is_switch(row[0]):
-                    out.append([row[0], row[1]])
-        return out
+    def _overlay_select(sel):
+        """要显示的 (nid,key) 列表＝流程自选的 overlaypanel（无自选＝空，覆盖层只剩启动按钮，不再回退所有开关）。"""
+        return [list(p)[:2] for p in (sel or []) if len(p) >= 2]
 
     def _overlay_items_from_graph(self, g):
-        sel = self._overlay_select(getattr(g, "overlaypanel", []), getattr(g, "panel", []),
-                                   lambda nid: getattr(g.nodes.get(nid), "type_id", "") == "data.switch")
+        sel = self._overlay_select(getattr(g, "overlaypanel", []))
         items, seen = [], set()
         for nid, key in sel:
             if (nid, key) in seen:
@@ -1100,8 +1093,7 @@ class Api:
                     return str(row[2])
             return key
 
-        sel = self._overlay_select(payload.get("overlaypanel", []), panel,
-                                   lambda nid: (nodes.get(nid) or {}).get("type") == "data.switch")
+        sel = self._overlay_select(payload.get("overlaypanel", []))
         items, seen = [], set()
         for nid, key in sel:
             if (nid, key) in seen:
@@ -1130,7 +1122,7 @@ class Api:
         显示子集由流程的 overlaypanel 决定（控制面板里点该项的 📺）；开关(布尔)可点切，数值/文本只读显示。
         数据源：运行中→运行图(引擎权威的实时值，含自动改写的开关)；未运行→编辑器实时上报的 collect() payload
         (所以编辑期点 📺 / 改值会立刻反映到覆盖层)；都没有→已加载图兜底。
-        overlaypanel 为空 → 回退“显示所有开关型面板项”（向后兼容旧流程，保持原来三开关的行为）。"""
+        overlaypanel 为空＝不显示任何项（覆盖层只剩启动按钮）；要显示就在控制面板点该项的 📺。"""
         alive = bool(self._run_thread and self._run_thread.is_alive())
         if alive and self._run_graph is not None:
             items = self._overlay_items_from_graph(self._run_graph)

@@ -211,6 +211,16 @@
       ]
     }
   ],
+  "overlaypanel": [
+    [
+      "sw_vill",
+      "on"
+    ],
+    [
+      "sw_cart",
+      "on"
+    ]
+  ],
   "nodes": [
     {
       "id": "tick",

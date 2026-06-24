@@ -92,8 +92,7 @@
                 "<span class='nv'>" + esc(vtext) + "</span></span>";
       }
     }
-    document.getElementById("chips").innerHTML =
-      html || "<span class='chip' style='cursor:default;border:0;background:none'><span class='k'>（未选择要显示的项：编辑器里勾“显示到覆盖层”）</span></span>";
+    document.getElementById("chips").innerHTML = html;   // 没有选中项＝不显示任何芯片（覆盖层只剩启动按钮+工具）
     setRunBtn(d);
     // 弹信息：新的 WARN/ERROR 运行事件（如“未检测到市场→已关闭出商人”）→ 醒目瞬时弹出 4.5s
     if (d.notice && d.notice.id && d.notice.id !== lastNoticeId) {
