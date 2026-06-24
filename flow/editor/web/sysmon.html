@@ -154,8 +154,9 @@
     let s = null;
     try { s = await api().sys_stats(); } catch (e) {}
     if (s && s.ok) {
-      if (s.glass === false) {   // WebView2 透明不可用 → 套不透明深色底兜底（防白底），与其它玻璃窗一致
-        document.documentElement.style.background = "#0f1217"; document.body.style.background = "#0f1217";
+      {   // 透明不可用/强制不透明 → 深色底兜底（防白底）；否则恢复透明（使开关可双向切换），与其它玻璃窗一致
+        const bg = (s.glass === false) ? "#0f1217" : "transparent";
+        document.documentElement.style.background = bg; document.body.style.background = bg;
       }
       last = s;
       const c = cap();

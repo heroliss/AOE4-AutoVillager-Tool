@@ -109,7 +109,10 @@
     if (d.glass === false) {
       document.documentElement.style.background = "#1b1f27";
       document.body.style.background = "#1b1f27";
-      if (!glassHintShown) { glassHintShown = true; flashAlert("覆盖层已用深色（WebView2 运行时旧/缺，更新可恢复玻璃）", "info", 7000); }
+      if (!glassHintShown) { glassHintShown = true; flashAlert("覆盖层已用深色背景（透明不可用或已强制不透明）", "info", 7000); }
+    } else {   // 透明可用且未强制不透明 → 恢复透明玻璃（撤销上面的内联深色，使「强制不透明」开关可双向切换）
+      document.documentElement.style.background = "transparent";
+      document.body.style.background = "transparent";
     }
     fitToContent();
   }

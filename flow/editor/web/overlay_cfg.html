@@ -34,6 +34,11 @@
         <b data-f="2" onclick="setFrost(2)">重</b>
       </span>
     </div>
+    <div class="row" title="个别机器(显卡/合成/系统透明效果关闭)覆盖层会发白；勾上＝改用不透明深色背景，永不发白。本机记忆。">
+      <label style="width:auto">不透明</label>
+      <input id="op" type="checkbox" onchange="setOpaque(this.checked)">
+      <span style="color:#9aa3af;font-size:11px">覆盖层发白时勾这个</span>
+    </div>
   </div>
 <script>
   function api() { return (window.pywebview && window.pywebview.api) || null; }
@@ -41,6 +46,7 @@
   function setCa(v) { try { api().overlay_set_content(parseInt(v, 10)); } catch (e) {} }
   function markFrost(f) { document.querySelectorAll(".seg b[data-f]").forEach(b => b.classList.toggle("on", parseInt(b.dataset.f, 10) === f)); }
   function setFrost(f) { try { api().overlay_set_frost(f); } catch (e) {} markFrost(f); }
+  function setOpaque(on) { try { api().overlay_set_opaque(!!on); } catch (e) {} }
   function closeWin() { try { api().toggle_overlay_cfg(); } catch (e) {} }
 
   function init() {
@@ -51,6 +57,7 @@
       document.getElementById("bg").value = s.bg;
       document.getElementById("ct").value = s.content;
       markFrost(s.frost);
+      document.getElementById("op").checked = !!s.opaque;
     }).catch(() => {});
   }
   init();

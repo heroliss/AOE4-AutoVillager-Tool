@@ -117,10 +117,27 @@ def _webview2_version():
 
 
 @functools.lru_cache(maxsize=1)
+def _transparency_effects_on():
+    """Windows「透明效果」开关（设置→个性化→颜色）。关掉时系统亚克力/透明会失效，覆盖层易发白/无玻璃。
+    读不到时默认 True（不误伤）。"""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            v, _ = winreg.QueryValueEx(k, "EnableTransparency")
+            return int(v) != 0
+    except Exception:
+        return True
+
+
+@functools.lru_cache(maxsize=1)
 def _glass_ok():
-    """覆盖层「透明玻璃」是否大概率可用：WebView2 透明背景(DefaultBackgroundColor=透明)需 ≈Edge 90+ 运行时。
-    判不准时【fail-open=返回 True】——只在【确证】运行时缺失/过旧时才返回 False，以免误伤本来正常的机器。
-    返回 False → 覆盖层改用不透明深色背景兜底（绝不发白）。"""
+    """覆盖层「透明玻璃」是否大概率可用：① 系统「透明效果」开着 ② WebView2 透明背景需 ≈Edge 90+ 运行时。
+    判不准时【fail-open=返回 True】——只在【确证】透明效果关 / 运行时缺失或过旧时才返回 False，避免误伤正常机器。
+    返回 False → 覆盖层改用不透明深色背景兜底（绝不发白）。注意：GPU/合成等原因导致的失效检测不到——那种情况
+    用「强制不透明」开关兜底（overlay_set_opaque，per-machine 持久化）。"""
+    if not _transparency_effects_on():
+        return False                      # 系统透明效果关 → 玻璃/亚克力失效 → 深色兜底
     pv = _webview2_version()
     if not pv:
         return False                      # 运行时缺失（这种机器编辑器本身多半也异常）→ 深色兜底
@@ -411,6 +428,9 @@ class Api:
         self._overlay_bg_alpha = 20          # 覆盖层【背景】着色不透明度 0~255（毛玻璃 tint alpha；0=不着色纯靠模糊；默认20=很淡的一点着色）
         self._overlay_content_alpha = 100    # 覆盖层【内容】不透明度 30~100（文字等；与背景独立）
         self._overlay_frost = 1              # 毛度：0=无(透明渐变) 1=轻(模糊) 2=重(亚克力)；默认轻
+        # 强制不透明深色背景：解决【个别机器覆盖层发白】（WebView2 透明在某些 GPU/合成/透明效果关闭下失效）。
+        # 持久化到 %APPDATA%（per-machine），默认关=玻璃。开启后覆盖层走深色底（与自动检测同一条兜底路径）。
+        self._overlay_opaque = bool(user_settings.get_setting("overlay_opaque"))
         self._overlay_stop_hover = False     # 停止 hover 轮询线程标志
         self._overlay_hover_thread = None    # 光标 hover 轮询线程（自动切换穿透/可点击）
         self._closing = False                # 程序正在关闭：此后一律不再 BeginInvoke 原生窗体（防关闭崩溃）
@@ -477,7 +497,7 @@ class Api:
                 "sys_used_pct": round(vm.percent, 1),
                 "sys_avail": round(vm.available / 1048576.0, 1),
                 "ncpu": ncpu,
-                "glass": _glass_ok(),   # False → 监控玻璃窗同样套深色底兜底（防白条）
+                "glass": self._overlay_glass_on(),   # False → 监控玻璃窗同样套深色底兜底（防白条）
             }
         except Exception:
             return {"ok": False}
@@ -950,6 +970,20 @@ class Api:
         self._reglass_all()
         return True
 
+    def overlay_set_opaque(self, on):
+        """强制覆盖层用不透明深色背景（解决个别机器发白）。持久化到 %APPDATA%（per-machine）。
+        开=深色底（无视透明是否可用，CSS 直接铺底，绝不发白）；关=恢复玻璃（若该机透明可用）。"""
+        try:
+            self._overlay_opaque = bool(on)
+            user_settings.update_settings(overlay_opaque=self._overlay_opaque)
+            return True
+        except Exception:
+            return False
+
+    def _overlay_glass_on(self):
+        """覆盖层这帧到底走不走玻璃：自动检测可用【且】用户没强制不透明。任一不满足→前端套深色底兜底。"""
+        return _glass_ok() and not self._overlay_opaque
+
     # ---------- 覆盖层【设置】小窗：同款玻璃，放调背景/内容透明度/毛度/穿透（窄条太小放不下）----------
     # ⚠ 不每次 create/destroy——新建一个 WebView2 窗口要整段初始化(几百ms)，正是“弹出时闪烁卡顿”的原因。
     #   改为首次创建后只 hide/show 复用：第二次起瞬开、无闪烁。
@@ -970,7 +1004,7 @@ class Api:
         x = max(0, min(self._overlay_rect[0], self._overlay_screen[0] - 230))
         y = min(self._overlay_rect[1] + 34, self._overlay_screen[1] - 170)
         # easy_drag=False：否则拖滑杆时整窗也跟着被拖；只让标题栏(带 pywebview-drag-region)拖动。
-        kw = dict(width=224, height=176, x=x, y=y, js_api=self, on_top=True,
+        kw = dict(width=224, height=208, x=x, y=y, js_api=self, on_top=True,
                   frameless=True, easy_drag=False, transparent=True,
                   min_size=(120, 80), background_color="#0B0E14")
         try:
@@ -998,7 +1032,7 @@ class Api:
     def overlay_cfg_state(self):
         """设置窗读取当前值，初始化滑杆。"""
         return {"bg": self._overlay_bg_alpha, "content": self._overlay_content_alpha,
-                "frost": self._overlay_frost}
+                "frost": self._overlay_frost, "opaque": self._overlay_opaque}
 
     # ---------- 覆盖层【资源监控】小窗：同款玻璃，CPU/内存/曲线（复用 sys_stats）----------
     def toggle_overlay_mon(self):
@@ -1183,7 +1217,7 @@ class Api:
         return {"items": items, "running": alive and not paused, "paused": paused, "bp_hit": bp,
                 "notice": (self._overlay_notice if alive else None),
                 "bg_alpha": self._overlay_bg_alpha, "content_alpha": self._overlay_content_alpha,
-                "frost": self._overlay_frost, "glass": _glass_ok(),   # False → 前端套不透明深色底兜底（防白条）
+                "frost": self._overlay_frost, "glass": self._overlay_glass_on(),   # False → 前端套不透明深色底兜底（防白条）
                 "rect": list(self._overlay_rect), "screen": list(self._overlay_screen)}
 
     def open_url(self, url):
