@@ -141,6 +141,9 @@ def _setup_cpu_venv():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
+        line = line.split('#', 1)[0].strip()   # 去掉行内注释（如 "pywebview  # 说明"），否则整行喂给 pip 会报错
+        if not line:
+            continue
         pkg_name = line.split('==')[0].split('>=')[0].split('<=')[0].split('[')[0].strip().lower()
         if pkg_name not in skip_packages:
             install_list.append(line)
@@ -173,12 +176,13 @@ def _setup_cpu_venv():
 
 
 def _build_with_venv(venv_python, entry_script, exe_name, output_dir, console_mode,
-                     extra_datas=None, extra_hiddenimports=None, collect_pkgs=None):
+                     extra_datas=None, extra_hiddenimports=None, collect_pkgs=None, icon_path=None):
     """使用虚拟环境的 Python 执行 PyInstaller 打包。
 
     extra_datas: 追加的 datas 条目(spec 字符串，如网页前端目录)；
     extra_hiddenimports: 追加的隐藏导入(如 webview/clr)；
-    collect_pkgs: 用 collect_all 兜底收集的包名(如 webview/pythonnet，静态分析抓不全)。"""
+    collect_pkgs: 用 collect_all 兜底收集的包名(如 webview/pythonnet，静态分析抓不全)；
+    icon_path: exe 图标(.ico 或 .png；PyInstaller 配合 Pillow 会把 PNG 自动转 .ico)。"""
 
     pi_build_dir = os.path.join(BASE_DIR, "build", f"{exe_name}_build")
     runtime_hook_path = _create_runtime_hook()
@@ -223,6 +227,8 @@ def _build_with_venv(venv_python, entry_script, exe_name, output_dir, console_mo
             "    except Exception as _e:\n"
             "        print('collect_all 跳过', _pkg, _e)\n"
         )
+
+    icon_repr = repr(icon_path) if icon_path else 'None'
 
     spec_content = f'''# -*- mode: python ; coding: utf-8 -*-
 import os
@@ -284,7 +290,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon={icon_repr},
     uac_admin=True,
 )
 '''
@@ -502,8 +508,7 @@ def build_editor():
         entry_script="run_editor.py",
         exe_name="AOE4-FlowEditor",
         output_dir=editor_output_dir,
-        # 首次验证建议保留控制台(True)以便看 pywebview/资源路径报错；确认能正常打开编辑器后可改 False 走纯窗口。
-        console_mode=True,
+        console_mode=False,   # 纯窗口（pywebview 自带窗口，不需要控制台）。需排错时临时改 True 看报错。
         extra_datas=[
             "(os.path.join(base_dir, 'flow', 'editor', 'web'), os.path.join('flow', 'editor', 'web'))",
             "(os.path.join(base_dir, 'flows'), 'flows')",
@@ -512,6 +517,7 @@ def build_editor():
             'webview', 'webview.platforms.winforms', 'clr', 'proxy_tools', 'bottle',
         ],
         collect_pkgs=['webview', 'pythonnet'],
+        icon_path=os.path.join(BASE_DIR, "templates", "cunmin.png"),   # 用村民图标做 exe 图标(PNG→ico 由 PyInstaller+Pillow 转)
     )
 
 

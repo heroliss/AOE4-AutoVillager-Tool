@@ -27,6 +27,8 @@ python run_headless.py                    # 无界面直接跑 flows/combined.fl
 python run_headless.py --dry-run          # 只打日志、不真正发按键（安全演练）
 
 python selfcheck.py                       # 引擎自检 + 重新生成内置 flows/combined.flow.json
+
+python build.py --editor                  # 打包成 exe → build/aoe4_editor_cpu/AOE4-FlowEditor.exe（首次自动建临时 venv 装 CPU 依赖）
 ```
 
 - 编辑器需管理员权限做"输入屏蔽"；拒绝 UAC 也能编辑，仅屏蔽不生效。设 `AOE4_EDITOR_DEBUG=1` 可开 WebView2 开发者工具。
