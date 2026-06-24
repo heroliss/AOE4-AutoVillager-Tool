@@ -9684,65 +9684,12 @@ LGraphNode.prototype.executeAction = function(action)
         ) {
             //render arrow
             if (this.render_connection_arrows) {
-                //compute two points in the connection
-                var posA = this.computeConnectionPoint(
-                    a,
-                    b,
-                    0.25,
-                    start_dir,
-                    end_dir
-                );
-                var posB = this.computeConnectionPoint(
-                    a,
-                    b,
-                    0.26,
-                    start_dir,
-                    end_dir
-                );
-                var posC = this.computeConnectionPoint(
-                    a,
-                    b,
-                    0.75,
-                    start_dir,
-                    end_dir
-                );
-                var posD = this.computeConnectionPoint(
-                    a,
-                    b,
-                    0.76,
-                    start_dir,
-                    end_dir
-                );
-
-                //compute the angle between them so the arrow points in the right direction
-                var angleA = 0;
-                var angleB = 0;
-                if (this.render_curved_connections) {
-                    angleA = -Math.atan2(posB[0] - posA[0], posB[1] - posA[1]);
-                    angleB = -Math.atan2(posD[0] - posC[0], posD[1] - posC[1]);
-                } else {
-                    angleB = angleA = b[1] > a[1] ? 0 : Math.PI;
-                }
-
-                //render arrow
-                ctx.save();
-                ctx.translate(posA[0], posA[1]);
-                ctx.rotate(angleA);
-                ctx.beginPath();
-                ctx.moveTo(-5, -3);
-                ctx.lineTo(0, +7);
-                ctx.lineTo(+5, -3);
-                ctx.fill();
-                ctx.restore();
-                ctx.save();
-                ctx.translate(posC[0], posC[1]);
-                ctx.rotate(angleB);
-                ctx.beginPath();
-                ctx.moveTo(-5, -3);
-                ctx.lineTo(0, +7);
-                ctx.lineTo(+5, -3);
-                ctx.fill();
-                ctx.restore();
+                // 方向箭头：按固定弧长沿连线铺(长线多/短线少,至少 1 个) —— 见 LGraphCanvas.drawWireArrows。
+                // 替换原来固定 ¼/¾ 两个箭头：现在与“聚焦高亮线 / 汇入线”共用同一函数，数量与位置统一。
+                var _self = this;
+                LGraphCanvas.drawWireArrows(ctx, function (t) {
+                    return _self.computeConnectionPoint(a, b, t, start_dir, end_dir);
+                }, color);
             }
 
             //circle —— 连线中点的实心圆点：方向已用箭头表示，圆点冗余，去掉(本项目改动)
@@ -9768,6 +9715,33 @@ LGraphNode.prototype.executeAction = function(action)
                 ctx.fill();
             }
         }
+    };
+
+    // 沿连线“按固定弧长”铺方向箭头（本项目改动，统一 base / 聚焦高亮 / 汇入 三处的箭头）：
+    //   箭头【个数】由连线像素长度决定——长线多、短线少(至少 1 个)，整图密度恒定；
+    //   位置取每等分段的中点 → 短线=中点(1 个)、中线=¼·¾(2 个)，方向沿局部切向。
+    //   pointAt(t)：t∈[0,1] 采样曲线上的点（base 传 computeConnectionPoint，聚焦/汇入传各自带 bow 的贝塞尔）。
+    LGraphCanvas.drawWireArrows = function (ctx, pointAt, color, spacing) {
+        spacing = spacing || 70;
+        var N = 24, pts = [], i;
+        for (i = 0; i <= N; i++) pts.push(pointAt(i / N));
+        var acc = [0], L = 0;
+        for (i = 1; i <= N; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); acc.push(L); }
+        if (L < 4) return;
+        var count = Math.max(1, Math.round(L / spacing));
+        ctx.save(); ctx.fillStyle = color;
+        for (var k = 0; k < count; k++) {
+            var d = L * (k + 0.5) / count, j = 1;
+            while (j < N && acc[j] < d) j++;
+            var f = acc[j] > acc[j - 1] ? (d - acc[j - 1]) / (acc[j] - acc[j - 1]) : 0;
+            var px = pts[j - 1][0] + (pts[j][0] - pts[j - 1][0]) * f;
+            var py = pts[j - 1][1] + (pts[j][1] - pts[j - 1][1]) * f;
+            var ang = Math.atan2(pts[j][1] - pts[j - 1][1], pts[j][0] - pts[j - 1][0]);
+            ctx.save(); ctx.translate(px, py); ctx.rotate(ang);
+            ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
+            ctx.restore();
+        }
+        ctx.restore();
     };
 
     //returns the link center point based on curvature

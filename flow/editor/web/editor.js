@@ -1211,9 +1211,13 @@ const ED = (function () {
         if (!pa || !pb) return;
         const cc = linkCtrlPts([pa[0], pa[1]], [pb[0], pb[1]]);
         const bow = ((j % 2 === 0) ? 1 : -1) * (Math.floor(j / 2) + 1) * 24;   // 交错上下弯，错开各条线
-        ctx.strokeStyle = EXEC_FANIN_PAL[j % EXEC_FANIN_PAL.length]; ctx.lineWidth = 2.5;
+        const col = EXEC_FANIN_PAL[j % EXEC_FANIN_PAL.length];
+        ctx.strokeStyle = col; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
         ctx.bezierCurveTo(cc[0][0], cc[0][1] + bow, cc[1][0], cc[1][1] + bow, pb[0], pb[1]); ctx.stroke();
+        // 汇入线也铺同款方向箭头（沿带 bow 的同一贝塞尔），与 base/聚焦数量一致
+        const ac0 = [cc[0][0], cc[0][1] + bow], ac1 = [cc[1][0], cc[1][1] + bow];
+        LGraphCanvas.drawWireArrows(ctx, (t) => _bezAt([pa[0], pa[1]], ac0, ac1, [pb[0], pb[1]], t), col);
       });
     }
     ctx.restore();
@@ -2922,14 +2926,12 @@ const ED = (function () {
     const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
     return [a * p0[0] + b * c0[0] + c * c1[0] + d * p1[0], a * p0[1] + b * c0[1] + c * c1[1] + d * p1[1]];
   }
+  // 方向箭头：与 base 连线共用 LGraphCanvas.drawWireArrows（按固定弧长铺、长线多短线少），
+  // 沿“带 bow 偏移”的同一条贝塞尔取样 → 聚焦高亮线的箭头数量/位置与底层连线完全一致。
   function _drawDirArrow(ctx, pa, pb, color, bow) {
     const cc = linkCtrlPts(pa, pb), b = bow || 0;
     const c0 = [cc[0][0], cc[0][1] + b], c1 = [cc[1][0], cc[1][1] + b];   // 随汇入线的“交错弯曲”一起偏移，箭头才落在曲线上
-    const m = _bezAt(pa, c0, c1, pb, 0.5);
-    const a0 = _bezAt(pa, c0, c1, pb, 0.44), a1 = _bezAt(pa, c0, c1, pb, 0.56);
-    ctx.save(); ctx.translate(m[0], m[1]); ctx.rotate(Math.atan2(a1[1] - a0[1], a1[0] - a0[0]));
-    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill();
-    ctx.restore();
+    LGraphCanvas.drawWireArrows(ctx, (t) => _bezAt(pa, c0, c1, pb, t), color);
   }
   function drawLinkFocus(ctx) {
     if (!graph || runSession || foldHidden.size) return;   // 试运行交给运行可视化；折叠态连线走箱体端口，先不掺和
