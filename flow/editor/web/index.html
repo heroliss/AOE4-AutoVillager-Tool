@@ -44,6 +44,9 @@
   #profbtn.on:hover { background: #395681; }
   #prevbtn.on { background: #314a6b; border-color: #3f5f88; color: #cfe3ff; }
   #prevbtn.on:hover { background: #395681; }
+  /* 运行跟踪开关：与 ⏱耗时/🖼预览 同款——开启时蓝底高亮，运行时画布自动跟随结束节点 */
+  #trackbtn.on { background: #314a6b; border-color: #3f5f88; color: #cfe3ff; }
+  #trackbtn.on:hover { background: #395681; }
   /* 覆盖层按钮：与 ⏱耗时/🖼预览 同款——开启时蓝底高亮 */
   #overlaybtn.on { background: #314a6b; border-color: #3f5f88; color: #cfe3ff; }
   #overlaybtn.on:hover { background: #395681; }
@@ -184,6 +187,7 @@
     <button id="dryrunbtn" class="edit-only" onclick="ED.dryRun()" title="试运行（干跑）：只识别、不发送任何输入，用于调试核对">试运行</button>
     <button id="profbtn" onclick="ED.toggleProfile()" title="性能监控：运行时在每个节点叠加「本节点耗时 / 本帧累计耗时(ms)」，找出耗时大头">⏱ 耗时</button>
     <button id="prevbtn" onclick="ED.togglePreview()" title="截图预览：运行/试运行时在感知节点上显示「它实际截到的区域图」，用于核对截图范围对不对">🖼 预览</button>
+    <button id="trackbtn" onclick="ED.toggleTrack()" title="运行跟踪：开启后运行时画布自动平移跟随「最后激活(结束)的节点」，并尽量多容纳其左侧已激活节点(执行历史)，其次容纳更多未激活节点。缩放保持你自己设定的不变。">🎯 跟踪</button>
     <button id="overlaybtn" onclick="ED.toggleOverlay()" title="游戏内覆盖层：在游戏上方悬一条透明毛玻璃窄条，显示控制面板/状态/弹信息（可调透明度、可拖动、不挡主视野）">🎮 覆盖层</button>
     <span class="sep"></span>
     <button onclick="ED.autolayout()" title="自动排版：重新理顺布局（使用模式下也可用，但不保存，退出使用模式即还原）">自动排版</button>
@@ -193,6 +197,7 @@
     <button class="edit-only" onclick="ED.viewChanges()" title="查看当前所有未保存改动（同保存预览），可逐条恢复">📋 查看修改</button>
     <button onclick="ED.search()" title="图内搜索（Ctrl+F）：按文字找节点/分组并定位居中">🔍 搜索</button>
     <button onclick="ED.help()">帮助</button>
+    <button onclick="ED.copyAiGuide()" title="复制「给AI看的流程图编写指南」到剪贴板：含执行模型/JSON结构/实时节点目录/套路。整段粘给任意AI，它就能直接编辑 .flow.json 按你的需求改/建流程">📋 AI说明</button>
     <span class="sep"></span>
     <span id="flowmeta"></span>
     <span id="dirty"></span>

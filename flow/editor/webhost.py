@@ -1706,6 +1706,18 @@ class Api:
         """程序名 + 版本（前端用于窗口标题与工具栏版本号显示）。单一来源见根目录 version.py。"""
         return {"name": APP_NAME, "version": APP_VERSION}
 
+    def copy_ai_guide(self):
+        """生成「给 AI 看的流程图编写指南」并复制到系统剪贴板。
+        节点目录实时取自注册表(与代码一致)。后端复制失败时回传文本，由前端用 navigator.clipboard 兜底。"""
+        try:
+            from .ai_guide import build_ai_guide, copy_to_clipboard
+            from ..core.graph import SCHEMA_VERSION
+            text = build_ai_guide(node_defs(), SCHEMA_VERSION)
+            ok = copy_to_clipboard(text)
+            return {"ok": ok, "chars": len(text), "text": "" if ok else text}
+        except Exception as e:
+            return {"ok": False, "chars": 0, "text": "", "error": str(e)}
+
     @staticmethod
     def _flow_name(path):
         """只读出流程文件里的 name（中文流程名），失败则返回空串。"""

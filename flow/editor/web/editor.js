@@ -49,6 +49,9 @@ const ED = (function () {
   let breakpoints = new Set();                  // 试运行断点：命中(出现在执行路径)即暂停；会话级，不随流程保存
   let bpHitId = null;                           // 当前“因命中断点而暂停”停在的节点 ourId（用于醒目高亮+居中；继续/停止后清空）
   let runUntil = null;                          // “运行到此节点”一次性目标（命中即暂停并清除）
+  let trackOn = false;                          // 运行跟踪开关：运行时画布自动平移跟随「最后激活(结束)节点」(缩放不变，由用户自定)
+  let _trackLastEnd = null;                     // 上次已对位的结束节点 ourId（仅在它变化时重算目标，平时不抢用户的手动平移）
+  let _trackTween = null;                       // 平滑平移补间 {fromX,fromY,toX,toY,t0,dur}（在运行动画 rAF 里推进）
   let simpleMode = false;                       // 使用模式：画布只读（仅控制面板+运行+日志），面向“只想用”的用户
   let simpleEntrySig = null;                    // 进入使用模式时的图快照：退出时据此还原（使用模式里的拖动/调参不落盘）
   let _lastRunStatus = "";                       // 上一条“本轮结果/原因”状态，变化时才记日志，避免刷屏
@@ -2179,6 +2182,113 @@ const ED = (function () {
     canvas.setDirty(true, true);
   }
 
+  // ===== 运行跟踪：把画布【平移】到「最后激活(结束)节点」的最佳位置（缩放保持用户设定不变）=====
+  // 屏幕坐标 = (图坐标 + ds.offset) × ds.scale；故 offset = 屏幕/scale − 图坐标。
+  // 目标优先级：① 结束节点必须完整可见；② 尽量多容纳“左侧已激活”节点(执行历史)；③ 再尽量多容纳未激活节点。
+  const TRACK = { MARGIN: 36, MIN_MOVE: 22, DUR: 240, W_ACT: 100, W_OTHER: 1, TITLE: 22 };
+
+  // 某 ourId 的“可见框”(图坐标 {x,y,w,h})：折叠隐藏的成员→其所属折叠箱体框；否则→节点本体(并入标题条)。
+  function trackBoxOfId(id, fi) {
+    if (fi && foldHidden.has(id)) {
+      const bi = fi.memberGroup.get(id);
+      const e = (bi != null) && fi.boxes.find((x) => x.i === bi);
+      return e ? { x: e.box.x, y: e.box.y, w: e.box.w, h: e.box.h } : null;
+    }
+    const n = nodeByOurId(id); if (!n) return null;
+    return { x: n.pos[0], y: n.pos[1] - TRACK.TITLE, w: n.size[0], h: n.size[1] + TRACK.TITLE };
+  }
+
+  // 当前所有“可见项”的带权框：节点→在 runPath 里则记为已激活(高权重)；折叠组→任一成员激活即记激活，去重只计一次。
+  function trackVisibleBoxes(fi) {
+    const out = [], seen = new Set();
+    for (const n of (graph && graph._nodes) || []) {
+      const id = n._id;
+      if (fi && foldHidden.has(id)) {
+        const bi = fi.memberGroup.get(id);
+        if (bi == null || seen.has(bi)) continue;
+        seen.add(bi);
+        const e = fi.boxes.find((x) => x.i === bi); if (!e) continue;
+        const act = groupAllMembers(e.g).some((m) => runPath.has(m));
+        out.push({ a: e.box.x, b: e.box.x + e.box.w, ay: e.box.y, by: e.box.y + e.box.h, w_: act ? TRACK.W_ACT : TRACK.W_OTHER });
+      } else {
+        out.push({ a: n.pos[0], b: n.pos[0] + n.size[0], ay: n.pos[1] - TRACK.TITLE, by: n.pos[1] + n.size[1], w_: runPath.has(id) ? TRACK.W_ACT : TRACK.W_OTHER });
+      }
+    }
+    return out;
+  }
+
+  // 一维选窗：在可行起点区间 [lo,hi] 内，取使“窗口 [start,start+L] 覆盖项的权重和”最大的 start。
+  // 覆盖判定：项 [a,b] 与窗口相交 ⟺ a≤start+L 且 b≥start。平手时偏向 tie（更靠近期望位置）。
+  function trackBestStart(spans, L, lo, hi, tie, key0, key1) {
+    if (!(hi > lo)) return null;                 // 不可行（结束节点比视口还大）→ 调用方改为居中
+    const cl = (v) => Math.max(lo, Math.min(hi, v));
+    const C = new Set([lo, hi, cl(tie)]);
+    for (const s of spans) { C.add(cl(s[key0])); C.add(cl(s[key1] - L)); C.add(cl(s[key0] - L)); C.add(cl(s[key1])); }
+    let best = -Infinity, bestSt = cl(tie);
+    for (const st of C) {
+      let sc = 0;
+      for (const s of spans) if (s[key0] <= st + L && s[key1] >= st) sc += s.w_;
+      if (sc > best || (sc === best && Math.abs(st - tie) < Math.abs(bestSt - tie))) { best = sc; bestSt = st; }
+    }
+    return bestSt;
+  }
+
+  // 计算结束节点 endId 的目标 ds.offset（缩放不变）。返回 [ox,oy] 或 null。
+  function trackTargetOffset(endId) {
+    if (!canvas || !graph) return null;
+    const fi = foldHidden.size ? foldInfo() : null;
+    const E = trackBoxOfId(endId, fi); if (!E) return null;
+    const s = canvas.ds.scale || 1;
+    const VW = canvas.canvas.width / s, VH = canvas.canvas.height / s, M = TRACK.MARGIN / s;
+    const boxes = trackVisibleBoxes(fi);
+    const Ex0 = E.x, Ex1 = E.x + E.w, Ey0 = E.y, Ey1 = E.y + E.h;
+    // X：可行起点 left ∈ [Ex1+M−VW, Ex0−M]（窗口含 E + 边距）。期望(tie)=区间左端 → E 靠视口右侧，最大化左侧历史。
+    const bx = trackBestStart(boxes, VW, Ex1 + M - VW, Ex0 - M, Ex1 + M - VW, "a", "b");
+    const left = (bx == null) ? (Ex0 + E.w / 2 - VW / 2) : bx;          // E 比视口还宽 → 水平居中
+    // Y：期望(tie)=结束节点垂直居中（纵向无“左/右历史”之分，居中最稳）。
+    const tyTie = Ey0 + E.h / 2 - VH / 2;
+    const by = trackBestStart(boxes, VH, Ey1 + M - VH, Ey0 - M, tyTie, "ay", "by");
+    const top = (by == null) ? tyTie : by;
+    return [-left, -top];
+  }
+
+  // 结束节点变化时重算并启动平滑平移（force=立刻对位，用于刚开启开关）。仅在运行会话中、用户未手动平移时生效。
+  function maybeTrack(force) {
+    if (!trackOn || !runSession || !canvas) return;
+    if (canvas.dragging_canvas) return;                                  // 用户正手动平移：让位，不抢
+    const id = runPathArr.length ? runPathArr[runPathArr.length - 1] : null;
+    if (!id) return;
+    if (!force && id === _trackLastEnd) return;                          // 结束节点没变：不重定位（让用户能自由平移查看）
+    _trackLastEnd = id;
+    const tgt = trackTargetOffset(id); if (!tgt) return;
+    const o = canvas.ds.offset, s = canvas.ds.scale || 1;
+    if (Math.hypot((tgt[0] - o[0]) * s, (tgt[1] - o[1]) * s) < TRACK.MIN_MOVE) return;   // 目标≈当前：免无谓抖动
+    _trackTween = { fromX: o[0], fromY: o[1], toX: tgt[0], toY: tgt[1], t0: performance.now(), dur: TRACK.DUR };
+  }
+
+  // 推进平移补间（ease-out cubic），返回“本帧是否平移了”。由运行动画 rAF 在【同一帧率闸(≤RUN_FPS=120fps)】里调用，
+  // 与脉冲动画共用节流——故跟踪平移严格遵守程序的 120 帧上限、不会在高刷屏上超采样。本函数只改偏移、不自行重绘。
+  function trackStep(now) {
+    const tw = _trackTween; if (!tw || !canvas) return false;
+    if (canvas.dragging_canvas) { _trackTween = null; return false; }    // 用户中途接管平移：放弃跟踪补间
+    let k = tw.dur > 0 ? (now - tw.t0) / tw.dur : 1; if (k > 1) k = 1;
+    const e = 1 - Math.pow(1 - k, 3);
+    canvas.ds.offset[0] = tw.fromX + (tw.toX - tw.fromX) * e;
+    canvas.ds.offset[1] = tw.fromY + (tw.toY - tw.fromY) * e;
+    if (k >= 1) _trackTween = null;
+    return true;
+  }
+
+  // 运行跟踪开关：开启后运行时画布自动跟随最后激活的节点，尽量多显示其左侧已激活节点(缩放不变)。可运行中随时切换。
+  function toggleTrack() {
+    trackOn = !trackOn;
+    const b = document.getElementById("trackbtn");
+    if (b) b.classList.toggle("on", trackOn);
+    try { localStorage.setItem("flow.track", trackOn ? "1" : "0"); } catch (e) {}
+    if (trackOn) { _trackLastEnd = null; maybeTrack(true); } else _trackTween = null;
+    setStatus(trackOn ? "已开启运行跟踪：画布自动跟随最后激活的节点（缩放不变，尽量显示左侧执行历史）" : "已关闭运行跟踪");
+  }
+
   // ---- 与 Python 交互 ----
   function api() {
     if (!(window.pywebview && window.pywebview.api))
@@ -2788,6 +2898,8 @@ const ED = (function () {
       try { const v = localStorage.getItem("flow.simpleMode"); simpleMode = (v === null) ? true : v === "1"; }
       catch (e) { simpleMode = true; }   // 默认进【使用模式】（成品工具默认只读运行）；之后记住用户的选择
       applySimpleMode();
+      try { trackOn = localStorage.getItem("flow.track") === "1"; } catch (e) { trackOn = false; }   // 恢复「运行跟踪」开关
+      { const tb = document.getElementById("trackbtn"); if (tb) tb.classList.toggle("on", trackOn); }
       if (simpleMode) simpleEntrySig = JSON.stringify(collect());   // 开机即处于使用模式：记下“退出时还原”的基线
       startSysMon();       // 启动右下角资源监控小窗（轮询后端 sys_stats）
       startRunStateSync(); // 常驻同步运行态：覆盖层启停 ↔ 主界面按钮保持一致
@@ -3222,7 +3334,8 @@ const ED = (function () {
       if (gap >= animInterval()) {
         runPhase += PHASE_SPEED * Math.min(gap, 200) / 1000;   // 按真实时间步进，掉帧也不变速
         _runAnimLast = ts;
-        if (canvas) canvas.setDirty(true, false);
+        const moved = _trackTween ? trackStep(ts) : false;     // 运行跟踪：与脉冲同一帧率闸推进平移（≤120fps）
+        if (canvas) canvas.setDirty(true, moved);              // 平移那帧连背景(网格/分组框)一起重绘；否则只刷前景
       }
       runAnimRAF = requestAnimationFrame(step);
     };
@@ -3340,6 +3453,7 @@ const ED = (function () {
       const r = await api().run_begin(collect(), realRun);
       runSession = !!(r && r.ok);
       runLogs = []; _lastRunStatus = ""; _lastTick = 0; _appliedPW = {}; renderLog();
+      _trackLastEnd = null; _trackTween = null;          // 新会话：清跟踪基线，首帧即重定位
       if (runSession) {
         startRunAnim();                                  // 启动脉冲/流动动画
         try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {}   // 把断点同步给引擎
@@ -3405,6 +3519,7 @@ const ED = (function () {
       runPreviewLabels = t.preview_labels || (previewOn ? runPreviewLabels : {});   // 预览标签(置信度/识别值)，编辑器以清晰文字显示
       if (t.param_writes) applyRunParamWrites(t.param_writes);   // 把运行时自动改写(如设开关)落到编辑器控件+面板(试运行同样反映，便于调试；记为可恢复的改动)
       _lastTick = t.tick;
+      maybeTrack();                        // 运行跟踪：结束节点变化时把画布平移到最佳位置（开关关时直接返回）
     }
     const ts = nowHMS();
     const added = (r.logs || []).map((l) => ({ tick: l.tick, ts, level: l.level, msg: l.msg, node: l.node }));
@@ -3417,6 +3532,7 @@ const ED = (function () {
       running = false; stopPoll(); setRunUI();
       const n = nodeByOurId(r.bp_hit);
       bpHitId = r.bp_hit;                 // 记下“停在哪”：drawRunOverlay 据此画醒目暂停高亮
+      _trackTween = null; _trackLastEnd = r.bp_hit;   // 断点居中优先：撤掉跟踪补间，避免随后又被跟踪平移走
       if (n && canvas) { try { canvas.centerOnNode(n); } catch (e) {} if (canvas) canvas.setDirty(true, true); }   // 居中到命中节点 + 整屏重绘（平移后背景/分组框也要刷新）
       setStatus("⏸ 命中断点：" + (n ? n.title : r.bp_hit) + " · 第 " + _lastTick + " 帧 ·（▶继续 / 取消该断点）");
     } else if (t) {
@@ -3459,6 +3575,7 @@ const ED = (function () {
       if (!runSession) {                // 引擎在跑但本界面还没认领（多半来自覆盖层「启动」）→ 认领该会话
         runSession = true; realRun = !!s.real;
         runLogs = []; _lastRunStatus = ""; _lastTick = 0; _appliedPW = {}; renderLog();
+        _trackLastEnd = null; _trackTween = null;        // 认领会话：清跟踪基线
         startRunAnim();
         try { api().run_set_breakpoints([...breakpoints], runUntil); } catch (e) {}
         try { api().run_set_profile(profileOn); } catch (e) {}
@@ -3469,6 +3586,7 @@ const ED = (function () {
     } else if (runSession) {            // 引擎已停（外部 stop / 自然结束）→ 收尾，按钮回到「运行」
       running = false; stopPoll(); stopRunAnim(); runSession = false; bpHitId = null;
       runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; runPreviewLabels = {};
+      _trackTween = null; _trackLastEnd = null;          // 会话结束：停掉跟踪补间
       setRunUI(); if (canvas) canvas.setDirty(true, true);
     }
   }
@@ -3500,6 +3618,7 @@ const ED = (function () {
     running = false; stopPoll(); stopRunAnim(); bpHitId = null;
     if (runSession) { try { await api().run_end(); } catch (e) {} runSession = false; }
     runPath = new Set(); runPathArr = []; runPorts = {}; runData = {}; runDataNodes = new Set(); runTimes = {}; runPreviews = {}; runPreviewLabels = {};
+    _trackTween = null; _trackLastEnd = null;          // 停止运行：停掉跟踪补间
     setRunUI();
     if (canvas) canvas.setDirty(true, true);
     setStatus("已停止运行");
@@ -3605,6 +3724,20 @@ const ED = (function () {
     try { const r = await api().toggle_monitor(); monOpen = !!(r && r.open); }
     catch (e) { showError("打开资源监控失败：" + (e && (e.stack || e.message) || e)); }
   }
+  // 生成「给AI看的流程图编写指南」并复制到剪贴板：把它整段粘给任意AI，AI 即可直接编辑 .flow.json 搭流程。
+  // 指南含执行模型/JSON结构/实时节点目录/套路/坑；具体某流程的逐节点说明在该流程 nodes[].note 里，无需另写文档。
+  async function copyAiGuide() {
+    try {
+      const r = await api().copy_ai_guide();
+      if (r && r.ok) { setStatus(`已复制「AI建流程说明」(${r.chars}字)到剪贴板——整段粘给AI即可让它帮你改/建流程`); return; }
+      if (r && r.text) {   // 后端复制失败：用浏览器剪贴板兜底（按钮点击=用户手势，WebView2 允许写剪贴板）
+        try { await navigator.clipboard.writeText(r.text); setStatus(`已复制「AI建流程说明」(${r.text.length}字)到剪贴板——整段粘给AI即可`); return; }
+        catch (e) {}
+      }
+      showError("复制到剪贴板失败" + (r && r.error ? "：" + r.error : "") + "。请重试。");
+    } catch (e) { showError("生成AI说明失败：" + (e && (e.stack || e.message) || e)); }
+  }
+
   // 开/关游戏内覆盖层（透明毛玻璃窄条，悬在游戏上方）
   let overlayOpen = false;
   async function toggleOverlay() {
@@ -3618,7 +3751,7 @@ const ED = (function () {
   }
 
   const self = {
-    toggleRun, dryRun, stopRun, toggleProfile, togglePreview, toggleSimple, toggleSysMon, toggleOverlay,
+    toggleRun, dryRun, stopRun, toggleProfile, togglePreview, toggleTrack, toggleSimple, toggleSysMon, toggleOverlay, copyAiGuide,
     clearLog() { runLogs = []; renderLog(); },
     async save() {
       try {
