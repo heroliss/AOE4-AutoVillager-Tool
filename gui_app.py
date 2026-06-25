@@ -619,7 +619,7 @@ class AOE4App:
             from version import __version__
             return __version__
         except Exception:
-            return "3.1.0"
+            return "3.2.0"
 
     def _build_ui(self):
         """构建界面"""
