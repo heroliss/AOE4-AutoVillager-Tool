@@ -666,43 +666,64 @@ const ED = (function () {
     const m = max || 22;
     return d.length > m ? d.slice(0, m) + "…" : d;
   }
-  // 组描述折成多行：保留显式换行(\n)，再按【像素宽】自动折行（中文逐字折）。返回行数组(≤maxLines，超出末行省略号)。
-  function groupDescLines(g, ctx, maxW, maxLines) {
-    const raw = String(g && g.desc || "").trim();
-    if (!raw) return [];
-    const out = []; let cut = false;
-    for (const para of raw.split(/\n+/)) {
-      let cur = "";
-      for (const ch of para) {
-        if (ctx.measureText(cur + ch).width > maxW && cur) {
-          if (out.length >= maxLines) { cut = true; break; }
-          out.push(cur); cur = ch;
-        } else cur += ch;
-      }
-      if (cut) break;
-      if (cur) { if (out.length >= maxLines) { cut = true; break; } out.push(cur); }
-    }
-    if (cut && out.length) out[out.length - 1] = out[out.length - 1].replace(/.$/, "…");
-    return out;
-  }
-  // 标签页左侧文字：⠿ 拖动手柄 + 路径名（描述改到标签【上方】多行展示，见 drawGroupDescAbove）。
+  // 标签页左侧文字：⠿ 拖动手柄 + 路径名（描述不再画在画布上，改为悬停组手柄时弹浮窗，见 updateGroupTip）。
   function groupTabLeft(g) {
     return "⠿ " + groupPathTitle(g);
   }
-  // 在展开组的标签【上方】逐行画组描述（小字、组色、略淡）——不改框/命中几何，纯展示；全文仍可点组在弹窗看。
-  function drawGroupDescAbove(ctx, x, tabTopY, g, col) {
-    const dlines = groupDescLines(g, ctx, 460, 3);
-    if (!dlines.length) return;
-    const sf = ctx.font, sa = ctx.globalAlpha, st = ctx.textAlign;
-    ctx.font = "11px 'Microsoft YaHei',sans-serif"; ctx.textAlign = "left";
-    ctx.fillStyle = col; ctx.globalAlpha = sa * 0.82;
-    const pm = "📝 ", pmW = ctx.measureText(pm).width, DLH = 14, last = dlines.length - 1;
-    for (let k = 0; k <= last; k++) {
-      const yy = tabTopY - 4 - (last - k) * DLH;   // 逐行向上叠；最后一行紧贴标签上沿
-      if (k === 0) ctx.fillText(pm, x, yy);
-      ctx.fillText(dlines[k], x + pmW, yy);
+
+  // —— 悬停组标签/箱体 → 弹出「描述 + 概要信息」浮窗（替代以前浮在标签上方的画布文字）——
+  let _gtipEl = null, _gtipFor = null;
+  function _gtip() {
+    if (_gtipEl) return _gtipEl;
+    const d = document.createElement("div");
+    d.id = "grouptip";
+    d.style.cssText = "position:fixed;z-index:200;max-width:340px;pointer-events:none;display:none;" +
+      "background:#23272f;border:1px solid #3a404a;border-radius:7px;padding:8px 11px;" +
+      "box-shadow:0 6px 22px rgba(0,0,0,.5);font:12px 'Microsoft YaHei',sans-serif;line-height:1.55";
+    document.body.appendChild(d);
+    _gtipEl = d; return d;
+  }
+  function groupTipHTML(g) {
+    const nodes = groupAllMembers(g).length;
+    const kids = groupDefs.filter((x) => x.parent === g.id).length;
+    const col = g.color || "#8a93a0";
+    const bits = [nodes + " 个节点"];
+    if (kids) bits.push(kids + " 个子组");
+    bits.push(g.collapsed ? "已折叠" : "已展开");
+    const desc = String(g.desc || "").trim();
+    return "<div style='font-weight:bold;color:" + col + "'>◳ " + esc(groupPathTitle(g)) + "</div>" +
+      "<div style='color:#8d96a3;font-size:11px;margin-top:1px'>" + bits.join(" · ") + "</div>" +
+      (desc ? "<div style='color:#c7cdd6;margin-top:5px'>" + esc(desc).replace(/\n/g, "<br>") + "</div>"
+            : "<div style='color:#6b727d;font-size:11px;margin-top:5px;font-style:italic'>（无描述，可在组详情里填写）</div>");
+  }
+  function showGroupTip(g, cx, cy) {
+    const el = _gtip();
+    if (_gtipFor !== g.id) { el.innerHTML = groupTipHTML(g); _gtipFor = g.id; }
+    el.style.display = "block";
+    const pad = 16, w = el.offsetWidth, h = el.offsetHeight;
+    let x = cx + pad, y = cy + pad;                                   // 默认在光标右下；贴边则翻转
+    if (x + w > window.innerWidth - 6) x = cx - pad - w;
+    if (y + h > window.innerHeight - 6) y = cy - pad - h;
+    el.style.left = Math.max(6, x) + "px";
+    el.style.top = Math.max(6, y) + "px";
+  }
+  function hideGroupTip() { if (_gtipEl) { _gtipEl.style.display = "none"; _gtipFor = null; } }
+  // 命中测试：坐标落在哪个组的标签/箱体手柄上（最内层子组优先）；无则 -1。
+  function groupHandleAt(gx, gy) {
+    const order = groupDefs.map((g, i) => i)
+      .sort((a, b) => groupAllMembers(groupDefs[a]).length - groupAllMembers(groupDefs[b]).length);
+    for (const i of order) {
+      const r = groupTabRect(groupDefs[i]); if (!r) continue;
+      if (gx >= r[0] && gx <= r[0] + r[2] && gy >= r[1] && gy <= r[1] + r[3]) return i;
     }
-    ctx.font = sf; ctx.globalAlpha = sa; ctx.textAlign = st;
+    return -1;
+  }
+  function updateGroupTip(e) {
+    if (!canvas || _groupDrag || (canvas.node_over)) { hideGroupTip(); return; }   // 拖组/悬节点时不弹
+    let off; try { off = canvas.convertEventToCanvasOffset(e); } catch (err) { hideGroupTip(); return; }
+    const gi = groupHandleAt(off[0], off[1]);
+    if (gi < 0) { hideGroupTip(); return; }
+    showGroupTip(groupDefs[gi], e.clientX, e.clientY);
   }
   // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。⊟ 占位保证标签留出按钮宽度。
   function groupTabText(g) { return groupTabLeft(g) + "  ⊟"; }
@@ -1312,8 +1333,7 @@ const ED = (function () {
       ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = contrastText(col); ctx.textAlign = "left";   // 显式置左：折叠箱体端口标签会把 textAlign 设成 right 且不复位，否则本组名被右对齐而整体左移错位
       ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
-      ctx.fillText("⠿ " + groupPathTitle(g), x + 9, y - 4);        // 标签上只放组名（⊟ 占位见 groupTabText）
-      drawGroupDescAbove(ctx, x + 9, y - 18, g, col);              // 描述：多行折行，浮在标签上方（不挡框内节点）
+      ctx.fillText("⠿ " + groupPathTitle(g), x + 9, y - 4);        // 标签上只放组名（描述见悬停浮窗 updateGroupTip）
       const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
     }
     ctx.restore();
@@ -4509,6 +4529,7 @@ const ED = (function () {
       const r = groupTabRect(groupDefs[i]); if (!r) continue;
       if (off[0] >= r[0] && off[0] <= r[0] + r[2] && off[1] >= r[1] && off[1] <= r[1] + r[3]) {
         e.preventDefault(); e.stopImmediatePropagation();
+        hideGroupTip();                 // 开始拖组：收起悬停浮窗
         selectGroup(groupDefs[i].id);   // 一按下手柄就选中该组（与节点一致：拖动即选中，右下角随即出详情）
         const members = groupAllMembers(groupDefs[i]).map(nodeByOurId).filter(Boolean);   // 拖整组＝移动其【子树全体】节点
         _groupDrag = { gi: i, last: off, members, moved: false };
@@ -4577,11 +4598,13 @@ const ED = (function () {
       canvas.onDrawForeground = (ctx) => { drawRunOverlay(ctx); };   // 节点之上只放“试运行”高亮/数据/流动；连线(含悬停聚焦)一律画在节点【后面】
       // 悬停的节点变化时强制重绘前景，让“聚焦关联连线”实时跟手（选中变化 LiteGraph 本就会重绘）
       let _lastHoverId = null;
-      canvas.canvas.addEventListener("mousemove", () => {
+      canvas.canvas.addEventListener("mousemove", (e) => {
         const id = (canvas && canvas.node_over) ? canvas.node_over._id : null;
         if (id !== _lastHoverId) { _lastHoverId = id; if (!runSession && canvas) canvas.setDirty(true, true); }
         ensureFlowAnim();   // 悬停到节点 → 启动其连线的流动光点动画（无悬停/无选中时自停，空闲不重绘）
+        updateGroupTip(e);  // 悬停组标签/箱体 → 弹描述浮窗（离开/在节点上自动隐藏）
       });
+      canvas.canvas.addEventListener("mouseleave", hideGroupTip);
       // 折叠子图：用自定义连线绘制——跳过组内连线、把跨边界连线改接到箱体端口；无折叠时走原版。
       const _origDrawConn = canvas.drawConnections;
       canvas.drawConnections = function (ctx) {

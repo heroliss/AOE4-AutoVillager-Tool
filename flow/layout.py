@@ -350,16 +350,22 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: flo
             col[n] = dcol(n)
 
     # 数据-only 分组（无脊柱成员，如“共享识别”）：成员天然按各自消费者散到很右（如 tc 被靠后的段消费），
-    # 会把组框横拉到跨越整图、与别的组框重叠。把这类组的数据成员收拢到组内最左列，成一竖排“传感器栏”，
-    # 组框即紧凑（代价：到远端消费者的数据线变长，但折叠该组后这些线会收成箱体端口）。
+    # 会把组框横拉到跨越整图、与别的组框重叠。把这类组的数据成员收拢到一条【独占的竖列】，成一排“传感器栏”，
+    # 组框即紧凑（代价：到远端消费者的数据线变长）。
+    # 独占列：用 c0 左侧的半列号(c0-0.5、再有就 -1.5…)给每个数据-only 组各自一条专属 x 轨道——否则它的
+    # 数据成员会和某个【脊柱段】落在同一整数列里、被那段的数据喂料(如门控的 c_cost_v)上下夹住，两组框就重叠
+    # （典型：共享识别 vs 生产门控）。半列在 by_col 里排序时自然插在两整数列之间，不与任何脊柱列同列。
+    _lane_off = 0.5
     for gr in (getattr(graph, "groups", []) or []):
         members = gr.get("members", []) if isinstance(gr, dict) else []
         if members and not any(m in spine_set for m in members):   # 该组全是数据节点 = 数据-only 组
             dm = [m for m in members if m in col]
             if dm:
-                c0 = min(col[m] for m in dm)   # 收拢到“成员最左列”，成一竖排紧凑栏（否则会被最靠后的消费者拉宽跨整图）
+                c0 = min(col[m] for m in dm)
+                lane = c0 - _lane_off       # 专属半列：插在 c0 左侧，独占一条不与脊柱共享的轨道
+                _lane_off += 1.0            # 下一个数据-only 组再往左让一条，避免两组挤同一半列
                 for m in dm:
-                    col[m] = c0
+                    col[m] = lane
 
     # 归一化列号从 0 开始（数据链可能产生负列）
     base = min(col.values())
