@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import functools
 import os
+import sys
 import threading
 import time
 from typing import Optional
@@ -173,9 +174,25 @@ import user_settings
 _OLD_STATE_FILE = os.path.abspath(".editor_state.json")   # 旧版状态文件，仅用于一次性迁移
 
 
+def _to_logical_flow(path):
+    """流程路径 → 可跨「源码/打包」复用的逻辑标识：内置→"flows/x"、我的→"user_flows/x"；其它保留绝对路径。
+    last_flow 用逻辑标识存进 %APPDATA%，源码版与打包版各自把 flows/ 解析到自己的内置目录(项目根 / 解压目录)，
+    不会因共用 %APPDATA% 而让打包版去打开源码工程里的文件。"""
+    try:
+        ap = _norm_path(path)
+        for base, prefix in ((BUILTIN_FLOWS_DIR, "flows"), (USER_FLOWS_DIR, "user_flows")):
+            nb = _norm_path(base)
+            if ap == nb or ap.startswith(nb + os.sep):
+                rel = os.path.relpath(os.path.abspath(path), base).replace("\\", "/")
+                return f"{prefix}/{rel}"
+    except Exception:
+        pass
+    return os.path.abspath(path)
+
+
 def _save_last_flow(path):
     if path:
-        user_settings.update_settings(last_flow=os.path.abspath(path))
+        user_settings.update_settings(last_flow=_to_logical_flow(path))
 
 
 def _load_last_flow():
@@ -187,10 +204,22 @@ def _load_last_flow():
                 with open(_OLD_STATE_FILE, "r", encoding="utf-8") as fp:
                     p = json.load(fp).get("last_flow")
                 if p:
-                    user_settings.update_settings(last_flow=os.path.abspath(p))
+                    user_settings.update_settings(last_flow=_to_logical_flow(p))
         except Exception:
             p = None
-    return p if p and os.path.exists(p) else None
+    if not p:
+        return None
+    real = resolve_resource(p)
+    if not os.path.exists(real):
+        return None
+    # 打包后 %APPDATA% 会与「源码运行」共用，旧记录可能是源码目录的绝对路径——只认本程序自己的
+    # 内置/用户目录(INTERNAL_DIR/APP_DIR)内的文件，避免打包版误开源码工程里的流程（顶部下拉也对不上）。
+    if getattr(sys, "frozen", False):
+        n = _norm_path(real)
+        roots = (_norm_path(INTERNAL_DIR), _norm_path(APP_DIR))
+        if not any(n == r or n.startswith(r + os.sep) for r in roots):
+            return None
+    return p
 
 
 # ==================== 注册表 -> 前端类型定义 ====================
@@ -1808,7 +1837,8 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
                 last = cand
         if last:
             try:
-                graph, path = Graph.load(last), last
+                real = resolve_resource(last)             # last 可能是逻辑标识(flows/…)，解析成真实绝对路径
+                graph, path = Graph.load(real), os.path.abspath(real)
             except Exception:
                 graph, path = None, None
     api = Api()
