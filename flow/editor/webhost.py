@@ -1017,7 +1017,9 @@ class Api:
             self._overlay_toast_window = None
 
     def _overlay_toast_on_loaded(self):
-        """大弹窗加载完成：移出任务栏 + 设鼠标穿透（不上玻璃——只让卡片自身可见，窗口其余透明）。"""
+        """大弹窗加载完成：① 上【零着色透明玻璃】(frost=0,alpha=0)——否则透明窗会露出 #0B0E14 窗口底色变成
+        中上方一大块黑框；用透明渐变把空白处真正透掉，只剩卡片(卡片自带不透明底)可见。② 移出任务栏 ③ 鼠标穿透。
+        固定 0 着色、不跟随用户的背景/毛度设置(那是给窄条玻璃用的；大弹窗要空白处全透、不要一层灰)。"""
         win = self._overlay_toast_window
         if win is None:
             return
@@ -1026,6 +1028,10 @@ class Api:
             return
 
         def _do():
+            try:
+                self._glass(win, 0, 0)     # 透明渐变 + 0 着色 = 空白处全透，消除黑框
+            except Exception:
+                pass
             try:
                 self._tool_window(native)
             except Exception:
