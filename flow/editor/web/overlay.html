@@ -94,10 +94,11 @@
     }
     document.getElementById("chips").innerHTML = html;   // 没有选中项＝不显示任何芯片（覆盖层只剩启动按钮+工具）
     setRunBtn(d);
-    // 弹信息：新的 WARN/ERROR 运行事件（如“未检测到市场→已关闭出商人”）→ 醒目瞬时弹出 4.5s
+    // 弹信息：新的 WARN/ERROR 运行事件（如“未检测到市场→已关闭出商人”）。优先交给屏幕中上方的大弹窗
+    // (d.toast)；仅当大弹窗不在场(透明不可用的机器)时，才退回在这条窄条里小弹一下兜底。
     if (d.notice && d.notice.id && d.notice.id !== lastNoticeId) {
       lastNoticeId = d.notice.id;
-      flashAlert(d.notice.msg, d.notice.level === "ERROR" ? "error" : "warn", 4500);
+      if (!d.toast) flashAlert(d.notice.msg, d.notice.level === "ERROR" ? "error" : "warn", 4500);
     }
     if (Date.now() < alertHoldUntil) { /* 瞬时弹信息/提示期间不被覆盖 */ }
     else if (d.bp_hit) { applyAlert("⏸ 命中断点：" + d.bp_hit, "error"); }

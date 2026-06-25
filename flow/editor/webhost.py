@@ -459,6 +459,7 @@ class Api:
         self._sysmon_game_scan = 0.0         # 上次扫描新游戏进程的时刻（每~2s 扫一次）
         self._mon_window = None              # 独立「资源监控」浮窗（单独系统窗口；下划线前缀避免 js_api 递归爬 .NET）
         self._overlay_window = None          # 游戏内覆盖层（无边框/透明/置顶/毛玻璃；单独系统窗口）
+        self._overlay_toast_window = None    # 覆盖层【大弹窗】：屏幕中上方淡入淡出的醒目提示（鼠标穿透、不挡游戏；只在透明可用时建）
         self._overlay_cfg_window = None      # 覆盖层【设置】小窗（同款玻璃；调背景/内容透明度/毛度/穿透）
         self._overlay_cfg_shown = False      # 设置窗当前是否可见（复用 hide/show、避免每次重建闪烁）
         self._overlay_mon_window = None      # 覆盖层【资源监控】小窗（同款玻璃；CPU/内存/曲线，复用 sys_stats）
@@ -748,6 +749,26 @@ class Api:
         except Exception:
             pass
 
+    @staticmethod
+    def _click_through(native):
+        """给原生窗加 WS_EX_TRANSPARENT(+LAYERED) → 鼠标点击【穿透】到底下的游戏，窗口纯展示、绝不挡操作。
+        用于屏幕中上方的大弹窗：它覆盖一大片画面，必须永远点不到、不抢焦点。须在句柄就绪后调用。"""
+        if native is None:
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            u = ctypes.windll.user32
+            hwnd = wintypes.HWND(int(native.Handle.ToInt64()))
+            GWL_EXSTYLE, WS_EX_TRANSPARENT, WS_EX_LAYERED = -20, 0x20, 0x80000
+            g = u.GetWindowLongPtrW; g.restype = ctypes.c_ssize_t; g.argtypes = [wintypes.HWND, ctypes.c_int]
+            s = u.SetWindowLongPtrW; s.restype = ctypes.c_ssize_t
+            s.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+            st = g(hwnd, GWL_EXSTYLE)
+            s(hwnd, GWL_EXSTYLE, st | WS_EX_TRANSPARENT | WS_EX_LAYERED)
+        except Exception:
+            pass
+
     def _overlay_finalize(self, win, frost, alpha):
         """覆盖窗【页面加载完成(loaded)】后的统一收尾——在 UI 线程里按序做完：① 上玻璃 → ② 设为工具窗。
         工具窗(WS_EX_TOOLWINDOW)本身就把窗口同时移出【任务栏 + Alt+Tab】，所以不再用 .NET 的 ShowInTaskbar=False——
@@ -911,7 +932,7 @@ class Api:
             except Exception:
                 pass
         self._overlay_hover_thread = None
-        for attr in ("_overlay_cfg_window", "_overlay_mon_window", "_overlay_window"):
+        for attr in ("_overlay_toast_window", "_overlay_cfg_window", "_overlay_mon_window", "_overlay_window"):
             w = getattr(self, attr, None)
             if w is not None:
                 try:
@@ -924,6 +945,13 @@ class Api:
         """开/关游戏内覆盖层窗口；返回 {open: bool}。"""
         if self._overlay_window is not None:
             self._overlay_stop_hover = True
+            tw = self._overlay_toast_window
+            if tw is not None:
+                try:
+                    tw.destroy()
+                except Exception:
+                    pass
+                self._overlay_toast_window = None
             try:
                 self._overlay_window.destroy()
             except Exception:
@@ -961,15 +989,57 @@ class Api:
                 self._overlay_window.events.loaded += self._overlay_on_loaded
             except Exception:
                 pass
+            self._open_overlay_toast(sw, sh)   # 同时建屏幕中上方的大弹窗（仅透明可用时）
             return {"open": True}
         except Exception as e:
             self._overlay_window = None
             return {"open": False, "reason": str(e)}
 
+    def _open_overlay_toast(self, sw, sh):
+        """建屏幕中上方的大弹窗（鼠标穿透、置顶、透明、无任务栏）。只在透明【可用】时建——否则透明失败会变成
+        屏幕中央一大块白底，弊远大于利；那种机器走窄条上的小提示兜底(见 overlay.html 的 d.toast 判定)。
+        建一次后常驻：有提示就淡入、过几秒淡出，平时整窗透明、什么都不画。"""
+        if not _glass_ok():
+            return                          # 透明不可用：不建大弹窗，提示退回窄条
+        import webview
+        page = os.path.join(WEB_DIR, "overlay_toast.html")
+        tw, th = 720, 150                   # 固定大区域；卡片在其中水平居中、淡入淡出
+        tx, ty = max(0, (sw - tw) // 2), max(0, int(sh * 0.11))   # 屏幕中上方
+        kw = dict(width=tw, height=th, x=tx, y=ty, js_api=self, on_top=True, frameless=True,
+                  easy_drag=False, transparent=True, min_size=(80, 20), background_color="#0B0E14")
+        try:
+            self._overlay_toast_window = webview.create_window("AOE4 Toast", url=page, **kw)
+            try:
+                self._overlay_toast_window.events.loaded += self._overlay_toast_on_loaded
+            except Exception:
+                pass
+        except Exception:
+            self._overlay_toast_window = None
+
+    def _overlay_toast_on_loaded(self):
+        """大弹窗加载完成：移出任务栏 + 设鼠标穿透（不上玻璃——只让卡片自身可见，窗口其余透明）。"""
+        win = self._overlay_toast_window
+        if win is None:
+            return
+        native = getattr(win, "native", None)
+        if self._native_dead(native):
+            return
+
+        def _do():
+            try:
+                self._tool_window(native)
+            except Exception:
+                pass
+            try:
+                self._click_through(native)
+            except Exception:
+                pass
+        self._form_invoke(native, _do)
+
     def _on_overlay_closed(self):
         self._overlay_stop_hover = True
         self._overlay_window = None
-        for attr in ("_overlay_cfg_window", "_overlay_mon_window"):   # 主窄条没了，孤儿设置/监控窗也关掉
+        for attr in ("_overlay_toast_window", "_overlay_cfg_window", "_overlay_mon_window"):   # 主窄条没了，孤儿弹窗/设置/监控窗也关掉
             w = getattr(self, attr, None)
             if w is not None:
                 try:
@@ -1254,6 +1324,8 @@ class Api:
             bp = self._bp_hit if alive else None
         return {"items": items, "running": alive and not paused, "paused": paused, "bp_hit": bp,
                 "notice": (self._overlay_notice if alive else None),
+                "toast": self._overlay_toast_window is not None,   # 大弹窗在场→窄条不再重复弹该提示（见 overlay.html）
+                "toast_hold": 4500,                                # 大弹窗显示时长(ms)，前后端一致
                 "bg_alpha": self._overlay_bg_alpha, "content_alpha": self._overlay_content_alpha,
                 "frost": self._overlay_frost, "glass": self._overlay_glass_on(),   # False → 前端套不透明深色底兜底（防白条）
                 "rect": list(self._overlay_rect), "screen": list(self._overlay_screen)}

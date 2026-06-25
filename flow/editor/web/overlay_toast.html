@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>AOE4 Toast</title>
+<style>
+  /* 屏幕中上方的大弹窗：整窗透明，只有中间那张卡片可见；鼠标穿透(WS_EX_TRANSPARENT 由后端加)，
+     这里再 pointer-events:none 双保险，绝不挡游戏点击。平时卡片 opacity:0(隐形)，来提示才淡入。 */
+  html, body { margin: 0; height: 100%; width: 100%; background: transparent; overflow: hidden;
+    font-family: "Microsoft YaHei", system-ui, sans-serif; -webkit-user-select: none; user-select: none;
+    pointer-events: none; cursor: default; }
+  #wrap { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+
+  /* 卡片：来提示时淡入 + 轻微下滑落定；过几秒淡出。背景半透明深色 + 按级别上色的边/光晕，文字带描边保证压在游戏画面上也清楚。 */
+  #card { display: inline-flex; align-items: center; gap: 12px; max-width: 92%;
+    padding: 13px 26px; border-radius: 13px; box-sizing: border-box;
+    background: rgba(24,28,36,0.86); border: 2px solid rgba(255,255,255,0.18);
+    color: #fff; font-size: 21px; font-weight: 800; line-height: 1.25; letter-spacing: 0.3px;
+    text-shadow: 0 2px 5px rgba(0,0,0,0.85); white-space: nowrap;
+    opacity: 0; transform: translateY(-12px); transition: opacity .38s ease, transform .38s ease; }
+  #card.show { opacity: 1; transform: translateY(0); }
+  #card .ic { font-size: 25px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7)); }
+  #card .tx { white-space: normal; }   /* 文字本身可折行，长提示不被截断 */
+
+  /* 按级别上色：警告=琥珀、错误=红、信息=蓝。边框 + 外发光让它在花花绿绿的游戏画面里也跳出来。 */
+  #card.lv-warn  { border-color: rgba(245,180,70,0.9);  box-shadow: 0 8px 30px rgba(0,0,0,0.5), 0 0 22px rgba(245,180,70,0.35); }
+  #card.lv-warn  .ic { color: #ffcf6e; }
+  #card.lv-error { border-color: rgba(240,90,90,0.95);  box-shadow: 0 8px 30px rgba(0,0,0,0.5), 0 0 22px rgba(240,90,90,0.4); }
+  #card.lv-error .ic { color: #ff8d8d; }
+  #card.lv-info  { border-color: rgba(90,160,235,0.9);  box-shadow: 0 8px 30px rgba(0,0,0,0.5), 0 0 22px rgba(90,160,235,0.35); }
+  #card.lv-info  .ic { color: #87bdff; }
+</style>
+</head>
+<body>
+  <div id="wrap"><div id="card"><span class="ic"></span><span class="tx"></span></div></div>
+<script>
+  function api() { return (window.pywebview && window.pywebview.api) || null; }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  const ICON = { warn: "⚠", error: "⛔", info: "ℹ" };
+  const card = document.getElementById("card");
+  let curId = 0, primed = false, hideTimer = null;
+
+  function showToast(msg, level, hold) {
+    card.querySelector(".ic").textContent = ICON[level] || ICON.warn;
+    card.querySelector(".tx").textContent = String(msg == null ? "" : msg);
+    card.classList.remove("lv-warn", "lv-error", "lv-info");
+    card.classList.add("lv-" + level, "show");          // 重设级别色 + 淡入
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => card.classList.remove("show"), Math.max(1200, hold | 0));   // 到点淡出
+  }
+
+  function poll() {
+    const a = api();
+    if (!a) { setTimeout(poll, 200); return; }
+    Promise.resolve(a.overlay_data()).then(d => {
+      if (!d) return;
+      const n = d.notice;
+      if (n && n.id) {
+        // 打开弹窗那一刻可能读到一条【陈旧】提示(后端存着最近一条)——首拍只记住 id、不弹，避免一开覆盖层就闪一下。
+        if (!primed) { curId = n.id; primed = true; }
+        else if (n.id !== curId) {
+          curId = n.id;
+          const lv = n.level === "ERROR" ? "error" : (n.level === "INFO" ? "info" : "warn");
+          showToast(n.msg, lv, d.toast_hold || 4500);
+        }
+      } else { primed = true; }
+    }).catch(() => {}).finally(() => setTimeout(poll, 300));   // 比窄条(500)稍勤，提示更跟手
+  }
+  poll();
+</script>
+</body>
+</html>
