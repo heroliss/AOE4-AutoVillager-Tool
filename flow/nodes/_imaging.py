@@ -15,6 +15,8 @@ def load_gray(path: str):
     """加载模板为灰度图（带缓存）。找不到返回 None。"""
     if not path:
         return None
+    from ..paths import resolve_resource
+    path = resolve_resource(path)   # 相对模板(templates/xxx.png)在内置/用户两根下解析；打包后内置在解压目录、用户截图在 exe 旁
     cached = _gray_cache.get(path)
     if cached is not None:
         return cached

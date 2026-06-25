@@ -82,11 +82,13 @@ _RUN_LOG_CAP = 4000
 _RUNSEP = "\x01"
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-# 内置流程目录（只读模板，随程序分发）与 用户自定义流程目录（用户的另存到这里）。
-BUILTIN_FLOWS_DIR = os.path.abspath("flows")
-USER_FLOWS_DIR = os.path.abspath("user_flows")
-# 截模板的保存目录（与内置模板同目录，节点里按相对路径 templates/xxx.png 读取）。
-TEMPLATES_DIR = os.path.abspath("templates")
+from ..paths import INTERNAL_DIR, APP_DIR, resolve_resource   # 内置只读资源根 / 用户可写数据根（打包后分离）
+# 内置流程目录（只读模板，随程序分发；打包后在解压目录 _MEIPASS）。
+BUILTIN_FLOWS_DIR = os.path.join(INTERNAL_DIR, "flows")
+# 用户另存的流程目录：放【用户可写目录】(打包后=exe 同目录)，否则打包后存进临时解压目录、一退出就丢。
+USER_FLOWS_DIR = os.path.join(APP_DIR, "user_flows")
+# 截图模板的保存目录：同样放【用户可写目录】(读取时 resolve_resource 会同时在内置目录找内置模板)。
+TEMPLATES_DIR = os.path.join(APP_DIR, "templates")
 
 
 def _norm_path(p):
@@ -155,15 +157,14 @@ def _glass_ok():
 
 
 def _to_rel_path(path):
-    """文件在工程目录内时转成相对路径(正斜杠，如 templates/xxx.png)，便于跨机器/打包；
-    工程目录之外则原样保留绝对路径。"""
+    """文件在【内置资源根】内时转成相对路径(正斜杠，如 templates/xxx.png)，便于跨机器/打包；
+    根之外(如打包后落到 exe 同目录的截图模板)则原样保留绝对路径，保证仍能读到。"""
     if not path:
         return path
     try:
-        base = os.path.dirname(TEMPLATES_DIR)   # 工程根 = templates 的上级目录
-        rel = os.path.relpath(os.path.abspath(path), base)
+        rel = os.path.relpath(os.path.abspath(path), INTERNAL_DIR)   # 相对内置资源根(开发期=项目根)
         return path if rel.startswith("..") else rel.replace("\\", "/")
-    except Exception:
+    except Exception:   # 跨盘符(打包后 exe 与解压目录不同盘)relpath 会抛 ValueError → 保留绝对路径
         return path
 # 记住上次打开的流程，下次启动自动载入（让编辑器更像“成品工具”：开机即用）。
 # 会话状态存到 %APPDATA%（见 user_settings），不再放程序目录——避免污染仓库 / 重装丢失 / 权限问题。
@@ -1605,13 +1606,15 @@ class Api:
 
     def list_builtin(self):
         # 同时列出内置流程(flows/)与用户另存的流程(user_flows/)；返回 {path, name} 供前端按中文名显示。
+        # path 用【逻辑前缀】"flows/xxx"、"user_flows/xxx"（前端据前缀分「内置只读/我的流程」两组），
+        # 真实磁盘位置可能分属不同根(内置=解压目录、我的=exe 同目录)，打开时由 resolve_resource 解析。
         out = []
-        for d in ("flows", "user_flows"):
-            if os.path.isdir(d):
-                for f in sorted(os.listdir(d)):
+        for base, prefix in ((BUILTIN_FLOWS_DIR, "flows"), (USER_FLOWS_DIR, "user_flows")):
+            if os.path.isdir(base):
+                for f in sorted(os.listdir(base)):
                     if f.endswith(".flow.json"):
-                        full = os.path.join(d, f)
-                        out.append({"path": f"{d}/{f}",
+                        full = os.path.join(base, f)
+                        out.append({"path": f"{prefix}/{f}",
                                     "name": self._flow_name(full) or f[:-len(".flow.json")]})
         return out
 
@@ -1619,7 +1622,7 @@ class Api:
         """该路径是否在内置流程目录下（内置=只读，保存时改为另存，避免被覆盖）。
         用 normcase 做大小写不敏感比较：否则盘符大小写不一致时会漏判，导致内置被当成可写文件覆盖。"""
         try:
-            ap, base = _norm_path(path), _norm_path(BUILTIN_FLOWS_DIR)
+            ap, base = _norm_path(resolve_resource(path)), _norm_path(BUILTIN_FLOWS_DIR)
             return ap == base or ap.startswith(base + os.sep)
         except Exception:
             return False
@@ -1629,8 +1632,9 @@ class Api:
         返回 {ok, reason?}。删的若是当前打开的流程，清掉 _path 与“上次流程”记录。"""
         p = path or self._path
         try:
-            ap = os.path.abspath(p)
-            napp = _norm_path(p)            # 比较用：大小写/分隔符规范化（盘符大小写随启动方式变）
+            real = resolve_resource(p)      # 逻辑路径(user_flows/xxx)→真实绝对路径
+            ap = os.path.abspath(real)
+            napp = _norm_path(real)         # 比较用：大小写/分隔符规范化（盘符大小写随启动方式变）
         except Exception:
             return {"ok": False, "reason": "路径无效"}
         if self._is_builtin(p) or not napp.startswith(_norm_path(USER_FLOWS_DIR) + os.sep):
@@ -1648,7 +1652,7 @@ class Api:
     def reveal_path(self, path):
         """在系统文件浏览器中定位并选中该文件（Windows: explorer /select,<路径>）。返回 {ok, reason?}。"""
         try:
-            ap = os.path.abspath(path) if path else ""
+            ap = os.path.abspath(resolve_resource(path)) if path else ""
             if not ap or not os.path.exists(ap):
                 return {"ok": False, "reason": "文件不存在（可能尚未保存）"}
             import subprocess
@@ -1659,10 +1663,11 @@ class Api:
             return {"ok": False, "reason": str(e)}
 
     def open_path(self, path):
-        if path and os.path.exists(path):
-            self._graph = Graph.load(path)
-            self._path = path
-            _save_last_flow(path)
+        real = resolve_resource(path)   # 逻辑前缀(flows/…、user_flows/…)→真实绝对路径(可能分属不同根)
+        if real and os.path.exists(real):
+            self._graph = Graph.load(real)
+            self._path = os.path.abspath(real)   # 统一存绝对路径：保存/定位/只读判定都直接用，不再依赖 CWD
+            _save_last_flow(self._path)
             return self._payload(self._graph)
         return None
 
@@ -1700,7 +1705,7 @@ class Api:
         """
         import base64
         try:
-            p = path if os.path.isabs(path) else os.path.abspath(path)
+            p = resolve_resource(path)   # 相对模板(templates/xxx.png)在内置/用户两根下查找；绝对则原样
             if not os.path.isfile(p):
                 return ""
             ext = os.path.splitext(p)[1].lower().lstrip(".") or "png"
@@ -1757,7 +1762,8 @@ class Api:
     def capture_template(self):
         from . import capture
         os.makedirs(TEMPLATES_DIR, exist_ok=True)
-        return self._capture(lambda: capture.capture_template(TEMPLATES_DIR))
+        res = self._capture(lambda: capture.capture_template(TEMPLATES_DIR))
+        return _to_rel_path(res) if res else res   # 内置根内→相对(templates/xxx.png 可跨机)；根外→保留绝对
 
     def autolayout(self, payload):
         from ..layout import mainline_layout

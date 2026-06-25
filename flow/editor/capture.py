@@ -312,11 +312,7 @@ def capture_template(save_dir: str):
     name = f"cap_{time.strftime('%Y%m%d_%H%M%S')}.png"
     path = os.path.join(save_dir, name)
     crop.save(path)
-    # 返回相对路径（与内置模板写法一致：templates/xxx.png），便于跨机移动工程。
-    try:
-        return os.path.relpath(path).replace("\\", "/")
-    except ValueError:
-        return path
+    return os.path.abspath(path)   # 返回绝对路径；是否转相对(templates/xxx.png)由 webhost._to_rel_path 按资源根决定
 
 
 # ==================== 捕获按键 ====================
