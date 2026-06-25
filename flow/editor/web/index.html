@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>AoE4 自动化节点编辑器</title>
+<title>AoE4 自动生产助手</title>
 <link rel="stylesheet" href="vendor/litegraph.css">
 <style>
   /* —— 配色变量：统一深色主题 + 一个蓝色强调色 —— */
@@ -56,6 +56,9 @@
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #dirty:not(:empty) { color: var(--warn); font-size: 11px; font-weight: bold; flex: none;
            background: #e6a23c1f; border: 1px solid #e6a23c55; border-radius: 10px; padding: 1px 8px; }
+  /* 版本号：工具栏最右侧的小灰胶囊，便于一眼看到当前版本（始终可见，不被提示挤掉） */
+  #ver { color: var(--fg-dim); font-size: 11px; flex: none; white-space: nowrap; margin-left: 2px;
+         padding: 1px 8px; border: 1px solid var(--line); border-radius: 10px; background: #ffffff0a; }
   /* 文件信息（当前在编辑哪个流程）：固定在工具栏左侧，不被操作提示覆盖 */
   #flowmeta { color: var(--fg); font-size: 12px; flex: 0 1 auto; min-width: 0; max-width: 320px;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -195,6 +198,7 @@
     <span id="dirty"></span>
     <span class="spacer"></span>
     <span id="hint">提示：右键空白处添加节点 · 滚轮缩放 · 拖动平移 · 详见“帮助”</span>
+    <span id="ver" title="当前版本"></span>
   </div>
   <div id="panel"></div>
   <div id="wrap">

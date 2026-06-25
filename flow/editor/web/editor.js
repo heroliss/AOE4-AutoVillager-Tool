@@ -12,6 +12,7 @@ const ED = (function () {
   let selectedGroupId = null;   // 当前选中的【组】id（组像节点一样可选中；右下角显示组的详情/暴露参数）。与 selectedNode 互斥。
   let seq = 1;
   let booted = false;
+  let APP_TITLE = "AoE4 自动生产助手";   // 程序名（启动时由后端 app_info 覆盖；窗口标题 document.title 用它）
   // 当前流程的元信息：名称/说明/文件路径/是否内置只读（保存时内置会被改为另存）
   let flowMeta = { name: "", desc: "", path: null, readonly: false };
   // 控制面板置顶项：有序的 [nodeId, paramKey, 自定义显示名?]（随流程保存）。
@@ -1709,7 +1710,7 @@ const ED = (function () {
   function showDirty(d) {
     const el = document.getElementById("dirty");
     if (el) el.textContent = d ? "●未保存" : "";
-    try { document.title = (d ? "*" : "") + "AoE4 自动化节点编辑器"; } catch (e) {}
+    try { document.title = (d ? "*" : "") + APP_TITLE; } catch (e) {}
     // 把“是否有未保存修改”同步给 Python，供关闭窗口时弹确认（仅在状态变化时调，省得频繁过桥）
     if (d !== _lastDirty) {
       _lastDirty = d;
@@ -4683,6 +4684,12 @@ const ED = (function () {
       const d = await a.get_defs();
       const b = await a.list_builtin();
       const f = await a.get_flow();
+      try {   // 程序名 + 版本：写入窗口标题与工具栏右侧版本胶囊（单一来源 version.py）
+        const info = await a.app_info();
+        if (info && info.name) { APP_TITLE = info.name; document.title = APP_TITLE; }
+        const ve = document.getElementById("ver");
+        if (ve && info && info.version) ve.textContent = "v" + info.version;
+      } catch (e) {}
       boot({ defs: d, builtin: b, flow: f });
     } catch (err) {
       showError("拉取启动数据失败：\n" + (err && (err.stack || err.message) || err));

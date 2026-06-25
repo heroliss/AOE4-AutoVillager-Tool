@@ -170,6 +170,7 @@ def _to_rel_path(path):
 # 记住上次打开的流程，下次启动自动载入（让编辑器更像“成品工具”：开机即用）。
 # 会话状态存到 %APPDATA%（见 user_settings），不再放程序目录——避免污染仓库 / 重装丢失 / 权限问题。
 import user_settings
+from version import __version__ as APP_VERSION, APP_NAME   # 单一版本/程序名来源（界面标题、关于信息）
 
 _OLD_STATE_FILE = os.path.abspath(".editor_state.json")   # 旧版状态文件，仅用于一次性迁移
 
@@ -1623,6 +1624,10 @@ class Api:
     def get_flow(self):
         return self._payload(self._graph)
 
+    def app_info(self):
+        """程序名 + 版本（前端用于窗口标题与工具栏版本号显示）。单一来源见根目录 version.py。"""
+        return {"name": APP_NAME, "version": APP_VERSION}
+
     @staticmethod
     def _flow_name(path):
         """只读出流程文件里的 name（中文流程名），失败则返回空串。"""
@@ -1845,7 +1850,7 @@ def launch(graph: Optional[Graph] = None, path: Optional[str] = None):
     api._graph = graph
     api._path = path
     index = os.path.join(WEB_DIR, "index.html")
-    api._window = webview.create_window("AoE4 自动化节点编辑器", url=index, js_api=api,
+    api._window = webview.create_window(f"{APP_NAME}  v{APP_VERSION}", url=index, js_api=api,
                                         width=1320, height=820)
 
     # 关闭窗口时，若有未保存修改则弹原生确认（返回 False 取消关闭）。前端通过 set_dirty 同步脏标记。

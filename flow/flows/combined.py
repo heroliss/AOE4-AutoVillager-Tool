@@ -212,16 +212,27 @@ def build_combined_graph() -> Graph:
         {"id": "g_sense", "title": "共享识别", "color": "#3f7a6a",
          "desc": "每帧只识别一次、多段共享：人口/空位/食物/黄金/木头/TC。",
          "members": ["pop", "slots", "food", "gold", "wood", "tc"]},
-        {"id": "g_gate", "title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#7a6a4a", "collapsed": True,
-         "desc": "抢锁/屏蔽之前的短路：逐段判 开关→队列空→资源够买1个→人口有空位；都没活/人口满＝本帧结束。",
-         "members": ["c_zero", "pre_sw_vill", "pre_q_vill", "pre_sw_xq", "pre_q_xq",
-                     "pre_sw_cart", "pre_q_cart",
-                     "c_cost_v", "cmp_food_v", "pre_food_v",
-                     "c_cost_x_food", "cmp_food_x", "pre_food_x",
-                     "c_cost_x", "cmp_gold_x", "pre_gold_x",
-                     "c_cost_cart", "cmp_gold_cart", "pre_gold_cart",
-                     "c_cost_cart_wood", "cmp_wood_cart", "pre_wood_cart",
-                     "cmp_slots", "pre_slots"]},
+        # 生产门控：父组(默认折叠成一个紧凑箱体)，展开后按【单位】拆成与生产段一一对应的子段——
+        # 村民/乡骑/商人三段门控配色与各自生产段一致(蓝/紫/琥珀)，外加一个三段共用的「人口空位」。
+        # 这样“门控里在判什么”与下面“在生产什么”左右对称、一眼对得上。
+        {"id": "g_gate", "title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#6a6f78", "collapsed": True,
+         "desc": "抢锁/屏蔽之前的短路：逐段判 开关→队列空→资源够买1个→人口有空位；都没活/人口满＝本帧结束。\n"
+                 "展开后分 村民/乡骑/商人 三段门控 + 三段共用的「人口空位」，与下方生产段一一对应。",
+         "members": []},
+        {"id": "gate_vill", "parent": "g_gate", "title": "村民门控", "color": "#3a6ea5",
+         "desc": "村民：开关开? → 队列空? → 食物够买1个?（任一不满足→看乡骑段）。",
+         "members": ["pre_sw_vill", "pre_q_vill", "c_cost_v", "cmp_food_v", "pre_food_v"]},
+        {"id": "gate_xq", "parent": "g_gate", "title": "乡骑门控（金朝）", "color": "#8a5a9a",
+         "desc": "乡骑：开关开? → 队列空? → 食物够? → 黄金够?（食物+黄金都要够，否则看商人段）。",
+         "members": ["pre_sw_xq", "pre_q_xq", "c_cost_x_food", "cmp_food_x", "pre_food_x",
+                     "c_cost_x", "cmp_gold_x", "pre_gold_x"]},
+        {"id": "gate_cart", "parent": "g_gate", "title": "商人门控（市场）", "color": "#a5793a",
+         "desc": "商人：开关开? → 队列空? → 木头够? → 黄金够?（木头+黄金都要够，否则本帧结束）。",
+         "members": ["pre_sw_cart", "pre_q_cart", "c_cost_cart_wood", "cmp_wood_cart", "pre_wood_cart",
+                     "c_cost_cart", "cmp_gold_cart", "pre_gold_cart"]},
+        {"id": "gate_slots", "parent": "g_gate", "title": "人口空位（三段共用）", "color": "#5f6b7a",
+         "desc": "人口空位 > 0 才进操作区开始生产；人口已满＝本帧结束。三段共用一次。",
+         "members": ["c_zero", "cmp_slots", "pre_slots"]},
         # 父组：把“进入+三段+收尾”整批操作裹成一个大函数（自身无直接成员，外框由子组撑开）。
         {"id": "g_op", "title": "生产操作区（整批一次）", "color": "#3a6ea5",
          "desc": "抢锁、屏蔽输入、存好编组后，一帧内依次生产 村民/乡骑/商人，最后统一收尾。", "members": []},
@@ -252,11 +263,18 @@ def build_combined_graph() -> Graph:
         ["c_cost_v", "value"], ["c_cost_x_food", "value"], ["c_cost_x", "value"],   # 门控(默认折叠)：各单位单价
         ["c_cost_cart", "value"], ["c_cost_cart_wood", "value"],
     ]
-    # 三段开关再向上冒到「操作区」箱体：折叠整个操作区时仍能一眼看到/切换三段开关。
+    # 子组再把某参数【向上一级】冒到父组箱体：
+    #  · 三段开关 → 「操作区」箱体：折叠整个操作区时仍能一眼看到/切换三段开关；
+    #  · 各单位资源单价 → 「门控」箱体：门控默认折叠，箱体上仍列出各单位单价旋钮（与原折叠门控一致）。
     g.groupexpose = [
         ["g_vill", "sw_vill", "on"],
         ["g_xq", "sw_xq", "on"],
         ["g_cart", "sw_cart", "on"],
+        ["gate_vill", "c_cost_v", "value"],
+        ["gate_xq", "c_cost_x_food", "value"],
+        ["gate_xq", "c_cost_x", "value"],
+        ["gate_cart", "c_cost_cart_wood", "value"],
+        ["gate_cart", "c_cost_cart", "value"],
     ]
     # 折叠箱体上的参数显示名 = 控制面板同名（统一存 labels，键 "nodeId|key"）。
     g.labels = {

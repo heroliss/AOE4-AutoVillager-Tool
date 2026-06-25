@@ -106,8 +106,8 @@ AOE4 自动生产村民工具
 按 Ctrl+C 退出。
 """
 
-# 版本号
-_VERSION = "3.0.0"
+# 版本号（单一来源：根目录 version.py）
+from version import __version__ as _VERSION
 
 # 立即打印启动信息（避免模块导入期间的卡顿）
 print()

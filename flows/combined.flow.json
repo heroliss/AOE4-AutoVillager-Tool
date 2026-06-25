@@ -129,32 +129,67 @@
     {
       "id": "g_gate",
       "title": "生产门控（开关+队列空+资源够+人口空位）",
-      "color": "#7a6a4a",
+      "color": "#6a6f78",
       "collapsed": true,
-      "desc": "抢锁/屏蔽之前的短路：逐段判 开关→队列空→资源够买1个→人口有空位；都没活/人口满＝本帧结束。",
+      "desc": "抢锁/屏蔽之前的短路：逐段判 开关→队列空→资源够买1个→人口有空位；都没活/人口满＝本帧结束。\n展开后分 村民/乡骑/商人 三段门控 + 三段共用的「人口空位」，与下方生产段一一对应。",
+      "members": []
+    },
+    {
+      "id": "gate_vill",
+      "parent": "g_gate",
+      "title": "村民门控",
+      "color": "#3a6ea5",
+      "desc": "村民：开关开? → 队列空? → 食物够买1个?（任一不满足→看乡骑段）。",
       "members": [
-        "c_zero",
         "pre_sw_vill",
         "pre_q_vill",
-        "pre_sw_xq",
-        "pre_q_xq",
-        "pre_sw_cart",
-        "pre_q_cart",
         "c_cost_v",
         "cmp_food_v",
-        "pre_food_v",
+        "pre_food_v"
+      ]
+    },
+    {
+      "id": "gate_xq",
+      "parent": "g_gate",
+      "title": "乡骑门控（金朝）",
+      "color": "#8a5a9a",
+      "desc": "乡骑：开关开? → 队列空? → 食物够? → 黄金够?（食物+黄金都要够，否则看商人段）。",
+      "members": [
+        "pre_sw_xq",
+        "pre_q_xq",
         "c_cost_x_food",
         "cmp_food_x",
         "pre_food_x",
         "c_cost_x",
         "cmp_gold_x",
-        "pre_gold_x",
-        "c_cost_cart",
-        "cmp_gold_cart",
-        "pre_gold_cart",
+        "pre_gold_x"
+      ]
+    },
+    {
+      "id": "gate_cart",
+      "parent": "g_gate",
+      "title": "商人门控（市场）",
+      "color": "#a5793a",
+      "desc": "商人：开关开? → 队列空? → 木头够? → 黄金够?（木头+黄金都要够，否则本帧结束）。",
+      "members": [
+        "pre_sw_cart",
+        "pre_q_cart",
         "c_cost_cart_wood",
         "cmp_wood_cart",
         "pre_wood_cart",
+        "c_cost_cart",
+        "cmp_gold_cart",
+        "pre_gold_cart"
+      ]
+    },
+    {
+      "id": "gate_slots",
+      "parent": "g_gate",
+      "title": "人口空位（三段共用）",
+      "color": "#5f6b7a",
+      "desc": "人口空位 > 0 才进操作区开始生产；人口已满＝本帧结束。三段共用一次。",
+      "members": [
+        "c_zero",
         "cmp_slots",
         "pre_slots"
       ]
@@ -310,6 +345,31 @@
       "g_cart",
       "sw_cart",
       "on"
+    ],
+    [
+      "gate_vill",
+      "c_cost_v",
+      "value"
+    ],
+    [
+      "gate_xq",
+      "c_cost_x_food",
+      "value"
+    ],
+    [
+      "gate_xq",
+      "c_cost_x",
+      "value"
+    ],
+    [
+      "gate_cart",
+      "c_cost_cart_wood",
+      "value"
+    ],
+    [
+      "gate_cart",
+      "c_cost_cart",
+      "value"
     ]
   ],
   "labels": {
@@ -489,7 +549,7 @@
       "type": "math.arith",
       "pos": [
         1595.5,
-        2458.0
+        3194.0
       ],
       "params": {
         "op": "-"
@@ -541,7 +601,7 @@
       "type": "sense.ocr_number",
       "pos": [
         1578.5,
-        2778.0
+        2578.0
       ],
       "params": {
         "region": [
@@ -597,8 +657,8 @@
       "id": "c_zero",
       "type": "data.const_number",
       "pos": [
-        4373.5,
-        432.0
+        4940.5,
+        280.0
       ],
       "params": {
         "value": 0
@@ -669,8 +729,8 @@
       "id": "cmp_slots",
       "type": "logic.compare",
       "pos": [
-        4692.0,
-        232.0
+        4932.0,
+        460.0
       ],
       "params": {
         "op": ">"
@@ -681,7 +741,7 @@
       "id": "pre_slots",
       "type": "control.if",
       "pos": [
-        5019.0,
+        4975.5,
         40.0
       ],
       "params": {},
@@ -692,7 +752,7 @@
       "type": "data.const_number",
       "pos": [
         1604.0,
-        3166.0
+        2966.0
       ],
       "params": {
         "value": 50
@@ -817,7 +877,7 @@
       "id": "pre_gold_cart",
       "type": "control.if",
       "pos": [
-        4735.5,
+        4692.0,
         40.0
       ],
       "params": {},

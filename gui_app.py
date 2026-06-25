@@ -614,19 +614,12 @@ class AOE4App:
 
     @staticmethod
     def _get_version():
-        """获取版本号：优先从git tag读取，否则使用内置版本号"""
+        """版本号：统一从根目录 version.py 读取（单一来源，界面/打包一致）。"""
         try:
-            import subprocess
-            result = subprocess.run(
-                ["git", "describe", "--tags", "--abbrev=0"],
-                capture_output=True, text=True, cwd=BASE_DIR,
-                timeout=3
-            )
-            if result.returncode == 0:
-                return result.stdout.strip().lstrip("v")
+            from version import __version__
+            return __version__
         except Exception:
-            pass
-        return "3.0.0"
+            return "3.1.0"
 
     def _build_ui(self):
         """构建界面"""
