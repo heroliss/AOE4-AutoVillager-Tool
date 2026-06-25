@@ -286,6 +286,8 @@ class ProduceCount(DataNode):
                 help="本来想造多少（如 每TC数×TC个数）。最终产量不会超过它。"),
         data_in("available_slots", DataType.NUMBER, label="空位",
                 help="人口空位（上限−当前）。不接=不受人口限制。多段串联时接【上一段】的“剩余空位”。"),
+        data_in("pop_cost", DataType.NUMBER, label="人口成本", advanced=True,
+                help="造 1 个占多少人口空位（覆盖参数“人口成本(每个)”）。默认 1。占 2+ 的单位改大、不占人口的单位填 0。"),
         data_in("food", DataType.NUMBER, label="食物",
                 help="当前食物量。受 食物÷食物成本 限制。不接=不看食物。多段共用食物时接上一段“剩余食物”。"),
         data_in("gold", DataType.NUMBER, label="黄金",
@@ -330,6 +332,8 @@ class ProduceCount(DataNode):
                   help="造 1 个要花多少木头。被“木头成本”输入覆盖。0=不看木头。", advanced=True),
         ParamSpec("stone_cost", "石头单位成本", "float", default=0.0, minimum=0.0,
                   help="造 1 个要花多少石头。被“石头成本”输入覆盖。0=不看石头。", advanced=True),
+        ParamSpec("pop_cost", "人口成本(每个)", "float", default=1.0, minimum=0.0,
+                  help="造 1 个占用多少人口空位。默认 1（绝大多数单位）。占 2+ 的改大、不占人口的填 0。被“人口成本”输入覆盖。", advanced=True),
         ParamSpec("cap", "数量上限", "int", default=-1, help="-1 表示不启用上限（需配合“当前数量”输入）。", advanced=True),
     ]
 
@@ -339,6 +343,8 @@ class ProduceCount(DataNode):
         active = (True if sw is None else bool(sw)) and not bool(inputs.get("busy"))
 
         slots = inputs.get("available_slots")
+        pc = inputs.get("pop_cost")               # 每个单位占多少人口；接了输入用它，否则回落到参数(默认1)
+        pop_cost = self.values["pop_cost"] if pc is None else pc
         amts = {nm: inputs.get(nm) for nm in self.RES}
         costs = {}
         for nm in self.RES:
@@ -346,8 +352,8 @@ class ProduceCount(DataNode):
             costs[nm] = self.values[nm + "_cost"] if c is None else c
 
         count = planned
-        if slots is not None:
-            count = min(count, slots)
+        if slots is not None and pop_cost and pop_cost > 0:   # 人口成本≤0 = 不占人口、不受空位限制
+            count = min(count, int(slots // pop_cost))
         for nm in self.RES:
             a, c = amts[nm], costs[nm]
             if a is not None and c and c > 0:
@@ -360,7 +366,8 @@ class ProduceCount(DataNode):
         if not active:               # 本段不该生产：产量0，预算原样透传（不占用人口/资源池）
             count = 0
 
-        out = {"count": count, "slots_left": None if slots is None else slots - count}
+        used_slots = count * pop_cost if (pop_cost and pop_cost > 0) else 0   # 本段占用的人口（按每个成本）
+        out = {"count": count, "slots_left": None if slots is None else slots - used_slots}
         for nm in self.RES:
             a, c = amts[nm], costs[nm]
             out[nm + "_left"] = None if a is None else a - (count * c if (c and c > 0) else 0)

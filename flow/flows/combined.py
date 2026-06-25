@@ -1,5 +1,5 @@
 """
-统一生产流程：在同一张图里、同一帧内依次生产【村民 / 乡骑 / 商人】，每段都有独立开关。
+统一生产流程：在同一张图里、同一帧内依次生产【村民 / 乡骑 / 商人 / 渔船】，每段都有独立开关。
 
 设计要点（回答"能否同图同时跑、阶段复用"）：
 - 共享前段只跑一次：修饰键/窗口/遮挡/渐变判断 -> 取锁 -> 屏蔽 -> 存编组。
@@ -8,8 +8,10 @@
 - 取锁/屏蔽/存编组/收尾对整批生产只做一次（一次输入屏蔽窗口内做完所有生产）。
 - 传感器（截图/OCR/模板）逐帧记忆化：多段都读"人口/空位"等也只算一次。
 
-开关默认：村民=开、乡骑=关、商人=关（默认行为≈普通出农；用户在节点上翻开关即可启停各段）。
-区域/模板/按键/成本均为占位默认值，需用编辑器按实际填写（尤其乡骑/商人模板）。
+开关默认：村民=开、乡骑=关、商人=关、渔船=关（默认行为≈普通出农；用户在节点上翻开关即可启停各段）。
+区域/模板/按键/成本均为占位默认值，需用编辑器按实际填写（尤其乡骑/商人/渔船模板）。
+渔船段与商人段同构：选码头(默认 K)→数码头→按“每码头数×码头个数”排队；只吃木头(默认 75)，
+队列占用图标 templates/fishing_boat.png（识别队列里是否已在造渔船、避免重复排队）。
 """
 from __future__ import annotations
 
@@ -40,11 +42,19 @@ MARKET = {
     "single_template": "templates/market_single.png",
     "numbered_templates": [f"templates/market_num_{i}.png" for i in range(2, 10)],
 }
+# 码头计数：与市场【同一套算法、同一识别区域】（用户要求），仅模板换成 pier_*：
+#   pier_single.png=1个码头，pier_2..9.png=2..9个（与 market_single / market_num_* 一一对应）。
+DOCK = {
+    **MARKET,
+    "building_name": "码头",
+    "single_template": "templates/pier_single.png",
+    "numbered_templates": [f"templates/pier_{i}.png" for i in range(2, 10)],
+}
 
 
 def build_combined_graph() -> Graph:
-    g = Graph(name="统一生产(村民/乡骑/商人)",
-              description="同一帧内依次生产 村民/乡骑/商人，每段由一个开关节点单独启停（默认只开村民）。\n"
+    g = Graph(name="统一生产(村民/乡骑/商人/渔船)",
+              description="同一帧内依次生产 村民/乡骑/商人/渔船，每段由一个开关节点单独启停（默认只开村民）。\n"
                           "前段做一次共享判断（暂停/窗口/遮挡）；三段复用人口/资源/TC 等识别结果"
                           "（每个区域每帧只截一次、自动缓存共享，无需整屏预取）。\n"
                           "区域/模板/按键/成本均为占位默认值，请按你的分辨率与实际界面在节点上调整。")
@@ -117,6 +127,12 @@ def build_combined_graph() -> Graph:
     add("c_cost_cart_wood", "data.const_number", {"value": 60})  # 商人单价(木头)
     add("cmp_wood_cart", "logic.compare", {"op": ">="})    # 木头 ≥ 商人木头单价 ?
     add("pre_wood_cart", "control.if")
+    # 渔船门控（码头）：只吃【木头75】（默认；不吃食物/黄金）。木头够买1个才进。
+    add("pre_sw_fish", "control.if")
+    add("pre_q_fish", "control.if")
+    add("c_cost_fish", "data.const_number", {"value": 75})   # 渔船单价(木头)；放到控制面板可按国家调
+    add("cmp_wood_fish", "logic.compare", {"op": ">="})    # 木头 ≥ 渔船木头单价 ?
+    add("pre_wood_fish", "control.if")
 
     # 操作锁 / 输入屏蔽 / 存当前编组（整批生产共用一次）
     add("lock", "control.lock_acquire")
@@ -164,6 +180,23 @@ def build_combined_graph() -> Graph:
     add("prod_cart", "game.produce_count", {"cost_per_unit": 60, "cap": -1})   # 成本由 c_cost_cart 喂入(下方连线)，此为兜底
     add("queue_cart", "action.press_key", {"key": "q"})
 
+    # ==================== 渔船段（码头）====================
+    # 与商人段同构：选码头→数码头→按“每码头数×码头个数”排队。差异：只吃木头(75)，建筑模板换 pier_*，选码头键=K。
+    add("sw_fish", "data.switch", {"on": False})            # 开关：是否生产渔船（码头）。默认关
+    add("if_sw_fish", "control.if")
+    add("q_fish", "sense.template_match",
+        {"region": QUEUE_REGION, "templates": ["templates/fishing_boat.png"], "threshold": 0.6, "transition_guard": True})
+    add("if_qfish", "control.if")
+    add("sel_dock", "action.press_key", {"key": "k"})       # 选中所有码头（默认绑定 K）
+    add("dock", "game.building_count", DOCK)                 # 数码头（与市场同套算法、同识别区域）：没码头→ok=False、count=0
+    add("not_dock", "logic.not")                            # 「没有码头」= 非(码头·成功)
+    add("set_fish", "control.set_switch",                   # 没码头就把「出渔船」开关设为「关」并提示
+        {"target": "sw_fish", "value": False, "reason": "未检测到码头"})
+    add("c_per_fish", "data.const_number", {"value": 2})    # 每个码头出渔船数（默认2）
+    add("plan_fish", "math.arith", {"op": "*"})
+    add("prod_fish", "game.produce_count", {"wood_cost": 75, "cap": -1})   # 只吃木头；成本由 c_cost_fish 喂入(下方连线)，此为兜底
+    add("queue_fish", "action.press_key", {"key": "q"})    # 出渔船快捷键（占位，需游戏内设置；放到控制面板可调）
+
     # ==================== 收尾（整批一次）====================
     add("restore", "action.press_key", {"key": "0"})
     add("disband", "action.press_key", {"key": "0", "modifiers": "ctrl,alt"})
@@ -178,26 +211,30 @@ def build_combined_graph() -> Graph:
         ["sw_vill", "on", "出村民"],
         ["sw_xq", "on", "出乡骑(金朝)"],
         ["sw_cart", "on", "出商人(市场)"],
+        ["sw_fish", "on", "出渔船(码头)"],
         ["c_per_v", "value", "每个TC出村民数"],
         ["c_per_x", "value", "每个TC出乡骑数"],
         ["c_per_cart", "value", "每个市场出商人数"],
+        ["c_per_fish", "value", "每个码头出渔船数"],
         ["c_cost_v", "value", "村民成本(食物)"],
         ["c_cost_x_food", "value", "乡骑成本(食物)"],
         ["c_cost_x", "value", "乡骑成本(黄金)"],
         ["c_cost_cart", "value", "商人成本(黄金)"],
         ["c_cost_cart_wood", "value", "商人成本(木头)"],
+        ["c_cost_fish", "value", "渔船成本(木头)"],
         ["win", "hdr", "HDR模式"],
-        ["tick", "interval", "循环间隔(秒)"],
-        ["delay", "seconds", "每轮等待(秒)"],
         ["queue_v", "key", "村民生产键"],
         ["queue_x", "key", "乡骑生产键"],
         ["queue_cart", "key", "商人生产键"],
+        ["queue_fish", "key", "渔船生产键"],
         ["sel_market", "key", "选中市场键"],
+        ["sel_dock", "key", "选中码头键"],
     ]
-    # 游戏内覆盖层默认显示的开关：只点亮「出村民」「出商人」两个（其余项可在控制面板点 📺 再加）。
+    # 游戏内覆盖层默认显示的开关：点亮「出村民」「出商人」「出渔船」（其余项可在控制面板点 📺 再加）。
     g.overlaypanel = [
         ["sw_vill", "on"],
         ["sw_cart", "on"],
+        ["sw_fish", "on"],
     ]
 
     # ==================== 可视化分组（两级嵌套：组≈函数）====================
@@ -219,7 +256,7 @@ def build_combined_graph() -> Graph:
         # 这样“门控里在判什么”与下面“在生产什么”左右对称、一眼对得上。
         {"id": "g_gate", "title": "生产门控（开关+队列空+资源够+人口空位）", "color": "#6a6f78",
          "desc": "抢锁/屏蔽之前的短路：逐段判 开关→队列空→资源够买1个→人口有空位；都没活/人口满＝本帧结束。\n"
-                 "展开后分 村民/乡骑/商人 三段门控 + 三段共用的「人口空位」，与下方生产段一一对应。",
+                 "展开后分 村民/乡骑/商人/渔船 四段门控 + 四段共用的「人口空位」，与下方生产段一一对应。",
          "members": []},
         {"id": "gate_vill", "parent": "g_gate", "title": "村民门控", "color": "#3a6ea5",
          "desc": "村民：开关开? → 队列空? → 食物够买1个?（任一不满足→看乡骑段）。",
@@ -229,15 +266,18 @@ def build_combined_graph() -> Graph:
          "members": ["pre_sw_xq", "pre_q_xq", "c_cost_x_food", "cmp_food_x", "pre_food_x",
                      "c_cost_x", "cmp_gold_x", "pre_gold_x"]},
         {"id": "gate_cart", "parent": "g_gate", "title": "商人门控（市场）", "color": "#a5793a",
-         "desc": "商人：开关开? → 队列空? → 木头够? → 黄金够?（木头+黄金都要够，否则本帧结束）。",
+         "desc": "商人：开关开? → 队列空? → 木头够? → 黄金够?（木头+黄金都要够，否则看渔船段）。",
          "members": ["pre_sw_cart", "pre_q_cart", "c_cost_cart_wood", "cmp_wood_cart", "pre_wood_cart",
                      "c_cost_cart", "cmp_gold_cart", "pre_gold_cart"]},
-        {"id": "gate_slots", "parent": "g_gate", "title": "人口空位（三段共用）", "color": "#5f6b7a",
-         "desc": "人口空位 > 0 才进操作区开始生产；人口已满＝本帧结束。三段共用一次。",
+        {"id": "gate_fish", "parent": "g_gate", "title": "渔船门控（码头）", "color": "#3f7a6a",
+         "desc": "渔船：开关开? → 队列空? → 木头够买1个?（只吃木头，任一不满足→本帧结束）。",
+         "members": ["pre_sw_fish", "pre_q_fish", "c_cost_fish", "cmp_wood_fish", "pre_wood_fish"]},
+        {"id": "gate_slots", "parent": "g_gate", "title": "人口空位（四段共用）", "color": "#5f6b7a",
+         "desc": "人口空位 > 0 才进操作区开始生产；人口已满＝本帧结束。四段共用一次。",
          "members": ["c_zero", "cmp_slots", "pre_slots"]},
         # 父组：把“进入+三段+收尾”整批操作裹成一个大函数（自身无直接成员，外框由子组撑开）。
         {"id": "g_op", "title": "生产操作区（整批一次）", "color": "#3a6ea5",
-         "desc": "抢锁、屏蔽输入、存好编组后，一帧内依次生产 村民/乡骑/商人，最后统一收尾。", "members": []},
+         "desc": "抢锁、屏蔽输入、存好编组后，一帧内依次生产 村民/乡骑/商人/渔船，最后统一收尾。", "members": []},
         {"id": "g_enter", "parent": "g_op", "title": "进入", "color": "#4178b5",
          "desc": "取锁→屏蔽鼠标键盘→Ctrl+0 暂存当前选择→松修饰键。",
          "members": ["lock", "block_begin", "save_sel", "relmod1"]},
@@ -250,6 +290,9 @@ def build_combined_graph() -> Graph:
         {"id": "g_cart", "parent": "g_op", "title": "商人段（市场）", "color": "#a5793a",
          "members": ["sw_cart", "if_sw_cart", "q_cart", "if_qcart", "sel_market", "market", "not_mkt", "set_cart",
                      "c_per_cart", "plan_cart", "prod_cart", "queue_cart"]},
+        {"id": "g_fish", "parent": "g_op", "title": "渔船段（码头）", "color": "#3f7a6a",
+         "members": ["sw_fish", "if_sw_fish", "q_fish", "if_qfish", "sel_dock", "dock", "not_dock", "set_fish",
+                     "c_per_fish", "plan_fish", "prod_fish", "queue_fish"]},
         {"id": "g_exit", "parent": "g_op", "title": "收尾", "color": "#5a9367",
          "desc": "恢复编组选择→解散临时编组→松修饰键→解除屏蔽→等待→解锁。",
          "members": ["restore", "disband", "relmod2", "block_end", "delay", "unlock"]},
@@ -259,11 +302,12 @@ def build_combined_graph() -> Graph:
     # foldparams=节点把【自身】参数暴露给它所在的【直接组】（折叠该组后在箱体上可调）；
     # groupexpose=该组再把某参数【向上一级】暴露给父组。于是折叠时箱体即列出关键旋钮，不必展开。
     g.foldparams = [
-        ["sw_vill", "on"], ["c_per_v", "value"],          # 三段：开关 + 每×数
+        ["sw_vill", "on"], ["c_per_v", "value"],          # 四段：开关 + 每×数
         ["sw_xq", "on"], ["c_per_x", "value"],
         ["sw_cart", "on"], ["c_per_cart", "value"],
+        ["sw_fish", "on"], ["c_per_fish", "value"],
         ["c_cost_v", "value"], ["c_cost_x_food", "value"], ["c_cost_x", "value"],   # 门控(默认折叠)：各单位单价
-        ["c_cost_cart", "value"], ["c_cost_cart_wood", "value"],
+        ["c_cost_cart", "value"], ["c_cost_cart_wood", "value"], ["c_cost_fish", "value"],
     ]
     # 子组再把某参数【向上一级】冒到父组箱体：
     #  · 三段开关 → 「操作区」箱体：折叠整个操作区时仍能一眼看到/切换三段开关；
@@ -272,18 +316,21 @@ def build_combined_graph() -> Graph:
         ["g_vill", "sw_vill", "on"],
         ["g_xq", "sw_xq", "on"],
         ["g_cart", "sw_cart", "on"],
+        ["g_fish", "sw_fish", "on"],
         ["gate_vill", "c_cost_v", "value"],
         ["gate_xq", "c_cost_x_food", "value"],
         ["gate_xq", "c_cost_x", "value"],
         ["gate_cart", "c_cost_cart_wood", "value"],
         ["gate_cart", "c_cost_cart", "value"],
+        ["gate_fish", "c_cost_fish", "value"],
     ]
     # 折叠箱体上的参数显示名 = 控制面板同名（统一存 labels，键 "nodeId|key"）。
     g.labels = {
-        "sw_vill|on": "出村民", "sw_xq|on": "出乡骑(金朝)", "sw_cart|on": "出商人(市场)",
-        "c_per_v|value": "每个TC出村民数", "c_per_x|value": "每个TC出乡骑数", "c_per_cart|value": "每个市场出商人数",
+        "sw_vill|on": "出村民", "sw_xq|on": "出乡骑(金朝)", "sw_cart|on": "出商人(市场)", "sw_fish|on": "出渔船(码头)",
+        "c_per_v|value": "每个TC出村民数", "c_per_x|value": "每个TC出乡骑数",
+        "c_per_cart|value": "每个市场出商人数", "c_per_fish|value": "每个码头出渔船数",
         "c_cost_v|value": "村民成本(食物)", "c_cost_x_food|value": "乡骑成本(食物)", "c_cost_x|value": "乡骑成本(黄金)",
-        "c_cost_cart|value": "商人成本(黄金)", "c_cost_cart_wood|value": "商人成本(木头)",
+        "c_cost_cart|value": "商人成本(黄金)", "c_cost_cart_wood|value": "商人成本(木头)", "c_cost_fish|value": "渔船成本(木头)",
     }
 
     # ==================== 节点说明（编辑器里展示，帮助看懂每个节点的作用）====================
@@ -312,11 +359,11 @@ def build_combined_graph() -> Graph:
         "pre_q_vill": "门控·村民队列空吗？空→去看“人口有空位吗”；已在造→跳过本段（不抢锁）。",
         "pre_sw_xq": "门控·乡骑开关开着吗？开→看乡骑队列；关→看商人段。",
         "pre_q_xq": "门控·乡骑队列空吗？空→去看“人口有空位吗”；已在造→看商人段。",
-        "pre_sw_cart": "门控·商人开关开着吗？关→本帧结束（无活）。",
-        "pre_q_cart": "门控·商人队列空吗？空→先看“木头够不够买1个”；已在造→本帧结束。",
+        "pre_sw_cart": "门控·商人开关开着吗？关→看渔船段。",
+        "pre_q_cart": "门控·商人队列空吗？空→先看“木头够不够买1个”；已在造→看渔船段。",
         "c_cost_cart_wood": "常量·商人单价(木头，默认60)。商人同吃木头+黄金(默认60木60金，不吃食物)——已放控制面板，可按国家调。同时供门控判断和产能计算。",
         "cmp_wood_cart": "门控·木头 ≥ 商人木头单价？",
-        "pre_wood_cart": "门控·木头够→再看黄金；不够→本帧结束。",
+        "pre_wood_cart": "门控·木头够→再看黄金；不够→看渔船段。",
         "c_cost_v": "常量·村民单价(食物，默认50)：食物不到这个数连1个都买不起、产量必为0。不同国家不同，已放到控制面板；同时供门控和产能计算。",
         "cmp_food_v": "门控·食物 ≥ 村民单价？顺带把食物OCR提前算好（挪出屏蔽窗口）。",
         "pre_food_v": "门控·食物够→看人口空位；不够（产量必为0）→跳过村民段，看乡骑（不进操作区、不按H、不排0个）。",
@@ -328,8 +375,13 @@ def build_combined_graph() -> Graph:
         "pre_gold_x": "门控·食物+黄金都够→看人口空位；黄金不够→跳过乡骑段，看商人。",
         "c_cost_cart": "常量·商人单价(黄金，默认60)。不同国家不同——已放到控制面板，可按你的国家调。同时供门控判断和产能计算。",
         "cmp_gold_cart": "门控·黄金 ≥ 商人黄金单价？",
-        "pre_gold_cart": "门控·黄金够→看人口空位；不够→本帧结束。",
-        "cmp_slots": "门控·人口空位 > 0？（三段共用：人口已满时谁都产不了，直接结束本帧）。",
+        "pre_gold_cart": "门控·黄金够→看人口空位；不够→看渔船段。",
+        "pre_sw_fish": "门控·渔船开关开着吗？关→本帧结束（无活）。",
+        "pre_q_fish": "门控·渔船队列空吗？空→看“木头够不够买1个”；已在造→本帧结束。",
+        "c_cost_fish": "常量·渔船单价(木头，默认75)。渔船只吃木头——已放控制面板，可按国家调。同时供门控判断和产能计算。",
+        "cmp_wood_fish": "门控·木头 ≥ 渔船木头单价？",
+        "pre_wood_fish": "门控·木头够→看人口空位；不够→本帧结束。",
+        "cmp_slots": "门控·人口空位 > 0？（四段共用：人口已满时谁都产不了，直接结束本帧）。",
         "pre_slots": "门控·有空位→开操作区(lock) 开始生产；人口已满→本帧到此结束（不抢锁/不屏蔽/不动编组）。",
         "sw_vill": "【开关】是否生产村民。关掉则整段跳过。",
         "if_sw_vill": "村民开关：开→进入村民段；关→直接跳到乡骑段。",
@@ -351,7 +403,7 @@ def build_combined_graph() -> Graph:
         "prod_x": "实际产量 = min(计划, 剩余空位, 剩余食物÷食物单价, 黄金÷黄金单价)。乡骑同时吃食物+黄金：食物从村民段结转(共用食物池)、黄金为黄金链起点；再把用剩的空位/黄金结转给商人段。乡骑没真生产时产0、预算透传。",
         "queue_x": "按 E 排队生产乡骑（金朝乡骑默认快捷键＝E；不同设置自行改键）。",
         "sw_cart": "【开关】是否生产商人（市场出商人）。默认关。",
-        "if_sw_cart": "商人开关：开→进入商人段；关→进入收尾。",
+        "if_sw_cart": "商人开关：开→进入商人段；关→进入渔船段。",
         "q_cart": "检测队列里是否已有商人。",
         "if_qcart": "队列已有商人则跳过本段。",
         "sel_market": "按 J 选中所有市场。⚠需在游戏里把“选所有市场”绑定到 J。按完不必再放延时——"
@@ -365,6 +417,22 @@ def build_combined_graph() -> Graph:
         "plan_cart": "计划数 = 每市场数量 × 市场个数（来自「数市场」；没市场则=0，自然不排）。",
         "prod_cart": "实际产量 = min(计划, 剩余人口空位, 木头÷木头单价, 剩余黄金÷黄金单价)。商人同吃木头+黄金(默认60木60金，不吃食物)；空位/黄金来自乡骑段结转——所以即使村民/乡骑同帧在产，商人仍按“真正剩下的”池子独立生产。木头为商人段起点(整池可用)。",
         "queue_cart": "按 Q 排队生产商人。",
+        "sw_fish": "【开关】是否生产渔船（码头出渔船）。默认关。",
+        "if_sw_fish": "渔船开关：开→进入渔船段；关→进入收尾。",
+        "q_fish": "检测队列里是否已有渔船（模板 templates/fishing_boat.png），避免重复排队。",
+        "if_qfish": "队列已有渔船则跳过本段。",
+        "sel_dock": "按 K 选中所有码头。⚠需在游戏里把“选所有码头”绑定到 K。按完不必再放延时——"
+                    "下游「数码头」节点会在面板刷新出来前自动重试重截。",
+        "dock": "数当前有几个码头（与市场计数同套算法、同识别区域，仅模板换 pier_*）。没数到码头→「成功」=否、「数量」=0："
+                "用它驱动『没码头就自动关掉出渔船开关』，并把“每码头×码头数”作为渔船计划数。",
+        "not_dock": "「非」：把「数码头·成功」取反 = “没有码头”。接给「设置开关」的条件。",
+        "set_fish": "设置开关：条件接「没有码头」、设为「关」——按 K 后没数到码头就把「出渔船」开关设为关并在日志提示"
+                    "（下一帧门控即跳过渔船段、不再反复按 K）。开关在编辑器/面板里会真的跟着变成关，可保存。",
+        "c_per_fish": "每个码头一次排几个渔船。",
+        "plan_fish": "计划数 = 每码头数量 × 码头个数（来自「数码头」；没码头则=0，自然不排）。",
+        "prod_fish": "实际产量 = min(计划, 剩余人口空位, 剩余木头÷木头单价)。渔船只吃木头(默认75)；空位/木头都从商人段结转——"
+                     "即使村民/乡骑/商人同帧在产，渔船仍按“真正剩下的”池子独立生产，不重复占用。",
+        "queue_fish": "按 渔船生产键 排队生产渔船（按实际产量次数；占位为 Q，需按游戏实际改键）。",
         "restore": "按 0 恢复操作前暂存的编组选择。",
         "disband": "Ctrl+Alt+0：解散临时编组，避免污染玩家的编组。",
         "relmod2": "再次松开修饰键，确保收尾干净。",
@@ -400,10 +468,18 @@ def build_combined_graph() -> Graph:
     g.connect_exec("pre_food_x", "false", "pre_sw_cart", "in")  # 食物不足 → 跳过乡骑段，看商人
     g.connect_exec("pre_gold_x", "true", "pre_slots", "in")     # 食物+黄金都够 → 看人口空位
     g.connect_exec("pre_gold_x", "false", "pre_sw_cart", "in")  # 黄金不足 → 跳过乡骑段，看商人
-    g.connect_exec("pre_sw_cart", "true", "pre_q_cart", "in")   # false 不接 = 本帧结束
+    g.connect_exec("pre_sw_cart", "true", "pre_q_cart", "in")
+    g.connect_exec("pre_sw_cart", "false", "pre_sw_fish", "in")    # 商人开关关 → 看渔船段
     g.connect_exec("pre_q_cart", "false", "pre_wood_cart", "in")  # 队列空 → 先看木头够不够买1个商人（商人吃木头+黄金）
-    g.connect_exec("pre_wood_cart", "true", "pre_gold_cart", "in")  # 木头够 → 再看黄金；false 不接 = 木头不足，本帧结束
-    g.connect_exec("pre_gold_cart", "true", "pre_slots", "in")  # false 不接 = 黄金不足，本帧结束
+    g.connect_exec("pre_q_cart", "true", "pre_sw_fish", "in")      # 已在造 → 跳过本段，看渔船
+    g.connect_exec("pre_wood_cart", "true", "pre_gold_cart", "in")  # 木头够 → 再看黄金
+    g.connect_exec("pre_wood_cart", "false", "pre_sw_fish", "in")  # 木头不足 → 跳过商人段，看渔船
+    g.connect_exec("pre_gold_cart", "true", "pre_slots", "in")
+    g.connect_exec("pre_gold_cart", "false", "pre_sw_fish", "in")  # 黄金不足 → 跳过商人段，看渔船
+    # 渔船门控（只吃木头）：开关→队列空→木头够买1个→（共用）人口空位。任一不满足→本帧结束（出口不接即结束）。
+    g.connect_exec("pre_sw_fish", "true", "pre_q_fish", "in")      # false 不接 = 本帧结束
+    g.connect_exec("pre_q_fish", "false", "pre_wood_fish", "in")  # 队列空 → 看木头够不够买1个渔船；true 不接 = 已在造，本帧结束
+    g.connect_exec("pre_wood_fish", "true", "pre_slots", "in")    # 木头够 → 看人口空位；false 不接 = 木头不足，本帧结束
     g.connect_exec("pre_slots", "true", "lock", "in")           # 有空位 → 开操作区开始生产；false 不接 = 人口已满，本帧结束
 
     g.connect_exec("lock", "ok", "block_begin", "in")       # 占用中(busy)则结束本帧
@@ -429,12 +505,21 @@ def build_combined_graph() -> Graph:
 
     # 商人段
     g.connect_exec("if_sw_cart", "true", "if_qcart", "in")
-    g.connect_exec("if_sw_cart", "false", "restore", "in")
+    g.connect_exec("if_sw_cart", "false", "if_sw_fish", "in")   # 关→进入渔船段
     g.connect_exec("if_qcart", "false", "sel_market", "in")
-    g.connect_exec("if_qcart", "true", "restore", "in")
+    g.connect_exec("if_qcart", "true", "if_sw_fish", "in")      # 已在造→进入渔船段
     g.connect_exec("sel_market", "out", "set_cart", "in")       # 按J后先判市场：没有就把「出商人」开关设为关
     g.connect_exec("set_cart", "out", "queue_cart", "in")       # 再排队（没市场则产量0、press_key自然不按）
-    g.connect_exec("queue_cart", "out", "restore", "in")
+    g.connect_exec("queue_cart", "out", "if_sw_fish", "in")     # 出完商人 → 进渔船段
+
+    # 渔船段（同商人段：开关 → 队列检查 → 选码头 → 判码头 → 排队；任一跳过都接到收尾）
+    g.connect_exec("if_sw_fish", "true", "if_qfish", "in")
+    g.connect_exec("if_sw_fish", "false", "restore", "in")
+    g.connect_exec("if_qfish", "false", "sel_dock", "in")
+    g.connect_exec("if_qfish", "true", "restore", "in")
+    g.connect_exec("sel_dock", "out", "set_fish", "in")         # 按K后先判码头：没有就把「出渔船」开关设为关
+    g.connect_exec("set_fish", "out", "queue_fish", "in")       # 再排队（没码头则产量0、press_key自然不按）
+    g.connect_exec("queue_fish", "out", "restore", "in")
 
     # 收尾
     g.connect_exec("restore", "out", "disband", "in")
@@ -510,6 +595,21 @@ def build_combined_graph() -> Graph:
     g.connect_data("q_cart", "found", "prod_cart", "busy")
     g.connect_data("prod_cart", "count", "queue_cart", "count")
 
+    # 渔船段数据（码头数由「数码头」实测；空位与木头从商人段结转；只吃木头75）
+    g.connect_data("sw_fish", "value", "if_sw_fish", "cond")
+    g.connect_data("q_fish", "found", "if_qfish", "cond")
+    g.connect_data("dock", "ok", "not_dock", "a")              # 没有码头 = 非(码头·成功)
+    g.connect_data("not_dock", "result", "set_fish", "condition")  # 没码头→条件为真→把「出渔船」设为关
+    g.connect_data("c_per_fish", "value", "plan_fish", "a")
+    g.connect_data("dock", "count", "plan_fish", "b")          # 计划=每码头数×码头个数（没码头=0）
+    g.connect_data("plan_fish", "value", "prod_fish", "planned")
+    g.connect_data("prod_cart", "slots_left", "prod_fish", "available_slots")   # 空位 = 商人用剩的（=村民/乡骑也用剩的）
+    g.connect_data("prod_cart", "wood_left", "prod_fish", "wood")               # 木头 = 商人用剩的（商人也吃木头，逐段扣减不重复占用）
+    g.connect_data("c_cost_fish", "value", "prod_fish", "wood_cost")            # 渔船木头单价(75)
+    g.connect_data("sw_fish", "value", "prod_fish", "switch")
+    g.connect_data("q_fish", "found", "prod_fish", "busy")
+    g.connect_data("prod_fish", "count", "queue_fish", "count")
+
     # 生产门控数据（简化）：开关/队列复用各段已有节点（按帧记忆化）；产能/食物/TC 一概不读。
     # 人口空位 > 0 三段共用一次（slots = 人口上限 - 当前，已在共享前段算好）。
     g.connect_data("sw_vill", "value", "pre_sw_vill", "cond")
@@ -518,6 +618,8 @@ def build_combined_graph() -> Graph:
     g.connect_data("q_xq", "found", "pre_q_xq", "cond")
     g.connect_data("sw_cart", "value", "pre_sw_cart", "cond")
     g.connect_data("q_cart", "found", "pre_q_cart", "cond")
+    g.connect_data("sw_fish", "value", "pre_sw_fish", "cond")
+    g.connect_data("q_fish", "found", "pre_q_fish", "cond")
     g.connect_data("slots", "value", "cmp_slots", "a")
     g.connect_data("c_zero", "value", "cmp_slots", "b")
     g.connect_data("cmp_slots", "result", "pre_slots", "cond")
@@ -539,5 +641,8 @@ def build_combined_graph() -> Graph:
     g.connect_data("wood", "value", "cmp_wood_cart", "a")        # 商人木头门控
     g.connect_data("c_cost_cart_wood", "value", "cmp_wood_cart", "b")
     g.connect_data("cmp_wood_cart", "result", "pre_wood_cart", "cond")
+    g.connect_data("wood", "value", "cmp_wood_fish", "a")        # 渔船木头门控（用原始木头量预判：门控在操作区之前，prod_cart 尚未扣减）
+    g.connect_data("c_cost_fish", "value", "cmp_wood_fish", "b")
+    g.connect_data("cmp_wood_fish", "result", "pre_wood_fish", "cond")
 
     return g

@@ -144,8 +144,10 @@ def main() -> None:
         "food": {"value": 300, "value2": None, "ok": True},
         "gold": {"value": 800, "value2": None, "ok": True},
         "wood": {"value": 800, "value2": None, "ok": True},  # 商人段会读木头(默认成本0=不限制)
+        "q_fish": {"found": False, "in_transition": False, "which": -1},
         "tc": {"count": 1, "ok": True},
         "market": {"count": 1, "ok": True},                  # 商人段数市场：默认有1个市场
+        "dock": {"count": 1, "ok": True},                    # 渔船段数码头：默认有1个码头
     }
     print("== 统一生产：默认(村民开/乡骑关/商人关) -> 只出村民 ==")
     logs, _ = run_with_stubs(build_combined_graph, COMBINED)
@@ -200,6 +202,40 @@ def main() -> None:
     ok &= check("没市场仍按J确认了一次", any("按键 j" in m for m in logs))
     ok &= check("没市场则不排商人(产量0、不按键)", not any("按键 q" in m for m in logs))
     ok &= check("没市场自动把出商人设为关并提示", any("设为「关」" in m for m in logs))
+
+    print("== 统一生产：开渔船段 -> 选码头K + 出渔船(只吃木头75) ==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "sw_vill": {"value": False}, "sw_xq": {"value": False},
+                              "sw_cart": {"value": False}, "sw_fish": {"value": True}})
+    # 只开渔船：村民/乡骑/商人全关、各段透传预算。空位150整池、木头800//75=10≥计划(2*1)=2。
+    ok &= check("选码头 K 键(渔船段开启)", any("按键 k" in m for m in logs))
+    ok &= check("出渔船 q x2 = min(2*1, 空位150, 木头800//75=10)", any("按键 q x2" in m for m in logs))
+
+    print("== 统一生产：渔船受木头限制（只吃木头75；木头只够1个）==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "sw_vill": {"value": False}, "sw_xq": {"value": False},
+                              "sw_cart": {"value": False}, "sw_fish": {"value": True},
+                              "wood": {"value": 100, "value2": None, "ok": True}})  # 100//75=1
+    ok &= check("渔船木头只够1个 q x1 = min(计划2, 木头100//75=1)", any("按键 q x1" in m for m in logs))
+    ok &= check("木头只够1个则不出2个渔船", not any("按键 q x2" in m for m in logs))
+
+    print("== 统一生产：只开渔船但没有码头 -> 自动把出渔船开关设为关并提示 ==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "sw_vill": {"value": False}, "sw_xq": {"value": False},
+                              "sw_cart": {"value": False}, "sw_fish": {"value": True},
+                              "dock": {"count": 0, "ok": False}})
+    ok &= check("没码头仍按K确认了一次", any("按键 k" in m for m in logs))
+    ok &= check("没码头则不排渔船(产量0、不按键)", not any("按键 q" in m for m in logs))
+    ok &= check("没码头自动把出渔船设为关并提示", any("设为「关」" in m for m in logs))
+
+    print("== 统一生产：商人+渔船同开 -> 木头逐段扣减、渔船按商人用剩的算 ==")
+    logs, _ = run_with_stubs(build_combined_graph,
+                             {**COMBINED, "sw_vill": {"value": False}, "sw_xq": {"value": False},
+                              "sw_cart": {"value": True}, "sw_fish": {"value": True},
+                              "wood": {"value": 200, "value2": None, "ok": True}})
+    # 商人吃木头60×2=120 → 木头剩80；渔船吃木头75 → 80//75=1（计划2但木头只够1）。验证木头链结转(商人用剩的给渔船)。
+    ok &= check("选市场J + 选码头K(两段都开)", any("按键 j" in m for m in logs) and any("按键 k" in m for m in logs))
+    ok &= check("渔船按商人用剩的木头算 q x1 = min(计划2, 剩余木头(200-120)//75=1)", any("按键 q x1" in m for m in logs))
 
     print("== 统一生产：食物不足(买不起1个) -> 跳过整个操作区(不抢锁/不按H/不排队) ==")
     logs, ctx = run_with_stubs(build_combined_graph,
