@@ -116,7 +116,8 @@
       "id": "g_sense",
       "title": "共享识别",
       "color": "#3f7a6a",
-      "desc": "每帧只识别一次、多段共享：人口/空位/食物/黄金/木头/TC。",
+      "collapsed": true,
+      "desc": "每帧只识别一次、多段共享：人口/空位/食物/黄金/木头/TC。展开可逐个核对截图区域。",
       "members": [
         "pop",
         "slots",
@@ -549,7 +550,7 @@
       "type": "math.arith",
       "pos": [
         1595.5,
-        3194.0
+        2966.0
       ],
       "params": {
         "op": "-"
@@ -752,7 +753,7 @@
       "type": "data.const_number",
       "pos": [
         1604.0,
-        2966.0
+        3166.0
       ],
       "params": {
         "value": 50

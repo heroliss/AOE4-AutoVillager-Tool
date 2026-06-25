@@ -404,16 +404,37 @@ def mainline_layout(graph, size_fn=None, node_gap: float = 40.0, branch_gap: flo
               if e.src_id == n and e.dst_id in graph.positions]
         return sum(ys) / len(ys) if ys else Y_SPINE
 
+    # 节点 → 直接所属分组id（用于把同组数据节点在列内聚到一起；每个节点至多属于一个组的直接成员）。
+    node_group = {}
+    for gr in (getattr(graph, "groups", []) or []):
+        if not isinstance(gr, dict):
+            continue
+        gid = gr.get("id")
+        for m in (gr.get("members", []) or []):
+            node_group[m] = gid
+
     # —— 再放数据支线：从右往左逐列（保证消费者已就位），一律挂在主线【下方】，按"接入消费者
     #    连接点的高度"排序——接入点高者贴近主线、低者更靠下。全部在下方是为了不跨越白色主线：
     #    数据输入端口都在节点的执行口(进入)之下，支线在下方汇入才不会与主线交叉、不扭麻花。——
+    #    【同组聚类】同一列里属于同一分组的数据节点排在一起(成一小块)，组框才紧凑；否则它们各自被
+    #    anchor_y 散开、纵向贯穿整列，组框被拉成压住别组的"竖条"(典型：共享识别)。组与组之间仍按
+    #    各自最小 anchor_y 排序，保持大致的上下流向、少交叉。
     for c in reversed(cols_sorted):
         da = [n for n in by_col[c] if n not in spine_set]
         if not da:
             continue
-        da.sort(key=anchor_y)
-        yb = spine_bot[c] + branch_gap
+        buckets = {}                     # 分组id(或无组节点各自独立) → 该列里的成员
         for n in da:
+            key = node_group.get(n)
+            if key is None:
+                key = ("__solo__", n)    # 不属于任何组的节点：各自独立成桶，不被强行聚到一起
+            buckets.setdefault(key, []).append(n)
+        for lst in buckets.values():
+            lst.sort(key=anchor_y)       # 桶内按接入高度排
+        ordered = [n for lst in sorted(buckets.values(), key=lambda lst: anchor_y(lst[0]))
+                   for n in lst]         # 桶间按桶内最小接入高度排，再摊平
+        yb = spine_bot[c] + branch_gap
+        for n in ordered:
             w, h = sz[n]
             r = _preview_reserve(graph.nodes[n])     # 预览节点上方留出截图高度
             graph.positions[n] = (col_x[c] + (col_w[c] - w) / 2.0, yb + r)

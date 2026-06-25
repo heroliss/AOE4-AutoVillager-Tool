@@ -660,16 +660,49 @@ const ED = (function () {
     return [x0, y0, x1 - x0, y1 - y0];
   }
   function groupColor(g, i) { return g.color || GROUP_COLORS[i % GROUP_COLORS.length]; }
-  // 组描述的单行短版（在名称旁直接显示，超长截断；换行/多空白压成单空格）。
+  // 组描述的单行短版（折叠箱体标题栏旁直接显示，超长截断；换行/多空白压成单空格）。
   function groupDescShort(g, max) {
     const d = String(g && g.desc || "").trim().replace(/\s+/g, " ");
     const m = max || 22;
     return d.length > m ? d.slice(0, m) + "…" : d;
   }
-  // 标签页左侧文字：⠿ 拖动手柄 + 路径名 +（有描述则）📝 描述短版。
+  // 组描述折成多行：保留显式换行(\n)，再按【像素宽】自动折行（中文逐字折）。返回行数组(≤maxLines，超出末行省略号)。
+  function groupDescLines(g, ctx, maxW, maxLines) {
+    const raw = String(g && g.desc || "").trim();
+    if (!raw) return [];
+    const out = []; let cut = false;
+    for (const para of raw.split(/\n+/)) {
+      let cur = "";
+      for (const ch of para) {
+        if (ctx.measureText(cur + ch).width > maxW && cur) {
+          if (out.length >= maxLines) { cut = true; break; }
+          out.push(cur); cur = ch;
+        } else cur += ch;
+      }
+      if (cut) break;
+      if (cur) { if (out.length >= maxLines) { cut = true; break; } out.push(cur); }
+    }
+    if (cut && out.length) out[out.length - 1] = out[out.length - 1].replace(/.$/, "…");
+    return out;
+  }
+  // 标签页左侧文字：⠿ 拖动手柄 + 路径名（描述改到标签【上方】多行展示，见 drawGroupDescAbove）。
   function groupTabLeft(g) {
-    const d = groupDescShort(g);
-    return "⠿ " + groupPathTitle(g) + (d ? "  📝 " + d : "");
+    return "⠿ " + groupPathTitle(g);
+  }
+  // 在展开组的标签【上方】逐行画组描述（小字、组色、略淡）——不改框/命中几何，纯展示；全文仍可点组在弹窗看。
+  function drawGroupDescAbove(ctx, x, tabTopY, g, col) {
+    const dlines = groupDescLines(g, ctx, 460, 3);
+    if (!dlines.length) return;
+    const sf = ctx.font, sa = ctx.globalAlpha, st = ctx.textAlign;
+    ctx.font = "11px 'Microsoft YaHei',sans-serif"; ctx.textAlign = "left";
+    ctx.fillStyle = col; ctx.globalAlpha = sa * 0.82;
+    const pm = "📝 ", pmW = ctx.measureText(pm).width, DLH = 14, last = dlines.length - 1;
+    for (let k = 0; k <= last; k++) {
+      const yy = tabTopY - 4 - (last - k) * DLH;   // 逐行向上叠；最后一行紧贴标签上沿
+      if (k === 0) ctx.fillText(pm, x, yy);
+      ctx.fillText(dlines[k], x + pmW, yy);
+    }
+    ctx.font = sf; ctx.globalAlpha = sa; ctx.textAlign = st;
   }
   // 标签页：左端 ⠿=可拖动整组；右端 ⊟=单击折叠成子图（折叠态箱体标题右端则是 ⊞=单击展开）。⊟ 占位保证标签留出按钮宽度。
   function groupTabText(g) { return groupTabLeft(g) + "  ⊟"; }
@@ -1278,7 +1311,9 @@ const ED = (function () {
       roundRect(ctx, x, y - 18, tw + 18, 20, 5);
       ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = contrastText(col); ctx.textAlign = "left";   // 显式置左：折叠箱体端口标签会把 textAlign 设成 right 且不复位，否则本组名被右对齐而整体左移错位
-      drawGroupNameWithDesc(ctx, x + 9, y - 4, "⠿ " + groupPathTitle(g), g, contrastText(col), "bold 13px 'Microsoft YaHei',sans-serif");   // 组名(主)+描述(小淡斜体)；⊟ 占位见 groupTabText
+      ctx.font = "bold 13px 'Microsoft YaHei',sans-serif";
+      ctx.fillText("⠿ " + groupPathTitle(g), x + 9, y - 4);        // 标签上只放组名（⊟ 占位见 groupTabText）
+      drawGroupDescAbove(ctx, x + 9, y - 18, g, col);              // 描述：多行折行，浮在标签上方（不挡框内节点）
       const ir = groupIconRect(g); if (ir) drawFoldChip(ctx, ir, "⊟");   // 右端：单击折叠按钮
     }
     ctx.restore();
