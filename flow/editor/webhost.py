@@ -88,6 +88,13 @@ USER_FLOWS_DIR = os.path.abspath("user_flows")
 # 截模板的保存目录（与内置模板同目录，节点里按相对路径 templates/xxx.png 读取）。
 TEMPLATES_DIR = os.path.abspath("templates")
 
+
+def _norm_path(p):
+    """规范化路径用于【安全比较】：取绝对路径 + os.path.normcase（Windows 下转小写、统一分隔符）。
+    必须如此——盘符大小写会随启动方式变化（VSCode 终端给 d:\\…，资源管理器给 D:\\…），
+    若用大小写敏感的字符串比较，内置流程可能被误判为可写而被覆盖。仅用于比较，不改实际读写路径。"""
+    return os.path.normcase(os.path.abspath(p))
+
 WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
 
 
@@ -1609,9 +1616,11 @@ class Api:
         return out
 
     def _is_builtin(self, path):
-        """该路径是否在内置流程目录下（内置=只读，保存时改为另存，避免被覆盖）。"""
+        """该路径是否在内置流程目录下（内置=只读，保存时改为另存，避免被覆盖）。
+        用 normcase 做大小写不敏感比较：否则盘符大小写不一致时会漏判，导致内置被当成可写文件覆盖。"""
         try:
-            return os.path.abspath(path).startswith(BUILTIN_FLOWS_DIR + os.sep)
+            ap, base = _norm_path(path), _norm_path(BUILTIN_FLOWS_DIR)
+            return ap == base or ap.startswith(base + os.sep)
         except Exception:
             return False
 
@@ -1621,14 +1630,15 @@ class Api:
         p = path or self._path
         try:
             ap = os.path.abspath(p)
+            napp = _norm_path(p)            # 比较用：大小写/分隔符规范化（盘符大小写随启动方式变）
         except Exception:
             return {"ok": False, "reason": "路径无效"}
-        if self._is_builtin(p) or not ap.startswith(USER_FLOWS_DIR + os.sep):
+        if self._is_builtin(p) or not napp.startswith(_norm_path(USER_FLOWS_DIR) + os.sep):
             return {"ok": False, "reason": "只能删除「我的流程」（内置流程为只读）"}
         try:
             if os.path.isfile(ap):
                 os.remove(ap)
-            if self._path and os.path.abspath(self._path) == ap:
+            if self._path and _norm_path(self._path) == napp:
                 self._path = None
                 user_settings.update_settings(last_flow=None)   # 当前流程被删 → 清“上次打开”记录，免得下次启动指向已删文件
             return {"ok": True}
