@@ -2924,6 +2924,9 @@ const ED = (function () {
   // 打开/切换其它流程前：若有未保存修改先确认（保存并继续 / 不保存 / 取消）。
   // 返回 true＝可以继续；false＝用户取消（调用方应中止）。
   async function guardUnsaved(actionLabel) {
+    // 使用模式不追踪“未保存”：里头的调参/拖动都是临时的（退出使用模式即还原、从不落盘），
+    // 切换/打开其它流程时不应弹保存框——否则会出现“顶部没显示●未保存、切换却问要不要保存”的矛盾。
+    if (simpleMode) return true;
     const choice = await confirmUnsaved(actionLabel);
     if (choice === "cancel") return false;
     if (choice === "save") {
