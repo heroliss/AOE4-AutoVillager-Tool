@@ -30,6 +30,14 @@ def get_sct():
     return _thread_local.sct
 
 
+def _is_transient_screen_error(error):
+    """判断截图失败是否属于"屏幕暂时不可用"（息屏/锁屏/睡眠时 GDI 失效）。
+    mss 此时抛 "Windows graphics function failed: BitBlt/..."——这类错误是临时的，
+    屏幕回来后 mss 照常可用，绝不能据此【永久】降级到更慢的 PIL。"""
+    s = str(error)
+    return ("graphics function failed" in s) or ("BitBlt" in s)
+
+
 def _fallback_notify(error):
     """通知用户mss回退到PIL（仅通知一次）"""
     global _use_mss, _fallback_notified
@@ -71,7 +79,8 @@ def capture_region(left, top, right, bottom):
             # mss返回的是BGRA格式，转换为RGB
             return Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
         except Exception as e:
-            _fallback_notify(e)
+            if not _is_transient_screen_error(e):   # 仅对"真不兼容"永久降级；息屏/锁屏只这次退回 PIL
+                _fallback_notify(e)
 
     # 回退到PIL.ImageGrab（延迟导入，仅在需要时加载）
     from PIL import ImageGrab
@@ -97,7 +106,8 @@ def capture_region_np(left, top, right, bottom):
             img = np.array(screenshot)
             return img[:, :, :3]  # 去掉Alpha通道
         except Exception as e:
-            _fallback_notify(e)
+            if not _is_transient_screen_error(e):   # 仅对"真不兼容"永久降级；息屏/锁屏只这次退回 PIL
+                _fallback_notify(e)
 
     # 回退到PIL.ImageGrab（延迟导入，仅在需要时加载）
     from PIL import ImageGrab

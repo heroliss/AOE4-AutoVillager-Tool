@@ -23,7 +23,7 @@ from typing import Optional
 
 from ..core import Graph, create_node, registry
 from ..core.types import PortKind
-from ..core.context import ExecutionContext
+from ..core.context import ExecutionContext, ScreenUnavailable
 from ..core.executor import TraceExecutor
 
 
@@ -445,6 +445,7 @@ class Api:
         self._run_interval = 0.1             # 每帧间隔(秒)，取自流程「每帧触发」节点；run_update 时刷新
         self._run_bps: set = set()           # 断点节点 id 集（命中即自停，精确不依赖前端轮询）
         self._run_until: Optional[str] = None  # “运行到此节点”一次性目标
+        self._screen_lost = False            # 屏幕不可用(息屏/锁屏)状态：进入即退避轻探测，提示只记一次，恢复时再记一条
         self._overlay_notice = None          # 覆盖层【弹信息】：最近一条值得提醒的运行事件(WARN/ERROR)，前端按 id 去重、瞬时弹出
         self._overlay_notice_id = 0
         self._run_profile = False            # 性能监控：开启后每帧附带各节点「自身/累计」耗时
@@ -1440,6 +1441,7 @@ class Api:
                 self._bp_hit = None
             self._run_stop = False
             self._run_paused = True
+            self._screen_lost = False        # 新会话从干净状态开始，不带入上次的"屏幕不可用"
             self._run_thread = threading.Thread(target=self._run_loop, name="flow-engine", daemon=True)
             self._run_thread.start()
             return {"ok": True, "nodes": len(self._run_graph.nodes), "real": bool(real)}
@@ -1459,7 +1461,16 @@ class Api:
                     before = len(self._run_logs)
                     try:
                         self._run_exec.run_tick(self._run_ctx, dt=self._run_interval)
-                    except Exception as e:   # 单帧异常不致命：记日志，循环继续
+                        if self._screen_lost:   # 上一轮屏幕不可用、本轮截图成功 → 已恢复
+                            self._screen_lost = False
+                            self._run_logs.append({"level": "INFO", "msg": "屏幕已恢复，继续运行", "node": None})
+                    except ScreenUnavailable:
+                        # 屏幕息屏/锁屏/睡眠——玩家多半已离开，不是错误：只在【刚进入】时记一条，
+                        # 之后安静退避轻探测，不刷屏、不弹覆盖层提醒，等屏幕回来自动恢复。
+                        if not self._screen_lost:
+                            self._screen_lost = True
+                            self._run_logs.append({"level": "INFO", "msg": "屏幕不可用（息屏/锁屏？），已暂停，等待恢复…", "node": None})
+                    except Exception as e:   # 其余单帧异常不致命：记日志，循环继续
                         self._run_logs.append({"level": "ERROR", "msg": f"运行异常：{e}", "node": None})
                     tick = self._run_ctx.tick_index
                     new_logs = self._run_logs[before:]
@@ -1519,7 +1530,10 @@ class Api:
                         self._bp_hit = hit
                         self._run_paused = True
                 if not self._run_paused:
-                    time.sleep(max(0.0, self._run_interval - (time.time() - t0)))
+                    if self._screen_lost:        # 屏幕不可用期间退避：~1.5s 轻探测一次，等屏幕回来再恢复全速
+                        time.sleep(1.5)
+                    else:
+                        time.sleep(max(0.0, self._run_interval - (time.time() - t0)))
         finally:
             ctx = self._run_ctx
             if ctx is not None:

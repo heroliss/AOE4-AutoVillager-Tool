@@ -27,6 +27,20 @@ from typing import Any, Callable, Optional
 _VK = {"shift": 0x10, "ctrl": 0x11, "alt": 0x12}
 
 
+class ScreenUnavailable(Exception):
+    """屏幕暂时无法截取——显示器息屏 / 锁屏（切到安全桌面）/ 系统睡眠时，桌面 GDI 表面失效，
+    mss 的 BitBlt 拷贝失败。这并非程序错误，而是"玩家多半已离开"的正常信号：上层循环应据此
+    进入"已暂停、等待恢复"状态并退避轻探测，而不是当成致命异常逐帧（~10次/秒）刷屏。"""
+
+
+def _is_screen_lost_error(exc) -> bool:
+    """判断一次截图失败是否属于"屏幕暂时不可用"。mss 在息屏/锁屏/睡眠时会抛
+    "Windows graphics function failed: BitBlt/SelectObject/..."，统一按此文本特征识别，
+    不依赖 mss 的异常类型（避免为了 except 而 import mss.exception）。"""
+    s = str(exc)
+    return ("graphics function failed" in s) or ("BitBlt" in s)
+
+
 class ExecutionContext:
     def __init__(
         self,
@@ -94,6 +108,16 @@ class ExecutionContext:
             except Exception:
                 pass
             self._sct = None
+
+    def _grab(self, sct, monitor):
+        """对当前线程的 mss 实例做一次 grab；把"屏幕暂时不可截"（息屏/锁屏导致的 GDI 失败）
+        翻译成 ScreenUnavailable，让上层循环据此优雅暂停而非当成致命异常刷屏。其余异常照常抛出。"""
+        try:
+            return sct.grab(monitor)
+        except Exception as e:
+            if _is_screen_lost_error(e):
+                raise ScreenUnavailable(str(e)) from e
+            raise
 
     def _capture_sct(self):
         """本上下文的 mss 实例：在【当前线程】惰性创建、跨帧复用，由 close_capture() 在该线程退出时关闭。
@@ -174,7 +198,7 @@ class ExecutionContext:
             sct = self._capture_sct()   # 当前线程自建、帧末关闭，避免 pywebview 换线程导致的泄漏/BitBlt 失败
             mon = sct.monitors[1]  # 主显示器
             self._full_origin = (mon["left"], mon["top"])
-            shot = sct.grab(mon)
+            shot = self._grab(sct, mon)
             self._full_frame = np.array(shot)[:, :, :3]  # BGRA -> BGR
         return self._full_frame
 
@@ -196,7 +220,7 @@ class ExecutionContext:
             import numpy as np
             sct = self._capture_sct()   # 同上：本帧自有 mss，不走 thread-local（会随 pywebview 线程泄漏）
             left, top, right, bottom = region
-            shot = sct.grab({"left": left, "top": top, "width": right - left, "height": bottom - top})
+            shot = self._grab(sct, {"left": left, "top": top, "width": right - left, "height": bottom - top})
             img = np.array(shot)[:, :, :3]  # BGRA -> BGR
         self._region_cache[key] = img
         return img
